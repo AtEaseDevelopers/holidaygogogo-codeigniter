@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS `customer_analyses` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `dedup_key` VARCHAR(255) NOT NULL,
+  `guest_name` VARCHAR(255) NULL DEFAULT NULL,
+  `source_counts` VARCHAR(100) NULL DEFAULT NULL,
+  `message_count` INT NOT NULL DEFAULT 0,
+  `summary` TEXT NULL DEFAULT NULL,
+  `sales_intel` TEXT NULL DEFAULT NULL,
+  `next_actions` TEXT NULL DEFAULT NULL,
+  `key_facts` TEXT NULL DEFAULT NULL,
+  `details_json` LONGTEXT NULL DEFAULT NULL,
+  `raw_json` LONGTEXT NULL DEFAULT NULL,
+  `model` VARCHAR(100) NULL DEFAULT NULL,
+  `input_tokens` INT NOT NULL DEFAULT 0,
+  `output_tokens` INT NOT NULL DEFAULT 0,
+  `cost_usd` DECIMAL(12,6) NOT NULL DEFAULT 0,
+  `status` VARCHAR(20) NOT NULL DEFAULT 'done',
+  `error_message` TEXT NULL DEFAULT NULL,
+  `created_by` INT NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_customer_analyses_dedup` (`dedup_key`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

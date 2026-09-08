@@ -8,7 +8,7 @@ class Product_Model extends CI_Model
 			Countries, Cities, Themes, TourStyle, LocalTransport,
 			Flights, MealBreakfast, MealLunch, MealDinner,
 			Hotels, ScenicHighlights, ShoppingStops,
-			Inclusions, Exclusions, OptionalTours, Itinerary, SpecialRemarks');
+			Inclusions, Exclusions, OptionalTours, Itinerary, SpecialRemarks, SourceUrl');
 		$this->db->join('category', 'category.CategoryID = product.CategoryID', 'left');
 		$this->db->where('ProductID', $this->input->get('product_id'));
 		return $this->db->get('product')->row_array();
@@ -134,6 +134,15 @@ class Product_Model extends CI_Model
 	function Update()
 	{
 		$this->db->update_batch('product', json_decode(json_encode($this->input->post('product'))), 'ProductID');
+	}
+
+	// Persist the scraped source URL on its own (called right after an extract is
+	// applied) so the "Last extracted from" line survives a refresh even before
+	// the user saves the rest of the extracted fields.
+	function Update_Source_Url($product_id, $url)
+	{
+		$this->db->where('ProductID', $product_id);
+		$this->db->update('product', array('SourceUrl' => $url));
 	}
 
 	function Detect()

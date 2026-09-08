@@ -221,7 +221,7 @@ class Ghl_Messages_Model extends CI_Model
      * @param int    $limit     Max messages returned.
      * @return array<int,array{side:string,author:string,body:string,time:string,type:string}>
      */
-    public function Conversation_By_Dedup_Key($dedup_key, $limit = 500)
+    public function Conversation_By_Dedup_Key($dedup_key, $limit = 500, $since = null)
     {
         $this->load->helper('ghl_message_log');
 
@@ -231,6 +231,14 @@ class Ghl_Messages_Model extends CI_Model
         }
         $limit = max(1, (int) $limit);
 
+        // Optional delta: only messages newer than a prior analysis watermark.
+        $since_sql = ''; $bind = array($dedup_key);
+        $since = trim((string) $since);
+        if ($since !== '') {
+            $since_sql = ' AND gm.date_added > ?';
+            $bind[] = $since;
+        }
+
         $rows = $this->db->query("
             SELECT gm.direction, gm.body, gm.message_type, gm.date_added,
                    gu.Name AS agent_name, cv.contact_name
@@ -238,10 +246,10 @@ class Ghl_Messages_Model extends CI_Model
             JOIN ghl_messages gm ON gm.contact_id = gc.contact_id
             LEFT JOIN ghl_users gu ON gu.UserID = gm.user_id
             LEFT JOIN ghl_conversations cv ON cv.conversation_id = gm.conversation_id
-            WHERE COALESCE(gc.dedup_key, CONCAT('ghl:', gc.id)) = ?
+            WHERE COALESCE(gc.dedup_key, CONCAT('ghl:', gc.id)) = ?{$since_sql}
             ORDER BY gm.date_added ASC, gm.id ASC
             LIMIT {$limit}
-        ", array($dedup_key))->result_array();
+        ", $bind)->result_array();
 
         $out = array();
         foreach ($rows as $row) {
@@ -258,7 +266,7 @@ class Ghl_Messages_Model extends CI_Model
      * @param int    $limit Max messages returned.
      * @return array<int,array{side:string,author:string,body:string,time:string,type:string}>
      */
-    public function Conversation_By_Phone($phone, $limit = 500)
+    public function Conversation_By_Phone($phone, $limit = 500, $since = null)
     {
         $this->load->helper('ghl_message_log');
 
@@ -269,23 +277,68 @@ class Ghl_Messages_Model extends CI_Model
         $placeholders = implode(',', array_fill(0, count($candidates), '?'));
         $limit = max(1, (int) $limit);
 
+        // Optional delta: only messages newer than a prior analysis watermark.
+        $bind = array_merge($candidates, $candidates);
+        $since_sql = '';
+        $since = trim((string) $since);
+        if ($since !== '') {
+            $since_sql = ' AND gm.date_added > ?';
+            $bind[] = $since;
+        }
+
         $rows = $this->db->query("
             SELECT gm.direction, gm.body, gm.message_type, gm.date_added,
                    gu.Name AS agent_name, gc.contact_name
             FROM ghl_messages gm
             LEFT JOIN ghl_users gu ON gu.UserID = gm.user_id
             LEFT JOIN ghl_conversations gc ON gc.conversation_id = gm.conversation_id
-            WHERE gm.from_number IN ($placeholders)
-               OR gm.to_number IN ($placeholders)
+            WHERE (gm.from_number IN ($placeholders)
+               OR gm.to_number IN ($placeholders)){$since_sql}
             ORDER BY gm.date_added ASC, gm.id ASC
             LIMIT {$limit}
-        ", array_merge($candidates, $candidates))->result_array();
+        ", $bind)->result_array();
 
         $out = array();
         foreach ($rows as $row) {
             $out[] = ghl_message_log_shape_message($row);
         }
         return $out;
+    }
+
+    /**
+     * Cheap stats for a conversation without pulling every row: total message
+     * count + the newest date_added. Used by the AI-analysis "memory" flow to
+     * detect new activity (skip / incremental). Returns ['count'=>int,'latest'=>?string].
+     */
+    public function Conversation_Meta_By_Dedup_Key($dedup_key)
+    {
+        $dedup_key = trim((string) $dedup_key);
+        if ($dedup_key === '') {
+            return array('count' => 0, 'latest' => null);
+        }
+        $row = $this->db->query("
+            SELECT COUNT(*) AS c, MAX(gm.date_added) AS m
+            FROM ghl_contacts gc
+            JOIN ghl_messages gm ON gm.contact_id = gc.contact_id
+            WHERE COALESCE(gc.dedup_key, CONCAT('ghl:', gc.id)) = ?
+        ", array($dedup_key))->row();
+        return array('count' => (int) $row->c, 'latest' => $row->m);
+    }
+
+    public function Conversation_Meta_By_Phone($phone)
+    {
+        $this->load->helper('ghl_message_log');
+        $candidates = ghl_message_log_phone_candidates($phone);
+        if (empty($candidates)) {
+            return array('count' => 0, 'latest' => null);
+        }
+        $ph = implode(',', array_fill(0, count($candidates), '?'));
+        $row = $this->db->query("
+            SELECT COUNT(*) AS c, MAX(gm.date_added) AS m
+            FROM ghl_messages gm
+            WHERE gm.from_number IN ($ph) OR gm.to_number IN ($ph)
+        ", array_merge($candidates, $candidates))->row();
+        return array('count' => (int) $row->c, 'latest' => $row->m);
     }
 
     private function get_code_datetime()

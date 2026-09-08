@@ -463,7 +463,7 @@ $is_dev_env = ($app_env !== 'prod');
 								// is now per-page via lc_can_view() (owner always allowed;
 								// everyone else only when granted). Access Settings (owner only)
 								// manages who can view/edit each page.
-								$lc_active = in_array($this->router->class, array('Customer', 'Guests', 'Ghl_Leads', 'Manual_Leads', 'Campaign', 'Lead_Status', 'Nature_Of_Business', 'Leads_Customer_Access', 'Merge_Duplicate_Customers'), true);
+								$lc_active = in_array($this->router->class, array('Customer', 'Guests', 'Ghl_Leads', 'Manual_Leads', 'Campaign', 'Lead_Status', 'Nature_Of_Business', 'Leads_Customer_Access', 'Merge_Duplicate_Customers', 'Hot_Cold_Customers'), true);
 								$lc_show_campaign    = lc_can_view('campaign');
 								$lc_show_lead_status = lc_can_view('lead_status');
 								$lc_show_nature_of_business = lc_can_view('nature_of_business');
@@ -485,6 +485,14 @@ $is_dev_env = ($app_env !== 'prod');
 									<div class="menu-submenu">
 										<i class="menu-arrow"></i>
 										<ul class="menu-subnav">
+											<?php if((int)$this->session->level === 10) { ?>
+											<li class="menu-item <?php if($this->router->class == 'Hot_Cold_Customers') { echo 'menu-item-active'; } ?>">
+												<a href="<?php echo base_url('Hot_Cold_Customers'); ?>" class="menu-link">
+													<i class="menu-bullet menu-bullet-dot"><span></span></i>
+													<span class="menu-text">Hot / Cold Customers</span>
+												</a>
+											</li>
+											<?php } ?>
 											<?php if(lc_can_view('customer')) { ?>
 											<li class="menu-item <?php if($this->router->class == 'Customer') { echo 'menu-item-active'; } ?>">
 												<a href="<?php echo base_url('Customer'); ?>" class="menu-link">

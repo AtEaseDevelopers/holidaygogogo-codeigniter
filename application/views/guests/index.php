@@ -1072,6 +1072,23 @@ div.kt-datatable__pager-container {
 														<a href="javascript:;" class="dropdown-item js-remarks" style="font-size:11px;" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>" data-name="<?php echo htmlspecialchars($g->Name, ENT_QUOTES); ?>">Remarks<?php if($rc > 0) { echo ' (' . $rc . ')'; } ?></a>
 													<?php } ?>
 													<a href="javascript:;" class="dropdown-item js-chat-history" style="font-size:11px;" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>" data-name="<?php echo htmlspecialchars($g->Name, ENT_QUOTES); ?>">Chat History<?php if($chat_c > 0) { echo ' (' . $chat_c . ')'; } ?></a>
+														<?php if(!empty($g->dedup_key) && (int)$this->session->level === 10) {
+															// Owner-only Customer Profile page (chat sources + AI Analysis).
+															$ca_phone = ( ! empty($phones) && (string)$phones[0]['mobile'] !== '')
+																? guest_contact_wa_digits($phones[0]['calling_code'], $phones[0]['mobile']) : '';
+															// Record where the analysis was launched from (shown on Hot/Cold page).
+															if($list_base === 'Manual_Leads')      { $ca_type = 'Manual Lead'; }
+															elseif($list_base === 'Ghl_Leads')     { $ca_type = 'GHL Lead'; }
+															elseif($list_base === 'Customer')      { $ca_type = 'Customer'; }
+															elseif(!empty($is_ghl_row))            { $ca_type = 'GHL Lead'; }
+															else                                   { $ca_type = 'Guest List'; }
+															$ca_url = base_url('Customer_Analysis?dedup_key=') . urlencode($g->dedup_key)
+																. '&name=' . urlencode($g->Name)
+																. '&source_type=' . urlencode($ca_type)
+																. ($ca_phone !== '' ? '&phone=' . urlencode($ca_phone) : '');
+														?>
+															<a href="<?php echo $ca_url; ?>" class="dropdown-item" style="font-size:11px;">Customer Profile</a>
+														<?php } ?>
 													<?php if(!empty($g->dedup_key)) {
 														$camp_c   = isset($campaign_counts[$g->dedup_key]) ? (int) $campaign_counts[$g->dedup_key] : 0;
 													?>
