@@ -5124,6 +5124,18 @@ class Booking extends MY_Controller
 					$this->load->model('Invoice_Split_Model');
 					$array['invoice_split'] = $this->Invoice_Split_Model->Get_Pax_By_Booking($array['BookingID']);
 
+					// Cap for the admin e-invoice "Add Pax" tool. Mirror the customer
+					// portal: count real pax from rooms first (Compute_Pax_Counts),
+					// then fall back to the existing split-row count. Booking header
+					// Adult/Children/Infant are often NULL even when the rooms/guest
+					// list are filled, which otherwise pins the cap at 0/1 and leaves
+					// the button permanently disabled (e.g. BC-2608-0119).
+					$einv_pax = $this->Booking_Model->Compute_Pax_Counts($array['BookingID']);
+					$array['einvoice_admin_max_pax'] = (int)$einv_pax['adult'] + (int)$einv_pax['child'] + (int)$einv_pax['infant'];
+					if ($array['einvoice_admin_max_pax'] <= 0) {
+						$array['einvoice_admin_max_pax'] = count($array['invoice_split']);
+					}
+
 					// Surface audit info (status + last admin editor) for the admin
 					// E-Invoice card. Reads the first pax row because Save_Split writes
 					// these fields uniformly across every pax in the same transaction.

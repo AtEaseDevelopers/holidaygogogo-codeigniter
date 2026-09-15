@@ -1852,14 +1852,11 @@
                                                 </div>
 
                                                 <?php if($einvoice_can_admin_edit && $einvoice_is_submitted) {
-                                                    // Pax count cap mirrors the customer portal: adult + child + infant
-                                                    // from booking. Fall back to invoice_split row count if not available.
-                                                    $admin_max_pax = (int)(isset($Adult) ? $Adult : 0)
-                                                        + (int)(isset($Children) ? $Children : 0)
-                                                        + (int)(isset($Infant) ? $Infant : 0);
-                                                    if ($admin_max_pax <= 0) {
-                                                        $admin_max_pax = count($invoice_split);
-                                                    }
+                                                    // Pax count cap mirrors the customer portal: counted from the
+                                                    // rooms/guest list first (Compute_Pax_Counts), then falling back
+                                                    // to the invoice_split row count. Computed in the controller so
+                                                    // NULL booking header pax no longer pins the cap at 0/1.
+                                                    $admin_max_pax = isset($einvoice_admin_max_pax) ? (int)$einvoice_admin_max_pax : count($invoice_split);
                                                     // Normalize booking_products into the same shape the JS expects.
                                                     $admin_bp_for_js = [];
                                                     if (!empty($booking_products)) {
