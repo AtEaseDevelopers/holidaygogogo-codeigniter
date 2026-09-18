@@ -174,7 +174,7 @@
             var eta = jobEta(j);
             return badge + (eta ? '<br><span style="font-size:10px; color:#8ba0c4;">' + $('<div>').text(eta).html() + '</span>' : '');
         }
-        return '<span class="label label-light-info label-inline font-weight-bold">' + (j.is_paste ? 'Analysed' : (j.is_upload ? 'Uploaded' : 'Crawled')) + '</span>';
+        return '<span class="label label-light-info label-inline font-weight-bold">' + (j.is_paste ? 'Analysed' : (j.is_crawled ? 'Crawled' : (j.is_upload ? 'Uploaded' : 'Crawled'))) + '</span>';
     }
     function jobActionCell(j) {
         var items = [];
@@ -253,7 +253,7 @@
                 no++;
                 total += (j.cost_total || 0);
                 var analysedChip = j.analysed ? ' <span class="label label-light-success label-inline" style="font-size:9px;">' + j.analysed + ' analysed</span>' : '';
-                var products = j.is_upload
+                var products = (j.is_upload && !j.is_crawled)
                     ? '<span class="text-muted">—</span>'
                     : (j.is_group
                         ? ((j.count > 0 ? j.count : '—') + analysedChip)
@@ -275,6 +275,10 @@
                         ? '<a href="' + esc(j.url) + '" target="_blank" rel="noopener" style="font-size:12px;"><i class="la la-paste mr-1"></i>' + esc(j.url) + '</a>'
                         : '<span style="font-size:12px;"><i class="la la-paste mr-1"></i>' + esc(j.url) + '</span>')
                         + ' <span class="label label-light-primary label-inline font-weight-bold" style="font-size:10px;">Text</span>'
+                        + (j.title ? '<div class="text-muted" style="font-size:11px;">' + esc(j.title) + '</div>' : '')
+                    : j.is_crawled
+                    ? '<a href="' + esc(j.url) + '" target="_blank" rel="noopener" style="font-size:12px;">' + esc(j.url) + '</a>'
+                        + ' <span class="label label-light-dark label-inline font-weight-bold" style="font-size:10px;">Crawled</span>'
                         + (j.title ? '<div class="text-muted" style="font-size:11px;">' + esc(j.title) + '</div>' : '')
                     : j.is_upload
                     ? '<span style="font-size:12px;"><i class="la la-file-alt mr-1"></i>' + esc(j.url) + '</span>'

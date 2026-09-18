@@ -430,6 +430,20 @@ class Competitor_Product extends MY_Controller
 		// In-progress paste jobs stay as individual rows.
 		$jobs = array_merge($jobs, $collected['singles']);
 
+		// Re-hydrate crawl-analysed DB rows whose transient job file has been
+		// pruned (files die at 7 days; the DB row is permanent) so they keep
+		// showing — deduped by host against the still-live crawl group rows, whose
+		// products remain reachable via Review/Timeline.
+		$covered_hosts = array();
+		foreach ($jobs as $g) {
+			if ( ! empty($g['is_group']) && isset($g['host'])) {
+				$covered_hosts[] = $g['host'];
+			}
+		}
+		$jobs = array_merge($jobs, competitor_orphan_crawl_rows(
+			$this->Competitor_Analysis_Model->Read_Crawl_Analyses(30), $covered_hosts, 'host'
+		));
+
 		// Fold in single (non-crawl) analyses — uploaded PDFs/images and pasted
 		// text/links — so they share the one results table.
 		foreach ($this->Competitor_Analysis_Model->Read_Uploads(20) as $u) {

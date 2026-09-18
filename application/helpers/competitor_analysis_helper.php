@@ -4137,3 +4137,103 @@ if ( ! function_exists('competitor_remove_crawl_items'))
 		);
 	}
 }
+
+if ( ! function_exists('competitor_url_dedup_key'))
+{
+	/**
+	 * Normalise a URL to a stable host+path key for de-duplication: lowercased,
+	 * scheme- and www-insensitive, trailing slash / query / fragment dropped. So
+	 * "https://x.com/tour/", "http://www.x.com/tour?a=1#f" and "x.com/tour" all
+	 * collapse to "x.com/tour". Returns '' when no host can be parsed. Pure.
+	 */
+	function competitor_url_dedup_key($url)
+	{
+		$url  = trim((string) $url);
+		if ($url === '') {
+			return '';
+		}
+		// parse_url needs a scheme to find the host; add one for bare host/paths.
+		$parts = parse_url(preg_match('#^https?://#i', $url) ? $url : 'http://' . $url);
+		$host  = isset($parts['host']) ? strtolower($parts['host']) : '';
+		if ($host === '') {
+			return '';
+		}
+		$host = preg_replace('/^www\./', '', $host);
+		$path = isset($parts['path']) ? rtrim($parts['path'], '/') : '';
+		return $host . strtolower($path);
+	}
+}
+
+if ( ! function_exists('competitor_orphan_crawl_rows'))
+{
+	/**
+	 * Re-hydrate crawl-analysed DB rows into the results listing as standalone
+	 * rows, so a saved analysis keeps showing after its transient crawl job file
+	 * is pruned (job files are deleted at 7 days, but the DB row lives forever —
+	 * that gap is why crawled analyses vanished from the listing while still
+	 * appearing on the Master Product page, which reads the DB directly).
+	 *
+	 * $db_rows      analysis rows (objects/arrays) with id, url, product_name,
+	 *               cost_usd, status, created_at.
+	 * $covered_keys keys already represented by a LIVE crawl job row — so we don't
+	 *               double-show a crawl whose file still exists (its products are
+	 *               reachable via Review/Timeline). Compared case-insensitively.
+	 * $key_mode     'host' (competitor listing merges by host) or 'url' (Our
+	 *               Product lists each pasted URL on its own).
+	 *
+	 * Returns listing-row arrays shaped like the folded upload rows (is_upload so
+	 * the DB-row View/Delete path applies) but tagged is_crawled for the label.
+	 * Pure; no DB or filesystem access.
+	 */
+	function competitor_orphan_crawl_rows($db_rows, $covered_keys, $key_mode = 'host')
+	{
+		$db_rows = is_array($db_rows) ? $db_rows : array();
+		// url mode dedups on a normalised host+path (so a trailing slash, query,
+		// fragment or http/https/www difference between the pasted URL and the
+		// saved analysis URL still counts as the same page); host mode on the host.
+		$norm = function ($v) use ($key_mode) {
+			return ($key_mode === 'url')
+				? competitor_url_dedup_key((string) $v)
+				: strtolower(competitor_job_host((string) $v));
+		};
+		$covered = array();
+		foreach ((is_array($covered_keys) ? $covered_keys : array()) as $k) {
+			$nk = ($key_mode === 'url') ? competitor_url_dedup_key((string) $k) : strtolower((string) $k);
+			if ($nk !== '') {
+				$covered[$nk] = true;
+			}
+		}
+
+		$rows = array();
+		foreach ($db_rows as $r) {
+			$r   = (object) $r;
+			$url = (string) (isset($r->url) ? $r->url : '');
+			$key = $norm($url);
+			if ($key === '' || isset($covered[$key])) {
+				continue;   // shown by a live crawl job row already
+			}
+			$ts = (string) (isset($r->created_at) ? $r->created_at : '');
+			$rows[] = array(
+				'job'         => 'crawl_' . (int) $r->id,
+				'is_upload'   => true,                                   // reuse the DB-row (View/Delete) path
+				'is_crawled'  => true,                                   // label as "Crawled", link the URL
+				'analysis_id' => (int) $r->id,
+				'url'         => $url,
+				'title'       => (string) (isset($r->product_name) ? $r->product_name : ''),
+				'state'       => ((isset($r->status) ? $r->status : '') === 'error') ? 'error' : 'done',
+				'message'     => 'Crawled',
+				'count'       => 1,
+				'analysed'    => 1,
+				'cost_total'  => (float) (isset($r->cost_usd) ? $r->cost_usd : 0),
+				'ts'          => $ts,
+				'keyword'     => '',
+				'reviewable'  => false,
+				'done'        => 1,
+				'total'       => 1,
+				'read_start'  => '',
+				'_sort'       => strtotime($ts) ?: 0,
+			);
+		}
+		return $rows;
+	}
+}

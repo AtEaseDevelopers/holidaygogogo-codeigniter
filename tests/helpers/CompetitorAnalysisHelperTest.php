@@ -1597,6 +1597,41 @@ $rb2 = competitor_remove_crawl_items($ci_items, $ci_status, array());
 check('remove_items empty -> all items kept', 3, count($rb2['items']));
 check('remove_items empty -> no ids', array(), $rb2['deleted_analysis_ids']);
 
+// ---- competitor_orphan_crawl_rows (re-hydrate crawled DB rows) ---------------
+$orphan_db = array(
+    (object) array('id' => 7, 'url' => 'https://easyeurope.com.my/golden-egypt/', 'product_name' => 'Golden Egypt', 'cost_usd' => 0.12, 'status' => 'done', 'created_at' => '2026-09-09 10:18:43'),
+    (object) array('id' => 9, 'url' => 'https://easyeurope.com.my/wild-kenya/',   'product_name' => 'Wild Kenya',   'cost_usd' => 0.10, 'status' => 'done', 'created_at' => '2026-09-18 00:04:14'),
+    (object) array('id' => 4, 'url' => 'https://applevacations.my/en/tour?pckg_id=529', 'product_name' => 'North Vietnam', 'cost_usd' => 0.20, 'status' => 'error', 'created_at' => '2026-09-04 10:32:48'),
+);
+// Host mode (competitor): a live crawl for easyeurope.com.my hides BOTH its rows.
+$host_rows = competitor_orphan_crawl_rows($orphan_db, array('easyeurope.com.my'), 'host');
+check('orphan host-mode hides covered host', 1, count($host_rows));
+check('orphan host-mode keeps uncovered row', 4, $host_rows[0]['analysis_id']);
+check('orphan row is DB-row path', true, $host_rows[0]['is_upload']);
+check('orphan row tagged crawled', true, $host_rows[0]['is_crawled']);
+check('orphan error row state', 'error', $host_rows[0]['state']);
+// Nothing covered -> all three fold in.
+$all_rows = competitor_orphan_crawl_rows($orphan_db, array(), 'host');
+check('orphan none-covered folds all', 3, count($all_rows));
+check('orphan carries cost', 0.12, $all_rows[0]['cost_total']);
+// URL mode (Our Product): only the matching URL is hidden.
+$url_rows = competitor_orphan_crawl_rows($orphan_db, array('https://easyeurope.com.my/golden-egypt/'), 'url');
+check('orphan url-mode hides only matching url', 2, count($url_rows));
+
+// url_dedup_key normalisation.
+check('url_dedup strips scheme/www/slash', 'easyeurope.com.my/golden-egypt', competitor_url_dedup_key('https://www.easyeurope.com.my/golden-egypt/'));
+check('url_dedup drops query+fragment', 'x.com/tour', competitor_url_dedup_key('http://x.com/tour?a=1#f'));
+check('url_dedup bare host+path', 'x.com/tour', competitor_url_dedup_key('x.com/tour'));
+check('url_dedup empty', '', competitor_url_dedup_key(''));
+
+// url-mode dedup ignores trailing-slash / www / scheme / query differences.
+$fuzzy = competitor_orphan_crawl_rows($orphan_db, array('http://www.easyeurope.com.my/golden-egypt'), 'url');
+check('orphan url-mode dedups normalised url', 2, count($fuzzy));
+check('orphan url-mode kept row ids', array(9, 4), array($fuzzy[0]['analysis_id'], $fuzzy[1]['analysis_id']));
+// Case-insensitive covered match; blank/no-host rows are skipped.
+$blank = competitor_orphan_crawl_rows(array((object) array('id' => 1, 'url' => '', 'created_at' => '')), array(), 'host');
+check('orphan skips hostless row', 0, count($blank));
+
 check('ui_labels en coverage', 'Coverage', competitor_ui_labels('en')['coverage']);
 check('ui_labels cn coverage', '覆盖范围', competitor_ui_labels('cn')['coverage']);
 check('ui_labels unknown key falls back to en set', 'Meals', competitor_ui_labels('en')['meals']);

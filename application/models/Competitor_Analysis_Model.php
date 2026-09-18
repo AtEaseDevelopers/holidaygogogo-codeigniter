@@ -108,6 +108,23 @@ class Competitor_Analysis_Model extends CI_Model
 		return $this->db->get('competitor_analyses')->result();
 	}
 
+	/**
+	 * Crawl-analysed rows (a pasted/URL crawl, not an upload/paste) — the
+	 * complement of Read_Uploads. These are re-hydrated into the results listing
+	 * so a saved crawl analysis keeps showing after its transient job file is
+	 * pruned (job files die at 7 days; the DB row is permanent). Newest first,
+	 * capped.
+	 */
+	function Read_Crawl_Analyses($limit = 30)
+	{
+		$this->db->select('id, url, product_name, cost_usd, status, created_at');
+		$this->db->where('feature', $this->feature);
+		$this->db->where("url LIKE 'http%' AND (source IS NULL OR source NOT IN ('upload','paste'))", null, false);
+		$this->db->order_by('id', 'DESC');
+		$this->db->limit((int) $limit);
+		return $this->db->get('competitor_analyses')->result();
+	}
+
 	/** Cumulative USD OpenAI spend across every stored analysis. */
 	function Read_Total_Cost()
 	{

@@ -424,6 +424,20 @@ class Our_Product extends MY_Controller
 		// read_job_views() already stamped every view's '_sort' (file mtime).
 		$jobs = array_merge($collected['crawls'], $collected['singles']);
 
+		// Re-hydrate crawl-analysed DB rows whose transient job file has been
+		// pruned (files die at 7 days; the DB row is permanent) so they keep
+		// showing — deduped by URL against the still-live crawl rows (every run is
+		// a single pasted tour URL, so the host is shared across many rows).
+		$covered_urls = array();
+		foreach ($jobs as $c) {
+			if (isset($c['url'])) {
+				$covered_urls[] = $c['url'];
+			}
+		}
+		$jobs = array_merge($jobs, competitor_orphan_crawl_rows(
+			$this->Our_Product_Model->Read_Crawl_Analyses(30), $covered_urls, 'url'
+		));
+
 		// Fold in single (non-crawl) analyses — uploaded PDFs/images and pasted
 		// text/links — so they share the one results table.
 		foreach ($this->Our_Product_Model->Read_Uploads(20) as $u) {
