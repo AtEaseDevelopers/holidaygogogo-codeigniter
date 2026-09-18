@@ -44,7 +44,7 @@
                         <input type="checkbox" id="competitor_ai_crawl" class="mr-2" style="width:16px; height:16px;">
                         <span class="font-weight-bold">Crawl with AI</span>
                     </label>
-                    <span class="form-text text-muted" style="font-size:12px;">Lets AI browse the site to find the tour pages — best for JS sites the quick crawl can’t read. Uses a small OpenAI call for discovery.</span>
+                    <span class="form-text text-muted" style="font-size:12px;">Lets AI browse the site to find the tour pages — best for JS sites the quick crawl can’t read.</span>
                 </div>
 
                 <!-- OR divider -->

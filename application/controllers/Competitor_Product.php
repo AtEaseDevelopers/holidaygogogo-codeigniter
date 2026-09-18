@@ -67,6 +67,7 @@ class Competitor_Product extends MY_Controller
 				'title'       => $title,
 				'duration'    => $meta['duration'],
 				'snippet'     => $meta['snippet'],
+				'kind'        => competitor_item_kind($text),   // 'package' (has price) | 'itinerary'
 				'chars'       => mb_strlen($text, 'UTF-8'),
 				'analysis_id' => isset($a['id']) ? (int) $a['id'] : 0,
 				'cost'        => isset($a['cost']) ? (float) $a['cost'] : 0.0,
@@ -377,9 +378,10 @@ class Competitor_Product extends MY_Controller
 				continue;
 			}
 			$mode = isset($s['mode']) ? $s['mode'] : 'crawl';
-			// Analyse jobs are transient (driven from the Review page) — not listed
-			// as their own "Crawled Results" row.
-			if ($mode === 'analyse') {
+			// Analyse jobs are transient (driven from the Review page), and translate
+			// jobs just cache a language overlay — neither is listed as its own
+			// "Crawled Results" row.
+			if ($mode === 'analyse' || $mode === 'translate') {
 				continue;
 			}
 			// A FINISHED paste/upload job is shown via its saved DB row (folded in by
@@ -695,9 +697,13 @@ class Competitor_Product extends MY_Controller
 	}
 
 	/**
-	 * AJAX: ensure a cached translation exists for {id, lang} — generate it with
-	 * OpenAI on first request, then reuse. The page reloads to ?lang=xx to render
-	 * it (so the PDF, which reads the same overlay, follows automatically).
+	 * AJAX: ensure a cached translation exists for {id, lang}. Generates it in the
+	 * BACKGROUND (a detached CLI worker) so the language toggle never blocks on the
+	 * slow OpenAI call — the caller polls Job_State and only lets the user switch to
+	 * the translated language once it reports done. Returns {done:true} when the
+	 * translation is already cached (instant switch), {job:<id>} when a background
+	 * job was started, or {success:false, message} on error. Falls back to an inline
+	 * (blocking) translate only when process spawn is unavailable.
 	 */
 	function Translate()
 	{
@@ -710,7 +716,7 @@ class Competitor_Product extends MY_Controller
 		$id   = (int) $this->input->post('id');
 		$lang = competitor_normalize_lang($this->input->post('lang'));
 		if ($lang === 'en') {
-			echo json_encode(array('success' => true, 'cached' => true));   // English is the stored original
+			echo json_encode(array('success' => true, 'done' => true));   // English is the stored original
 			return;
 		}
 		if (empty(get_env('OPENAI_API_KEY'))) {
@@ -724,10 +730,25 @@ class Competitor_Product extends MY_Controller
 		}
 		// Already translated → nothing to do (cheap path; keeps the toggle instant).
 		if ($this->Competitor_Analysis_Model->Read_Translation($id, $lang) !== null) {
-			echo json_encode(array('success' => true, 'cached' => true));
+			echo json_encode(array('success' => true, 'done' => true));
 			return;
 		}
 
+		// Translate in the BACKGROUND so the toggle returns immediately; the view
+		// polls Job_State and enables the 中文 button once the worker caches it.
+		$job_id = $this->queue_job(array(
+			'url'         => $analysis->product_name ?: $analysis->page_title,
+			'mode'        => 'translate',
+			'analysis_id' => $id,
+			'lang'        => $lang,
+			'created_by'  => $this->session->admin_id,
+		));
+		if ($job_id !== '') {
+			echo json_encode(array('success' => true, 'job' => $job_id));
+			return;
+		}
+
+		// No process spawn available (exec disabled) → translate inline as a last resort.
 		@set_time_limit(600);
 		$this->load->library('CompetitorAnalysisService');
 		try {
@@ -739,7 +760,7 @@ class Competitor_Product extends MY_Controller
 			return;
 		}
 		$this->Competitor_Analysis_Model->Save_Translation($id, $lang, $overlay);
-		echo json_encode(array('success' => true, 'cached' => false));
+		echo json_encode(array('success' => true, 'done' => true));
 	}
 
 	/**

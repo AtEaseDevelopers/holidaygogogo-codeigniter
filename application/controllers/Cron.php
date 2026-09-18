@@ -2955,4 +2955,42 @@ class Cron extends CI_Controller
 		}
 	}
 
+	/**
+	 * FAQ AI Suggestion generator — reads the last $days of WhatsApp / GHL chats,
+	 * asks OpenAI to distil the recurring customer questions into candidate FAQs,
+	 * and stores the new ones in `faq_suggestions` for staff to review. Meant to
+	 * run every 3 days at 00:30 via crontab:
+	 *
+	 *   30 0 *\/3 * * cd /path/to/app && php index.php cron generate_faq_suggestions >> /path/to/app/application/logs/faq_suggestion_cron.log 2>&1
+	 *
+	 * CLI-only; the default $days matches the schedule and can be overridden by
+	 * the FAQ_SUGGESTION_DAYS .env key.
+	 */
+	public function generate_faq_suggestions($days = null)
+	{
+		if (!$this->input->is_cli_request()) {
+			show_error('This script can only be run from the command line.', 403);
+			return;
+		}
+		$days = ($days !== null) ? (int) $days : (int) get_env('FAQ_SUGGESTION_DAYS');
+		if ($days < 1) {
+			$days = 3;
+		}
+
+		$this->load->model('Faq_Suggestion_Model');
+		echo '[' . date('Y-m-d H:i:s') . "] FAQ suggestion run start (last {$days} days)" . PHP_EOL;
+		try {
+			$summary = $this->Faq_Suggestion_Model->Generate($days);
+		} catch (Exception $e) {
+			echo '  ERROR: ' . $e->getMessage() . PHP_EOL;
+			log_message('error', 'FAQ suggestion cron failed: ' . $e->getMessage());
+			return;
+		}
+		echo '  created=' . (int) $summary['created']
+			. ' proposed=' . (int) $summary['proposed']
+			. ($summary['reason'] !== '' ? ' reason=' . $summary['reason'] : '')
+			. ' model=' . $summary['model'] . PHP_EOL;
+		echo '[' . date('Y-m-d H:i:s') . '] FAQ suggestion run done' . PHP_EOL;
+	}
+
 }

@@ -143,7 +143,6 @@ $justified = function ($items) use ($flat) {
     <?php echo htmlspecialchars($is_crawl ? $lbl('site', 'Site:') : $lbl('source', 'Source:')) . ' '; ?><?php echo htmlspecialchars((string) $a->url); ?>
     <?php if($is_crawl) { echo ' &middot; ' . (int) $a->product_count . ' ' . htmlspecialchars($lbl('products', 'products')); } ?>
     &middot; <?php echo htmlspecialchars($lbl('analysed', 'Analysed')); ?> <?php echo date('d M Y H:i', strtotime($a->created_at)); ?>
-    <?php if($a->model) { echo ' &middot; ' . htmlspecialchars($a->model); } ?>
     <?php if((float) $a->cost_usd > 0) { echo ' &middot; ' . htmlspecialchars($lbl('ai_cost', 'AI cost')) . ' USD ' . number_format((float) $a->cost_usd, 4); } ?>
 </div>
 

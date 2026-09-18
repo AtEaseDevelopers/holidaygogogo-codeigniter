@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `faq_suggestions` (
+  `SuggestionID`   INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `Title`          VARCHAR(255) NOT NULL,
+  `Description`    TEXT NULL,
+  `DestinationIds` VARCHAR(255) NULL,
+  `State`          ENUM('pending','accepted','dismissed') NOT NULL DEFAULT 'pending',
+  `AcceptedFAQID`  INT(11) UNSIGNED NULL,
+  `RunKey`         VARCHAR(64) NULL,
+  `Model`          VARCHAR(100) NULL,
+  `CostUsd`        DECIMAL(12,6) NULL,
+  `Status`         ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  `InsertBy`       INT(11) NULL,
+  `InsertDate`     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `UpdateBy`       INT(11) NULL,
+  `UpdateDate`     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`SuggestionID`),
+  KEY `idx_faq_sugg_state` (`State`),
+  KEY `idx_faq_sugg_status` (`Status`),
+  KEY `idx_faq_sugg_run` (`RunKey`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

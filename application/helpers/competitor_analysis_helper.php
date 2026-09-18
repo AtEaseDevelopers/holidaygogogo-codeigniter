@@ -185,8 +185,8 @@ if ( ! function_exists('competitor_output_contract'))
 			. '"child_friendly": string (DERIVE "Yes"/"No" + short reason), '
 			. '"senior_friendly": string (DERIVE "Yes"/"No" + short reason), '
 			. '"usp": string[] (DERIVE unique selling points for the target traveller), '
-			. '"traveller_segments": [{"segment": string (EXACTLY one of: "single","elderly","teenager","couple","family_kids","family_elderly","company"), "suitability": string ("High"/"Medium"/"Low"), "justification": string (2-3 sentences on WHY this tour does or does not suit that traveller type, citing CONCRETE tour attributes — pace & difficulty, itinerary intensity, meals, hotel tier, activities, child/senior friendliness, price/value, group vs free-and-easy style)}] '
-				. '(Assess ALL SEVEN traveller types once each, in that order. Judge each strictly from concrete clues in the source; give a suitability level and a grounded justification. If the source genuinely gives no basis to judge a type, still include it with suitability "" and a short note on what is missing — do NOT invent facts), '
+			. '"traveller_segments": [{"segment": string (EXACTLY one of: "single","elderly","teenager","couple","family_kids","family_elderly","company"), "suitability": string ("High"/"Medium"/"Low"), "justification": string (a THOROUGH, well-reasoned verdict of AT LEAST 4-6 sentences on WHY this tour does or does not suit that traveller type. Do NOT give a thin one-liner. Build the case by: (1) citing SEVERAL CONCRETE tour attributes by name — pace & walking difficulty, itinerary intensity & free time, meals, hotel tier, specific activities/attractions, child/senior friendliness, price/value, group vs free-and-easy style; (2) explaining HOW each cited attribute helps or hurts THIS specific traveller type (e.g. why long walking days matter for elderly, why the activity mix matters for teenagers); (3) naming BOTH the strongest reasons it fits AND the main caveats or trade-offs, so the reasoning is balanced; (4) ending with a clear takeaway that justifies the High/Medium/Low level given. Ground every claim in the source — do NOT invent facts.)}] '
+				. '(Assess ALL SEVEN traveller types once each, in that order. Judge each strictly from concrete clues in the source; give a suitability level and a rich, well-evidenced justification as described above. If the source genuinely gives no basis to judge a type, still include it with suitability "" and a short note on exactly what information is missing to make the call — do NOT invent facts), '
 			. '"itinerary": [{"day": string, "title": string, "description": string}] (one entry per day; the description must list ALL places/activities visited that day, not just a few), '
 			. '"pros": string[] (advantages FROM THE CUSTOMER\'S POINT OF VIEW — what a traveller booking this tour actually gains, not marketing spin. Format EACH item as "<benefit> — <justification>" where the justification explains WHY it matters to the customer, e.g. "Direct flights — less travel fatigue and a full extra day at the destination"), '
 			. '"cons": string[] (drawbacks FROM THE CUSTOMER\'S POINT OF VIEW — what a traveller should be wary of before booking. Format EACH item as "<drawback> — <justification>" explaining WHY it matters to the customer, e.g. "Many shopping stops — less sightseeing time and possible sales pressure"), '
@@ -1963,6 +1963,25 @@ if ( ! function_exists('competitor_item_meta'))
 			break;
 		}
 		return array('duration' => $duration, 'snippet' => $snippet);
+	}
+}
+
+if ( ! function_exists('competitor_item_kind'))
+{
+	/**
+	 * Classify one crawled product for the Review list: 'package' when its content
+	 * carries a price (a currency figure like "RM1,899" / "SGD 250" / "$1,200"),
+	 * otherwise 'itinerary'. The rule is simply: content mentions a price → it is a
+	 * priced PACKAGE; no price → a plain ITINERARY. Uses the same price pattern as
+	 * competitor_has_product_signal() so both agree on what "a price" is. Pure.
+	 */
+	function competitor_item_kind($text)
+	{
+		if ( ! is_string($text) || $text === '') {
+			return 'itinerary';
+		}
+		$has_price = (bool) preg_match('/(?:rm|myr|sgd|usd|eur|php|idr|thb|aud|\$|£|€)\s*[0-9][0-9,]{2,}/iu', $text);
+		return $has_price ? 'package' : 'itinerary';
 	}
 }
 

@@ -178,12 +178,12 @@ class Customer_Analysis extends MY_Controller
 
 	/**
 	 * Decide how a run should behave given the last analysis + current chat stats.
-	 * Returns 'full' (first run / forced / uploads changed / no watermark),
+	 * Returns 'full' (first run / uploads changed / no watermark),
 	 * 'unchanged' (nothing new — reuse stored profile) or 'incremental'.
 	 */
-	private function detect_mode($prior, $meta, $force_full)
+	private function detect_mode($prior, $meta)
 	{
-		if ( ! $prior || $force_full) {
+		if ( ! $prior) {
 			return 'full';
 		}
 		$live_ghl    = (int) $meta['ghl']['count'];
@@ -212,7 +212,6 @@ class Customer_Analysis extends MY_Controller
 		$phone       = trim((string) $this->input->post('phone'));
 		$name        = trim((string) $this->input->post('name'));
 		$source_type = $this->clean_source_type($this->input->post('source_type'));
-		$force_full  = (int) $this->input->post('force_full') === 1;
 
 		if ($dedup_key === '') {
 			echo json_encode(array('success' => false, 'message' => 'Missing customer reference.'));
@@ -221,7 +220,7 @@ class Customer_Analysis extends MY_Controller
 
 		$prior = $this->Customer_Analysis_Model->Read_Latest_Done($dedup_key);
 		$meta  = $this->gather_meta($dedup_key, $phone);
-		$mode  = $this->detect_mode($prior, $meta, $force_full);
+		$mode  = $this->detect_mode($prior, $meta);
 
 		// Nothing new since the last analysis — reuse the stored profile, no AI call.
 		if ($mode === 'unchanged') {

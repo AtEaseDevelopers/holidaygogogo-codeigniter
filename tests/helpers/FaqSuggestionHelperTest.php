@@ -1,0 +1,153 @@
+<?php
+/**
+ * Run with: php tests/helpers/FaqSuggestionHelperTest.php
+ *
+ * Locks the pure faq_suggestion_helper functions that power the "FAQ AI
+ * Suggestion" feature:
+ *   - faq_suggestion_cutoff        : "last N days" lower-bound datetime (>=1 day)
+ *   - faq_suggestion_transcript    : GHL + WA messages -> labelled transcript,
+ *                                    dropping system/blank lines, tail-capped
+ *   - faq_suggestion_build_prompt  : instructions + input; must contain "json"
+ *                                    (Responses json_object mode) + destinations
+ *   - faq_suggestion_parse_response: AI JSON -> clean suggestions, resolving
+ *                                    destination names to ids, dropping bad rows
+ *   - faq_suggestion_filter_new    : drop titles already seen / duplicated
+ */
+
+if (!defined('BASEPATH')) {
+	define('BASEPATH', __DIR__);
+}
+require __DIR__ . '/../../application/helpers/faq_suggestion_helper.php';
+
+function assert_eq($label, $expected, $actual) {
+	if ($expected === $actual) {
+		echo "  PASS  {$label}\n";
+	} else {
+		echo "  FAIL  {$label}: expected " . var_export($expected, true)
+		   . ", got " . var_export($actual, true) . "\n";
+		exit(1);
+	}
+}
+function assert_true($label, $actual) { assert_eq($label, true, (bool) $actual); }
+function assert_false($label, $actual) { assert_eq($label, false, (bool) $actual); }
+
+// ---- cutoff ----------------------------------------------------------------
+$now = mktime(12, 0, 0, 9, 17, 2026); // 2026-09-17 12:00:00
+assert_eq('cutoff 3 days',        '2026-09-14 12:00:00', faq_suggestion_cutoff($now, 3));
+assert_eq('cutoff 1 day',         '2026-09-16 12:00:00', faq_suggestion_cutoff($now, 1));
+assert_eq('cutoff floors to 1',   '2026-09-16 12:00:00', faq_suggestion_cutoff($now, 0));
+assert_eq('cutoff neg floors 1',  '2026-09-16 12:00:00', faq_suggestion_cutoff($now, -5));
+
+// ---- transcript ------------------------------------------------------------
+$ghl = array(
+	array('direction' => 'inbound',  'body' => 'What time is check-in?'),
+	array('direction' => 'outbound', 'body' => 'Check-in is 3pm.'),
+	array('direction' => 'inbound',  'body' => '   '),          // blank -> dropped
+);
+$wa = array(
+	array('outbound' => false, 'body' => 'Is breakfast included?', 'system' => false),
+	array('outbound' => true,  'body' => 'Yes, daily breakfast.',  'system' => false),
+	array('outbound' => false, 'body' => 'Messages are encrypted', 'system' => true), // system -> dropped
+);
+$t = faq_suggestion_transcript($ghl, $wa, 60000);
+assert_eq('transcript lines',
+	"Customer: What time is check-in?\nAgent: Check-in is 3pm.\nCustomer: Is breakfast included?\nAgent: Yes, daily breakfast.",
+	$t);
+assert_eq('empty inputs -> empty', '', faq_suggestion_transcript(array(), array(), 60000));
+
+// ---- is_noise --------------------------------------------------------------
+assert_true('blank is noise',            faq_suggestion_is_noise('   '));
+assert_true('emoji only is noise',       faq_suggestion_is_noise('👍👍'));
+assert_true('single char is noise',      faq_suggestion_is_noise('k'));
+assert_true('ack ok is noise',           faq_suggestion_is_noise('Ok'));
+assert_true('ack thanks is noise',       faq_suggestion_is_noise('Thank you!'));
+assert_true('greeting hi is noise',      faq_suggestion_is_noise('Hi'));
+assert_true('media omitted is noise',    faq_suggestion_is_noise('<Media omitted>'));
+assert_true('deleted is noise',          faq_suggestion_is_noise('This message was deleted'));
+assert_false('real question not noise',  faq_suggestion_is_noise('How much is the deposit?'));
+assert_false('greeting+question kept',   faq_suggestion_is_noise('Hi, how much is the Japan tour?'));
+
+// ---- transcript: noise drop + dedupe with counts ---------------------------
+$g = array(
+	array('direction' => 'inbound',  'body' => 'How much deposit?'),
+	array('direction' => 'outbound', 'body' => 'RM500 per person.'),
+	array('direction' => 'inbound',  'body' => 'ok thanks'),          // ack -> dropped
+	array('direction' => 'inbound',  'body' => 'How much deposit??'),  // dup question
+	array('direction' => 'inbound',  'body' => '<Media omitted>'),     // media -> dropped
+	array('direction' => 'inbound',  'body' => 'how much   DEPOSIT'),  // dup question (3rd)
+);
+$out = faq_suggestion_transcript($g, array(), 0);
+assert_eq('dedupe + count + noise drop',
+	"Customer: How much deposit? (asked 3 times)\nAgent: RM500 per person.",
+	$out);
+
+// Tail-cap keeps the most recent whole lines only.
+$many = array();
+for ($i = 1; $i <= 50; $i++) {
+	$many[] = array('direction' => 'inbound', 'body' => 'line' . $i);
+}
+$capped = faq_suggestion_transcript($many, array(), 40);
+assert_true('cap under limit', strlen($capped) <= 40);
+assert_false('cap drops early line', strpos($capped, 'line1:') !== false);
+assert_true('cap keeps last line', strpos($capped, 'line50') !== false);
+assert_false('cap never starts mid-line', substr($capped, 0, 1) === 'e' || substr($capped, 0, 1) === 'l' && strpos($capped, 'Customer') !== 0);
+
+// ---- build_prompt ----------------------------------------------------------
+$p = faq_suggestion_build_prompt("Customer: hi\nAgent: hello", array('Japan', ' Korea ', ''));
+assert_true('prompt has instructions', trim($p['instructions']) !== '');
+assert_true('input mentions json (json_object mode)', stripos($p['input'], 'json') !== false);
+assert_true('input carries transcript', strpos($p['input'], 'Customer: hi') !== false);
+assert_true('input lists destination Japan', strpos($p['input'], 'Japan') !== false);
+assert_true('input lists destination Korea trimmed', strpos($p['input'], 'Korea') !== false);
+$p2 = faq_suggestion_build_prompt('x', array());
+assert_true('no destinations -> (none configured)', strpos($p2['input'], '(none configured)') !== false);
+
+// ---- parse_response --------------------------------------------------------
+$dest_map = array('Japan' => 5, 'Korea' => 8);
+$json = array('suggestions' => array(
+	array(
+		'title' => 'Check-in time',
+		'reason' => 'Asked by many customers before arrival.',
+		'destinations' => array('Japan', 'Atlantis'), // Atlantis unknown -> dropped
+		'items' => array(
+			array('q' => 'What time is check-in?', 'a' => '3pm.'),
+			array('q' => 'half', 'a' => ''),           // incomplete -> dropped
+		),
+	),
+	array('title' => '', 'items' => array(array('q' => 'x', 'a' => 'y'))), // no title -> dropped
+	array('title' => 'No items here', 'items' => array()),                 // no items -> dropped
+	array(
+		'title' => 'Breakfast',
+		'destinations' => array('korea'),             // case-insensitive resolve
+		'items' => array(array('q' => 'Breakfast?', 'a' => 'Included.')),
+	),
+));
+$parsed = faq_suggestion_parse_response($json, $dest_map, 30);
+assert_eq('parsed count', 2, count($parsed));
+assert_eq('parsed[0] title', 'Check-in time', $parsed[0]['title']);
+assert_eq('parsed[0] reason kept', 'Asked by many customers before arrival.', $parsed[0]['reason']);
+assert_eq('parsed[1] reason default empty', '', $parsed[1]['reason']);
+assert_eq('parsed[0] dest ids', array(5), $parsed[0]['destination_ids']);
+assert_eq('parsed[0] items kept', 1, count($parsed[0]['items']));
+assert_eq('parsed[1] title', 'Breakfast', $parsed[1]['title']);
+assert_eq('parsed[1] dest ids ci', array(8), $parsed[1]['destination_ids']);
+
+// String input is decoded; cap is honoured.
+$raw = '{"suggestions":[{"title":"A","items":[{"q":"a","a":"b"}]},{"title":"B","items":[{"q":"a","a":"b"}]}]}';
+assert_eq('string input decoded + capped', 1, count(faq_suggestion_parse_response($raw, array(), 1)));
+assert_eq('garbage -> empty', array(), faq_suggestion_parse_response('not json', array(), 30));
+
+// ---- norm_title / filter_new ----------------------------------------------
+assert_eq('norm strips punctuation', 'check in time', faq_suggestion_norm_title('  Check-In  Time!! '));
+$sugg = array(
+	array('title' => 'Check-in time'),
+	array('title' => 'CHECK IN TIME'),   // dup of #1 -> dropped
+	array('title' => 'Baggage allowance'),
+	array('title' => 'Visa rules'),      // already an existing FAQ -> dropped
+);
+$new = faq_suggestion_filter_new($sugg, array('Visa Rules'));
+assert_eq('filter_new count', 2, count($new));
+assert_eq('filter_new[0]', 'Check-in time', $new[0]['title']);
+assert_eq('filter_new[1]', 'Baggage allowance', $new[1]['title']);
+
+echo "\nAll FaqSuggestionHelper tests passed.\n";

@@ -154,17 +154,18 @@ if ( ! function_exists('customer_analysis_output_contract'))
 		return
 			"You are a senior travel-sales analyst for Holidaygogogo Tours, a Malaysian tour agency. " .
 			"You are given the full chat history between our agency ('Agent') and ONE customer ('Customer'). " .
+			"Your job is to build a rich CUSTOMER PROFILE and then tell the business owner exactly what to do next to win the sale. " .
 			"Analyse ONLY what the transcript supports — never invent facts.\n\n" .
 			"Return STRICT JSON only (no markdown fences, no prose outside the object) with this exact shape:\n" .
 			"{\n" .
-			"  \"summary\": \"2-4 sentence customer profile: who they are, travel style, party/family context, and the gist of the relationship\",\n" .
-			"  \"key_facts\": [\"durable facts worth remembering: pax count, kids' ages, dietary needs, past trips, contact preferences\"],\n" .
+			"  \"summary\": \"a detailed 4-6 sentence customer profile: who they are; their travel style and preferences; party/family composition and any special needs; budget posture and how they make decisions; and where the relationship with us stands and how engaged they are\",\n" .
+			"  \"next_actions\": [\"concrete sales next steps the OWNER should take to move this customer toward booking, ordered most important first — each specific and actionable (what to send, what to offer, what to confirm, when to follow up), tailored to this customer's situation, not generic advice\"],\n" .
 			"  \"temperature\": \"hot or cold — classify the customer's intention to make a booking\",\n" .
 			"  \"temperature_reason\": \"one short sentence justifying the hot/cold call\"\n" .
 			"}\n\n" .
 			"Classification: 'hot' = the customer shows clear intention to make a booking (asking to book, confirming dates/pax, requesting a quote or payment to proceed, actively engaged and close to converting). " .
 			"'cold' = little or no booking intention (just browsing, price-shopping without commitment, unresponsive, or went quiet). temperature MUST be exactly \"hot\" or \"cold\".\n" .
-			"Rules: use an empty string or empty array when the transcript gives nothing. Keep list items short. Write every field in English.";
+			"Rules: use an empty string or empty array when the transcript gives nothing. Write concrete, business-ready detail and favour specifics from the chat over generic statements. Write every field in English.";
 	}
 }
 
@@ -207,7 +208,7 @@ if ( ! function_exists('customer_analysis_build_update_request'))
 		$p = (array) $prior;
 		$prior_json = json_encode(array(
 			'summary'            => isset($p['summary']) ? (string) $p['summary'] : '',
-			'key_facts'          => (isset($p['key_facts']) && is_array($p['key_facts'])) ? array_values($p['key_facts']) : array(),
+			'next_actions'       => (isset($p['next_actions']) && is_array($p['next_actions'])) ? array_values($p['next_actions']) : array(),
 			'temperature'        => isset($p['temperature']) ? (string) $p['temperature'] : '',
 			'temperature_reason' => isset($p['temperature_reason']) ? (string) $p['temperature_reason'] : '',
 		), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
@@ -216,18 +217,18 @@ if ( ! function_exists('customer_analysis_build_update_request'))
 			"You are a senior travel-sales analyst for Holidaygogogo Tours, a Malaysian tour agency. " .
 			"You are UPDATING an existing customer profile: you are given the profile from the last analysis " .
 			"plus ONLY the new chat messages since then. Keep facts that still hold, incorporate the new " .
-			"messages, drop anything the new messages contradict, and RE-ASSESS the hot/cold booking intent " .
-			"based on the latest state. Do not invent facts.\n\n" .
+			"messages, drop anything the new messages contradict, refresh the recommended sales next steps, " .
+			"and RE-ASSESS the hot/cold booking intent based on the latest state. Do not invent facts.\n\n" .
 			"Return STRICT JSON only (no markdown fences, no prose outside the object) with this exact shape:\n" .
 			"{\n" .
-			"  \"summary\": \"2-4 sentence up-to-date customer profile\",\n" .
-			"  \"key_facts\": [\"durable facts worth remembering\"],\n" .
+			"  \"summary\": \"a detailed 4-6 sentence up-to-date customer profile: who they are, travel style, party/family context, budget posture, and where the relationship stands\",\n" .
+			"  \"next_actions\": [\"concrete sales next steps the OWNER should take now to move this customer toward booking, ordered most important first, tailored to the latest state\"],\n" .
 			"  \"temperature\": \"hot or cold — current intention to make a booking\",\n" .
 			"  \"temperature_reason\": \"one short sentence justifying the hot/cold call\"\n" .
 			"}\n\n" .
 			"'hot' = clear intention to book (confirming dates/pax, asking to proceed/pay, actively engaged). " .
 			"'cold' = little/no intention (browsing, price-shopping, unresponsive, went quiet). " .
-			"temperature MUST be exactly \"hot\" or \"cold\". Write every field in English.";
+			"temperature MUST be exactly \"hot\" or \"cold\". Write concrete, business-ready detail. Write every field in English.";
 
 		$name  = trim((string) $guest_name);
 		$input =

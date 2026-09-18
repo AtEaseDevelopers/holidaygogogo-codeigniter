@@ -80,9 +80,16 @@ check_true('request carries customer name', strpos($req['input'], 'Ali Bin Abu')
 check_true('request carries transcript', strpos($req['input'], 'Customer: hi') !== false);
 check_true('request instructions ask for strict JSON', stripos($req['instructions'], 'STRICT JSON') !== false);
 check_true('request instructions do NOT ask for sales_intel (disabled)', strpos($req['instructions'], 'sales_intel') === false);
-check_true('request instructions do NOT ask for next_actions (disabled)', strpos($req['instructions'], 'next_actions') === false);
-check_true('request instructions still define key_facts', strpos($req['instructions'], 'key_facts') !== false);
+check_true('request instructions ask for next_actions (sales next steps)', strpos($req['instructions'], 'next_actions') !== false);
+check_true('request instructions do NOT ask for key_facts (dropped)', strpos($req['instructions'], 'key_facts') === false);
 check_true('request instructions ask for hot/cold temperature', strpos($req['instructions'], 'temperature') !== false && stripos($req['instructions'], 'hot') !== false && stripos($req['instructions'], 'cold') !== false);
+
+// The incremental-update request also asks for the sales next steps.
+$reqUpd = customer_analysis_build_update_request('Ali', array('summary' => 'old', 'next_actions' => array('x')), "Customer: still keen");
+check_true('update request carries prior summary', strpos($reqUpd['input'], 'old') !== false);
+check_true('update request carries new transcript', strpos($reqUpd['input'], 'still keen') !== false);
+check_true('update request asks for next_actions', strpos($reqUpd['instructions'], 'next_actions') !== false);
+check_true('update request does NOT ask for key_facts (dropped)', strpos($reqUpd['instructions'], 'key_facts') === false);
 
 // ---- customer_analysis_normalize_temperature --------------------------------
 check('temperature normalises HOT -> hot', 'hot', customer_analysis_normalize_temperature('HOT'));

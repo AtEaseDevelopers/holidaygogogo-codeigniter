@@ -643,6 +643,14 @@ $m2 = competitor_item_meta("Amazing 5 Days 4 Nights Bali\nBeach and temples", 'B
 check('item_meta duration "5 Days 4 Nights"', '5 Days 4 Nights', $m2['duration']);
 $m3 = competitor_item_meta('', '');
 check('item_meta empty when no text', '', $m3['duration'] . $m3['snippet']);
+
+// ---- competitor_item_kind (package when priced, else itinerary) -------------
+check('item_kind price RM -> package', 'package', competitor_item_kind("Bali 5D4N tour\nFrom RM1,899 per pax"));
+check('item_kind price SGD with space -> package', 'package', competitor_item_kind('Special deal SGD 250 nett'));
+check('item_kind price $ symbol -> package', 'package', competitor_item_kind('Book now for $1,200'));
+check('item_kind no price -> itinerary', 'itinerary', competitor_item_kind("Day 1 Kunming\nDay 2 Dali\nDay 3 return"));
+check('item_kind bare number (no currency) -> itinerary', 'itinerary', competitor_item_kind('Visit 1899 heritage sites over 5 days'));
+check('item_kind empty -> itinerary', 'itinerary', competitor_item_kind(''));
 check('is_product_url skips WP /tag/ taxonomy', false, competitor_is_product_url('https://www.holidaygogogo.com/tag/china-tour-packages/'));
 check('is_product_url skips WP /author/ archive', false, competitor_is_product_url('https://www.holidaygogogo.com/author/holiday-tour-admin/'));
 check('is_product_url skips date archive', false, competitor_is_product_url('https://www.holidaygogogo.com/2024/05/best-tour-deals/'));

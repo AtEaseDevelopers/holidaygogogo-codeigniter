@@ -69,7 +69,7 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
                 </div>
 
                 <div class="mb-5">
-                    <span class="text-muted" style="font-size:12px;"><?php echo htmlspecialchars($L('analysed', 'Analysed')); ?> <?php echo date('d M Y H:i', strtotime($a->created_at)); ?><?php if($a->model) { echo ' · ' . htmlspecialchars($a->model); } ?><?php if((float) $a->cost_usd > 0) { echo ' · ' . htmlspecialchars($L('ai_cost', 'AI cost')) . ' USD ' . number_format((float) $a->cost_usd, 4) . ' (' . number_format((int) $a->input_tokens) . ' in / ' . number_format((int) $a->output_tokens) . ' out tokens)'; } ?></span>
+                    <span class="text-muted" style="font-size:12px;"><?php echo htmlspecialchars($L('analysed', 'Analysed')); ?> <?php echo date('d M Y H:i', strtotime($a->created_at)); ?><?php if((float) $a->cost_usd > 0) { echo ' · ' . htmlspecialchars($L('ai_cost', 'AI cost')) . ' USD ' . number_format((float) $a->cost_usd, 4); } ?></span>
                 </div>
 
                 <?php if($is_crawl) { ?>

@@ -59,6 +59,8 @@ class Competitor_Product_Job extends CI_Controller
 			$this->run_paste($job, $write);
 		} elseif ($mode === 'upload') {
 			$this->run_upload($job, $write);
+		} elseif ($mode === 'translate') {
+			$this->run_translate($job, $write);
 		} else {
 			$this->run_crawl($job, $write);
 		}
@@ -134,6 +136,41 @@ class Competitor_Product_Job extends CI_Controller
 				'count' => 1, 'analysis_id' => $id, 'cost_total' => (float) $record['cost_usd']));
 		} catch (Exception $e) {
 			log_message('error', 'CompetitorJob paste failed: ' . $e->getMessage());
+			$write(array('state' => 'error', 'message' => $e->getMessage()));
+		}
+	}
+
+	/**
+	 * Translate a saved analysis into $lang in the BACKGROUND and cache it
+	 * (competitor_analyses.translations_json) — the same work the old synchronous
+	 * Translate() did, moved here so the View page's language toggle never blocks on
+	 * the slow OpenAI call. The View/PDF read the cached overlay once this is done.
+	 */
+	private function run_translate($job, $write)
+	{
+		@set_time_limit(0);
+		$id   = isset($job['analysis_id']) ? (int) $job['analysis_id'] : 0;
+		$lang = competitor_normalize_lang(isset($job['lang']) ? $job['lang'] : 'en');
+		$write(array('state' => 'running', 'phase' => 'translating', 'done' => 0, 'total' => 1));
+		$this->load->model('Competitor_Analysis_Model');
+		try {
+			if ($id <= 0 || $lang === 'en') {
+				throw new Exception('Nothing to translate.');
+			}
+			$analysis = $this->Competitor_Analysis_Model->Read_One($id);
+			if ( ! $analysis) {
+				throw new Exception('Analysis not found.');
+			}
+			// Skip the OpenAI call if another request already cached it.
+			if ($this->Competitor_Analysis_Model->Read_Translation($id, $lang) === null) {
+				$overlay = $this->competitoranalysisservice->translate_analysis(
+					competitor_display_products($analysis), $lang
+				);
+				$this->Competitor_Analysis_Model->Save_Translation($id, $lang, $overlay);
+			}
+			$write(array('state' => 'done', 'phase' => 'translating', 'done' => 1, 'total' => 1, 'analysis_id' => $id));
+		} catch (Exception $e) {
+			log_message('error', 'Competitor_Product_Job translate failed: ' . $e->getMessage());
 			$write(array('state' => 'error', 'message' => $e->getMessage()));
 		}
 	}

@@ -30,7 +30,7 @@ class Faq_Model extends CI_Model
 		}
 
 		$this->db->group_by('f.FAQID');
-		$this->db->order_by('f.FAQID', 'ASC');
+		$this->db->order_by('f.FAQID', 'DESC');
 		$rows = $this->db->get()->result();
 
 		// Resolve per-item tags: a FAQ's effective tag set is the union across its

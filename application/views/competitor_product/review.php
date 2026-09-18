@@ -39,6 +39,7 @@
                                 <th style="width:40px; text-align:center;"><input type="checkbox" id="sel_all"></th>
                                 <th style="text-align:center;">No.</th>
                                 <th>Product</th>
+                                <th style="text-align:center;">Type</th>
                                 <th style="text-align:center;">AI Cost (USD)</th>
                                 <th style="text-align:center;">Analysed On</th>
                                 <th style="text-align:center;">Action</th>
@@ -46,10 +47,11 @@
                         </thead>
                         <tbody id="products_body">
                             <?php if (empty($products)) { ?>
-                                <tr id="empty_row"><td colspan="6" style="text-align:center; padding:12px;">No products crawled</td></tr>
+                                <tr id="empty_row"><td colspan="7" style="text-align:center; padding:12px;">No products crawled</td></tr>
                             <?php } else { $n = 1; foreach ($products as $p) {
                                 $analysed = ((int) $p['analysis_id'] > 0);
-                                $hay = strtolower(trim($p['title'] . ' ' . $p['snippet'] . ' ' . $p['url'] . ' ' . $p['duration']));
+                                $kind     = (isset($p['kind']) && $p['kind'] === 'package') ? 'package' : 'itinerary';
+                                $hay = strtolower(trim($p['title'] . ' ' . $p['snippet'] . ' ' . $p['url'] . ' ' . $p['duration'] . ' ' . $kind));
                             ?>
                                 <tr class="product-row" data-search="<?php echo htmlspecialchars($hay); ?>"<?php echo $analysed ? ' style="background:#f6fbf7;"' : ''; ?>>
                                     <td style="text-align:center;"><input type="checkbox" class="sel-item" value="<?php echo (int) $p['i']; ?>" <?php echo $p['chars'] > 0 ? '' : 'disabled'; ?>></td>
@@ -60,6 +62,13 @@
                                         <?php echo $p['chars'] > 0 ? '' : ' <span class="label label-light-danger label-inline" style="font-size:10px;">empty</span>'; ?>
                                         <?php if ( ! empty($p['snippet'])) { ?><div class="text-muted" style="font-size:11px; margin-top:2px;"><?php echo htmlspecialchars($p['snippet']); ?></div><?php } ?>
                                         <?php if ( ! empty($p['url'])) { ?><div style="margin-top:2px;"><a href="<?php echo htmlspecialchars($p['url']); ?>" target="_blank" rel="noopener" class="text-muted" style="font-size:11px; word-break:break-all;"><i class="la la-external-link-alt mr-1"></i><?php echo htmlspecialchars($p['url']); ?></a></div><?php } ?>
+                                    </td>
+                                    <td class="cell-kind" style="text-align:center;">
+                                        <?php if ($kind === 'package') { ?>
+                                            <span class="label label-light-primary label-inline" style="font-size:11px;" data-toggle="tooltip" title="Content mentions a price">Package</span>
+                                        <?php } else { ?>
+                                            <span class="label label-light-warning label-inline" style="font-size:11px;" data-toggle="tooltip" title="No price found — itinerary only">Itinerary</span>
+                                        <?php } ?>
                                     </td>
                                     <td class="cell-cost" style="text-align:center; font-size:12px;"><?php echo $analysed && $p['cost'] > 0 ? number_format((float) $p['cost'], 4) : '—'; ?></td>
                                     <td class="cell-analysed" style="text-align:center; font-size:12px;">
@@ -139,7 +148,7 @@
         refreshSel();
         renumber();
         if (!$('#products_body tr.product-row').length && !$('#empty_row').length) {
-            $('#products_body').append('<tr id="empty_row"><td colspan="6" style="text-align:center; padding:12px;">No products crawled</td></tr>');
+            $('#products_body').append('<tr id="empty_row"><td colspan="7" style="text-align:center; padding:12px;">No products crawled</td></tr>');
         }
     }
 

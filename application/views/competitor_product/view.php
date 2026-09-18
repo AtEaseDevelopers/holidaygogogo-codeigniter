@@ -69,7 +69,7 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
                 </div>
 
                 <div class="mb-5">
-                    <span class="text-muted" style="font-size:12px;"><?php echo htmlspecialchars($L('analysed', 'Analysed')); ?> <?php echo date('d M Y H:i', strtotime($a->created_at)); ?><?php if($a->model) { echo ' · ' . htmlspecialchars($a->model); } ?><?php if((float) $a->cost_usd > 0) { echo ' · ' . htmlspecialchars($L('ai_cost', 'AI cost')) . ' USD ' . number_format((float) $a->cost_usd, 4) . ' (' . number_format((int) $a->input_tokens) . ' in / ' . number_format((int) $a->output_tokens) . ' out tokens)'; } ?></span>
+                    <span class="text-muted" style="font-size:12px;"><?php echo htmlspecialchars($L('analysed', 'Analysed')); ?> <?php echo date('d M Y H:i', strtotime($a->created_at)); ?><?php if((float) $a->cost_usd > 0) { echo ' · ' . htmlspecialchars($L('ai_cost', 'AI cost')) . ' USD ' . number_format((float) $a->cost_usd, 4); } ?></span>
                 </div>
 
                 <?php if($is_crawl) { ?>
@@ -113,34 +113,89 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
 
 <script>
     // 中文 toggle. English is the stored original (instant). Chinese is AI-translated
-    // on first use, cached server-side, then the page reloads to ?lang=cn so both the
-    // view and the PDF (which reads the same cached overlay) follow the translation.
+    // in the BACKGROUND (a detached CLI worker) on first use, then cached server-side.
+    // While it translates the button is disabled (a spinner) — you can only click it
+    // to view the translated page once the poll reports the translation is ready. The
+    // PDF reads the same cached overlay, so it follows the translation automatically.
     (function() {
-        var CUR_LANG = '<?php echo $lang; ?>';
-        var HAS_CN   = <?php echo $has_cn ? 'true' : 'false'; ?>;
-        var ID       = '<?php echo (int) $a->id; ?>';
-        var CN_URL   = '<?php echo base_url('Competitor_Product/View?id=' . (int) $a->id . '&lang=cn'); ?>';
-        var IMG      = '<?php echo base_url('assets/image/sweetalert.jpg'); ?>';
+        var CUR_LANG  = '<?php echo $lang; ?>';
+        var HAS_CN    = <?php echo $has_cn ? 'true' : 'false'; ?>;
+        var ID        = '<?php echo (int) $a->id; ?>';
+        var CN_URL    = '<?php echo base_url('Competitor_Product/View?id=' . (int) $a->id . '&lang=cn'); ?>';
+        var STATE_URL = '<?php echo base_url('Competitor_Product/Job_State?job='); ?>';
+        var LS_KEY    = 'cpx_tr_' + ID + '_cn';   // remembers an in-flight job across a refresh
+        var LABEL     = '中文';
 
-        $('#ca_lang_cn').on('click', function() {
-            if (CUR_LANG === 'cn') { return; }                 // already showing Chinese
-            if (HAS_CN) { window.location.href = CN_URL; return; }  // cached → just switch
+        var $btn    = $('#ca_lang_cn');
+        var polling = false;
+        // Non-blocking toast (top-right, no backdrop) so the user can keep working — or
+        // leave the page entirely — while the translation runs in the background.
+        var Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false });
 
-            Swal.fire({ background: 'url(' + IMG + ')', title: '翻译中… / Translating…',
-                allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
+        function setTranslating() {
+            polling = true;
+            $btn.html('<i class="la la-spinner la-spin mr-1"></i>翻译中…').css('pointer-events', 'none').css('opacity', 0.65);
+        }
+        function setReady() {
+            HAS_CN = true; polling = false;
+            try { localStorage.removeItem(LS_KEY); } catch (e) {}
+            $btn.html(LABEL).css('pointer-events', '').css('opacity', '')
+                .attr('data-original-title', 'View in 中文 (translation ready)');
+        }
+        function setIdleError(msg) {
+            polling = false;
+            try { localStorage.removeItem(LS_KEY); } catch (e) {}
+            $btn.html(LABEL).css('pointer-events', '').css('opacity', '');
+            Toast.fire({ icon: 'error', title: msg || 'Translation failed', timer: 6000, timerProgressBar: true });
+        }
+
+        function poll(job) {
+            var t = setInterval(function() {
+                $.getJSON(STATE_URL + encodeURIComponent(job)).done(function(res) {
+                    if (!res) { return; }
+                    if (res.state === 'done') {
+                        clearInterval(t); setReady();
+                        Toast.fire({ icon: 'success', title: 'Translation ready — click 中文 to view', timer: 5000, timerProgressBar: true });
+                    } else if (res.state === 'error' || res.state === 'unknown') {
+                        clearInterval(t); setIdleError(res.message);
+                    }
+                });
+            }, 2500);
+        }
+
+        $btn.on('click', function() {
+            if (CUR_LANG === 'cn') { return; }                     // already showing Chinese
+            if (polling) { return; }                               // translating → not clickable yet
+            if (HAS_CN) { window.location.href = CN_URL; return; } // ready → view it
+
+            setTranslating();
             $.ajax({
                 url: '<?php echo base_url('Competitor_Product/Translate'); ?>',
                 type: 'post', dataType: 'json', data: { id: ID, lang: 'cn' },
                 success: function(res) {
-                    Swal.close();
-                    if (res && res.success) { window.location.href = CN_URL; }
-                    else { Display_Message(IMG, (res && res.message) ? res.message : 'Translation failed', null); }
+                    if (res && res.success && res.done) { setReady(); window.location.href = CN_URL; return; }
+                    if (res && res.success && res.job) {
+                        try { localStorage.setItem(LS_KEY, res.job); } catch (e) {}
+                        Toast.fire({ icon: 'info', title: 'Translating in the background…', timer: 4000, timerProgressBar: true });
+                        poll(res.job);
+                        return;
+                    }
+                    setIdleError(res && res.message ? res.message : 'Translation failed');
                 },
-                error: function() {
-                    Swal.close();
-                    Display_Message(IMG, 'Translation failed. Please try again.', null);
-                }
+                error: function() { setIdleError('Translation failed. Please try again.'); }
             });
         });
+
+        // Resume a background translation left running before a refresh. The poll
+        // self-heals: a job that already finished (or was pruned) returns done/unknown.
+        if (CUR_LANG !== 'cn' && ! HAS_CN) {
+            var job = '';
+            try { job = localStorage.getItem(LS_KEY) || ''; } catch (e) {}
+            if (job) {
+                setTranslating();
+                Toast.fire({ icon: 'info', title: 'Resuming background translation…', timer: 3000, timerProgressBar: true });
+                poll(job);
+            }
+        }
     })();
 </script>

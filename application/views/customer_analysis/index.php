@@ -32,16 +32,13 @@ function ca_render_analysis($a, $expanded = true)
                 <h3 class="card-label">
                     <?php echo $expanded ? 'Latest Analysis' : 'Analysis'; ?>
                     <?php $temp = strtolower(trim((string) $a->temperature));
-                    if ($temp === 'hot') { ?>
+                    if (false && $temp === 'hot') { // hot/cold badge UI hidden for now; feature retained ?>
                         <span class="label label-danger label-inline font-weight-bolder ml-2" data-toggle="tooltip" title="<?php echo htmlspecialchars($a->temperature_reason ?: ''); ?>"><i class="la la-fire mr-1"></i>HOT</span>
                     <?php } elseif ($temp === 'cold') { ?>
                         <span class="label label-info label-inline font-weight-bolder ml-2" data-toggle="tooltip" title="<?php echo htmlspecialchars($a->temperature_reason ?: ''); ?>"><i class="la la-snowflake mr-1"></i>COLD</span>
                     <?php } ?>
                     <span class="text-muted font-weight-normal ml-2" style="font-size:12px;">
                         <?php echo date('d M Y, H:i', strtotime($a->created_at)); ?>
-                        <?php if ($a->model) { echo ' · ' . htmlspecialchars($a->model); } ?>
-                        <?php if ((float) $a->cost_usd > 0) { echo ' · USD ' . number_format((float) $a->cost_usd, 4) . ' (' . number_format((int) $a->input_tokens) . ' in / ' . number_format((int) $a->output_tokens) . ' out)'; } ?>
-                        <?php if ($a->message_count) { echo ' · ' . (int) $a->message_count . ' messages'; } ?>
                     </span>
                 </h3>
             </div>
@@ -62,6 +59,19 @@ function ca_render_analysis($a, $expanded = true)
                     <div class="mb-5">
                         <div class="font-weight-bolder text-dark mb-2">Customer Profile</div>
                         <div class="text-dark-75" style="font-size:13px; line-height:1.7;"><?php echo nl2br(htmlspecialchars($a->summary)); ?></div>
+                    </div>
+                <?php } ?>
+
+                <?php if ( ! empty($a->next_actions)) { ?>
+                    <div class="separator separator-dashed my-4"></div>
+                    <div class="font-weight-bolder text-dark mb-3"><i class="la la-bullseye text-primary mr-1"></i>Recommended Next Steps (Sales)</div>
+                    <div class="mb-2">
+                        <?php foreach ($a->next_actions as $i => $step) { ?>
+                            <div class="d-flex align-items-start mb-3">
+                                <span class="label label-primary label-inline font-weight-bolder mr-3 mt-1" style="min-width:22px;"><?php echo (int) $i + 1; ?></span>
+                                <div class="text-dark-75" style="font-size:13px; line-height:1.7;"><?php echo nl2br(htmlspecialchars($step)); ?></div>
+                            </div>
+                        <?php } ?>
                     </div>
                 <?php } ?>
 
@@ -90,16 +100,6 @@ function ca_render_analysis($a, $expanded = true)
                 echo $chip('Budget Signals', $si['budget_signals']);
                 echo $chip('Objections / Concerns', $si['objections']);
                 } ?>
-
-                <?php if ( ! empty($a->key_facts)) { ?>
-                    <div class="separator separator-dashed my-4"></div>
-                    <div class="font-weight-bolder text-dark mb-3">Key Facts</div>
-                    <ul class="text-dark-75" style="font-size:13px; line-height:1.8;">
-                        <?php foreach ($a->key_facts as $fact) { ?>
-                            <li><?php echo htmlspecialchars($fact); ?></li>
-                        <?php } ?>
-                    </ul>
-                <?php } ?>
             <?php } ?>
         </div>
     </div>
@@ -127,11 +127,6 @@ function ca_render_analysis($a, $expanded = true)
                     <button type="button" class="btn btn-light-primary font-weight-bold mr-3" onclick="history.back();">
                         <i class="la la-arrow-left"></i> Back
                     </button>
-                    <?php if (! empty($has_prior)) { ?>
-                        <button type="button" id="ca_run_full" class="btn btn-light-warning font-weight-bold mr-3" <?php echo $can_analyse ? '' : 'disabled'; ?> data-toggle="tooltip" title="Ignore saved memory and re-read the entire chat from scratch">
-                            <i class="la la-redo-alt"></i> Full re-analyse
-                        </button>
-                    <?php } ?>
                     <button type="button" id="ca_run" class="btn btn-primary font-weight-bold" <?php echo $can_analyse ? '' : 'disabled'; ?>>
                         <i class="la la-robot"></i> AI Analysis
                     </button>
@@ -156,8 +151,7 @@ function ca_render_analysis($a, $expanded = true)
                         <?php } else { ?>
                             Chat changed since <?php echo date('d M Y, H:i', strtotime($last_analysed_at)); ?> — <strong>AI Analysis</strong> will do a full re-read.
                         <?php } ?>
-                        <?php $est_tokens = (int) ceil($transcript_chars / 4); ?>
-                        <span class="ml-1">Full transcript: ~<?php echo number_format($est_tokens); ?> tokens (<?php echo number_format($transcript_chars); ?> chars).</span>
+                        <span class="ml-1">Full transcript: <?php echo number_format($transcript_chars); ?> characters.</span>
                         <?php if ($transcript_chars > $warn_chars) { ?>
                             <span class="text-danger font-weight-bold"><i class="la la-exclamation-triangle"></i> A full run may exceed the AI limit — you'll be warned before it runs.</span>
                         <?php } ?>
@@ -211,28 +205,27 @@ function ca_render_analysis($a, $expanded = true)
     // transcript); an incremental update only sends the small delta.
     function confirmIfLong() {
         if (TRANSCRIPT_CHARS <= WARN_CHARS) { return true; }
-        var estTokens = Math.round(TRANSCRIPT_CHARS / 4 / 1000);
-        return window.confirm('This conversation is very long — about ' + estTokens + 'k tokens ('
-            + TRANSCRIPT_CHARS.toLocaleString() + ' characters).\n\n'
+        return window.confirm('This conversation is very long — about '
+            + TRANSCRIPT_CHARS.toLocaleString() + ' characters.\n\n'
             + 'It may exceed the AI\'s limit and fail, or be slow and more costly.\n\n'
             + 'Proceed with the full analysis anyway?');
     }
 
-    function run($btn, forceFull) {
-        // A full run happens on the Full button, the first-ever run, or when the
-        // chat changed in a way that needs a full re-read.
-        var isFull = forceFull || RUN_MODE === 'full';
+    function run($btn) {
+        // A full run happens on the first-ever run or when the chat changed in a
+        // way that needs a full re-read; otherwise it's an incremental update.
+        var isFull = RUN_MODE === 'full';
         if (isFull && !confirmIfLong()) { return; }
 
-        var buttons = $('#ca_run, #ca_run_full');
+        var buttons = $('#ca_run');
         var orig = $btn.html();
         buttons.prop('disabled', true);
         $btn.html('<i class="la la-spinner la-spin"></i> Analysing…');
-        setStatus(forceFull
-            ? 'Re-reading the full conversation and asking OpenAI…'
+        setStatus(isFull
+            ? 'Re-reading the full conversation and running AI analysis…'
             : 'Updating the profile from the latest messages…', 'primary');
 
-        $.post(RUN_URL, $.extend({ force_full: forceFull ? 1 : 0 }, PARAMS), function (res) {
+        $.post(RUN_URL, PARAMS, function (res) {
             if (res && res.success && res.unchanged) {
                 setStatus((res.message || 'Already up to date.'), 'success');
                 buttons.prop('disabled', false);
@@ -252,8 +245,7 @@ function ca_render_analysis($a, $expanded = true)
         });
     }
 
-    $('#ca_run').on('click', function () { run($(this), false); });
-    $('#ca_run_full').on('click', function () { run($(this), true); });
+    $('#ca_run').on('click', function () { run($(this)); });
 
     $(document).on('click', '.js-ca-delete', function () {
         if (!confirm('Delete this analysis? This cannot be undone.')) { return; }

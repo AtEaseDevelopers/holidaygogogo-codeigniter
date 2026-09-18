@@ -64,6 +64,9 @@
 					<a href="<?php echo base_url('Faq/Internal'); ?>" target="_blank" rel="noopener" class="btn btn-light-primary font-weight-bold" data-toggle="tooltip" title="Open every FAQ together on one page">
 						<i class="la la-book"></i>Internal FAQs
 					</a>
+					<a href="<?php echo base_url('Faq_Suggestion'); ?>" class="btn btn-light-info font-weight-bold ml-2" data-toggle="tooltip" title="Review AI-suggested FAQs mined from recent WhatsApp / GHL chats">
+						<i class="la la-magic"></i>AI Suggestions
+					</a>
 					<?php if($can_edit) { ?>
 						<a href="<?php echo base_url('Faq/Download'); ?>" class="btn btn-light-success font-weight-bold ml-2" data-toggle="tooltip" title="Download every FAQ as an Excel file">
 							<i class="la la-file-excel"></i>Excel
