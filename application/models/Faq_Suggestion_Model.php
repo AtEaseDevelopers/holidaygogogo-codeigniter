@@ -17,23 +17,17 @@ class Faq_Suggestion_Model extends CI_Model
 	const CHAT_DIR = 'assets/upload/chat_history/';
 
 	/**
-	 * Suggestions for the listing, newest first. $state filters by lifecycle
-	 * ('pending' | 'accepted' | 'dismissed'); '' or 'all' returns every active
-	 * (non-deleted) row. Each row is decorated with QuestionCount and the
-	 * "||"-joined Destinations names for the view.
+	 * The suggestions belonging to one generation run (the run detail page), in
+	 * the AI's priority order (most-helpful-first = ascending SuggestionID). Each
+	 * row is decorated with QuestionCount and the "||"-joined Destinations names.
 	 */
-	function Read_Suggestions($state = 'pending')
+	function Read_Suggestions_For_Run($run_id)
 	{
 		$this->load->model('Faq_Model'); // Decode_Items() lives there
-		$this->db->select('SuggestionID, Title, Description, Reason, DestinationIds, State, AcceptedFAQID, RunKey, Model, CostUsd, InsertBy, InsertDate');
+		$this->db->select('SuggestionID, Title, Description, Reason, DestinationIds, State, AcceptedFAQID, RunID, RunKey, Model, CostUsd, InsertBy, InsertDate');
 		$this->db->from('faq_suggestions');
 		$this->db->where('Status', 'Y');
-		if (in_array($state, array('pending', 'accepted', 'dismissed'), true)) {
-			$this->db->where('State', $state);
-		}
-		// Newest run on top, but WITHIN a run keep the AI's priority order
-		// (most-helpful-first = ascending SuggestionID, the insert order).
-		$this->db->order_by('RunKey', 'DESC');
+		$this->db->where('RunID', (int) $run_id);
 		$this->db->order_by('SuggestionID', 'ASC');
 		$rows = $this->db->get()->result();
 
@@ -51,6 +45,124 @@ class Faq_Suggestion_Model extends CI_Model
 			$row->Destinations = implode('||', $names);
 		}
 		return $rows;
+	}
+
+	// ---------------------------------------------------------------------
+	// Runs — a run is one generation (from a date range of chats, or one
+	// uploaded PDF). The listing shows runs; each opens to the suggestions
+	// inside it (mirrors the Competitor Analysis history → detail flow).
+	// ---------------------------------------------------------------------
+
+	/**
+	 * All active runs for the listing, newest first. Each row is decorated with
+	 * a Scope label and a PendingCount (still-pending suggestions in that run).
+	 */
+	function Read_Runs()
+	{
+		$this->load->helper('faq_suggestion');
+		$this->db->select('RunID, Source, StartDate, EndDate, Mobile, FileName, Model, CostUsd, Proposed, Created, RunState, ErrorMessage, InsertBy, InsertDate');
+		$this->db->from('faq_suggestion_runs');
+		$this->db->where('Status', 'Y');
+		$this->db->order_by('RunID', 'DESC');
+		$runs = $this->db->get()->result();
+		if (empty($runs)) {
+			return $runs;
+		}
+
+		// One grouped query for the per-run pending counts (avoid N+1).
+		$pending = array();
+		$this->db->select('RunID, COUNT(*) AS c');
+		$this->db->from('faq_suggestions');
+		$this->db->where('Status', 'Y');
+		$this->db->where('State', 'pending');
+		$this->db->where('RunID IS NOT NULL', null, false);
+		$this->db->group_by('RunID');
+		foreach ($this->db->get()->result() as $r) {
+			$pending[(int) $r->RunID] = (int) $r->c;
+		}
+
+		foreach ($runs as $run) {
+			$run->Scope        = faq_suggestion_run_scope($run);
+			$run->PendingCount = isset($pending[(int) $run->RunID]) ? $pending[(int) $run->RunID] : 0;
+		}
+		return $runs;
+	}
+
+	/** One active run row (decorated with its Scope label), or null. */
+	function Read_Run($run_id)
+	{
+		$this->load->helper('faq_suggestion');
+		$this->db->where('RunID', (int) $run_id);
+		$this->db->where('Status', 'Y');
+		$run = $this->db->get('faq_suggestion_runs')->row();
+		if ($run !== null) {
+			$run->Scope = faq_suggestion_run_scope($run);
+		}
+		return $run;
+	}
+
+	/**
+	 * Queue a run: create the row in the 'queued' state (the background worker,
+	 * or the inline fallback, later moves it running → done/error). Returns RunID.
+	 * $data: Source, and (chats) StartDate/EndDate/Mobile or (pdf) FileName/StoredName.
+	 */
+	function Queue_Run($data)
+	{
+		return $this->Create_Run($data + array('RunState' => 'queued'));
+	}
+
+	/** Create a run row (records the attempt before the AI call); returns RunID. */
+	function Create_Run($data)
+	{
+		$admin_id = $this->session->userdata('admin_id');
+		$now      = date('Y-m-d H:i:s');
+		$row = array(
+			'Source'     => isset($data['Source']) ? (string) $data['Source'] : 'chats',
+			'StartDate'  => !empty($data['StartDate']) ? (string) $data['StartDate'] : null,
+			'EndDate'    => !empty($data['EndDate'])   ? (string) $data['EndDate']   : null,
+			'Mobile'     => isset($data['Mobile'])     && $data['Mobile']     !== '' ? (string) $data['Mobile']     : null,
+			'FileName'   => isset($data['FileName'])   && $data['FileName']   !== '' ? (string) $data['FileName']   : null,
+			'StoredName' => isset($data['StoredName']) && $data['StoredName'] !== '' ? (string) $data['StoredName'] : null,
+			'RunState'   => isset($data['RunState']) ? (string) $data['RunState'] : 'queued',
+			'Status'     => 'Y',
+			'InsertBy'   => $admin_id,
+			'InsertDate' => $now,
+			'UpdateBy'   => $admin_id,
+			'UpdateDate' => $now,
+		);
+		$this->db->insert('faq_suggestion_runs', $row);
+		return (int) $this->db->insert_id();
+	}
+
+	/** Update a run's outcome fields (counts / cost / model / state / error). */
+	function Update_Run($run_id, $data)
+	{
+		$allowed = array('Model', 'CostUsd', 'Proposed', 'Created', 'RunState', 'ErrorMessage');
+		$row = array();
+		foreach ($allowed as $k) {
+			if (array_key_exists($k, $data)) {
+				$row[$k] = $data[$k];
+			}
+		}
+		if (empty($row)) {
+			return false;
+		}
+		$row['UpdateBy']   = $this->session->userdata('admin_id');
+		$row['UpdateDate'] = date('Y-m-d H:i:s');
+		$this->db->where('RunID', (int) $run_id);
+		return $this->db->update('faq_suggestion_runs', $row);
+	}
+
+	/** Soft-delete a run and every suggestion inside it. */
+	function Delete_Run($run_id)
+	{
+		$run_id  = (int) $run_id;
+		$admin_id = $this->session->userdata('admin_id');
+		$now      = date('Y-m-d H:i:s');
+		$this->db->where('RunID', $run_id);
+		$this->db->update('faq_suggestions', array('Status' => 'N', 'UpdateBy' => $admin_id, 'UpdateDate' => $now));
+		$this->db->where('RunID', $run_id);
+		return $this->db->update('faq_suggestion_runs', array('Status' => 'N', 'UpdateBy' => $admin_id, 'UpdateDate' => $now));
 	}
 
 	/** Count of pending suggestions (for the menu / listing badge). */
@@ -80,6 +192,7 @@ class Faq_Suggestion_Model extends CI_Model
 			'DestinationIds' => isset($data['DestinationIds']) ? (string) $data['DestinationIds'] : null,
 			'State'          => isset($data['State']) ? $data['State'] : 'pending',
 			'RunKey'         => isset($data['RunKey']) ? (string) $data['RunKey'] : null,
+			'RunID'          => isset($data['RunID']) ? (int) $data['RunID'] : null,
 			'Model'          => isset($data['Model']) ? (string) $data['Model'] : null,
 			'CostUsd'        => isset($data['CostUsd']) ? $data['CostUsd'] : null,
 			'Status'         => 'Y',
@@ -139,38 +252,84 @@ class Faq_Suggestion_Model extends CI_Model
 	}
 
 	// ---------------------------------------------------------------------
-	// Generation — the routine the cron (and the manual "Generate now" button)
-	// run: gather the last $days of conversations, ask OpenAI, store new
-	// candidates. Returns a summary array.
+	// Generation — the routine the manual "Generate" button runs: gather the
+	// chosen date range of conversations (optionally for one mobile number),
+	// ask OpenAI, store new candidates. Returns a summary array.
 	// ---------------------------------------------------------------------
 
+	/** Directory the uploaded PDFs are stored in (relative to FCPATH). */
+	const UPLOAD_DIR = 'assets/upload/faq_suggestion/';
+
 	/**
-	 * Generate suggestions from the last $days of WhatsApp + GHL conversations.
-	 * Returns ['created'=>int, 'proposed'=>int, 'reason'=>string, 'model'=>string].
-	 * 'reason' is set when nothing was created ('no_messages' | 'no_suggestions').
-	 * Never throws for an empty window; re-throws AI/config errors to the caller.
+	 * Process one queued run (the background worker's body; also the inline
+	 * fallback when exec() is unavailable). Reads the run's stored inputs, moves
+	 * it running, calls the AI, stores the new candidates, and marks the run
+	 * done / error. Never throws — the outcome is recorded on the run row.
+	 * Returns ['created'=>int, 'proposed'=>int, 'reason'=>string, 'model'=>string,
+	 *          'run_id'=>int].
 	 */
-	function Generate($days = 3)
+	function Process_Run($run_id)
 	{
 		$this->load->helper('faq_suggestion');
 		$this->load->helper('chat_history');
 		$this->load->model('Faq_Model');
 
-		$cutoff = faq_suggestion_cutoff(time(), $days);
+		$run_id = (int) $run_id;
+		$run    = $this->Read_Run($run_id);
+		if ($run === null) {
+			return array('created' => 0, 'proposed' => 0, 'reason' => 'gone', 'model' => '', 'run_id' => $run_id);
+		}
+		$state = strtolower((string) $run->RunState);
+		if ($state !== 'queued' && $state !== 'running') {
+			// Already finished (e.g. a duplicate worker) — nothing to do.
+			return array('created' => (int) $run->Created, 'proposed' => (int) $run->Proposed, 'reason' => '', 'model' => (string) $run->Model, 'run_id' => $run_id);
+		}
+		$this->Update_Run($run_id, array('RunState' => 'running'));
 
-		$ghl_rows = $this->Recent_Ghl_Messages($cutoff);
-		$wa_rows  = $this->Recent_Wa_Messages($cutoff);
-
-		$dest_map   = $this->Destination_Name_Map();          // id => name
+		$dest_map   = $this->Destination_Name_Map();
 		$dest_names = array_values($dest_map);
 
-		$transcript = faq_suggestion_transcript($ghl_rows, $wa_rows, $this->max_transcript_chars());
-		if (trim($transcript) === '') {
-			return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '');
+		try {
+			if (strtolower((string) $run->Source) === 'pdf') {
+				$path = FCPATH . self::UPLOAD_DIR . basename((string) $run->StoredName);
+				$data = @file_get_contents($path);
+				if ($data === false || $data === '') {
+					throw new Exception('Could not read the uploaded file.');
+				}
+				$ext = strtolower(pathinfo((string) $run->StoredName, PATHINFO_EXTENSION));
+				$this->load->library('FaqSuggestionService');
+				$result = $this->faqsuggestionservice->suggest_file(base64_encode($data), $ext, $dest_names);
+			} else {
+				$start     = substr((string) $run->StartDate, 0, 10) . ' 00:00:00';
+				$end       = substr((string) $run->EndDate, 0, 10) . ' 23:59:59';
+				$phone_key = faq_suggestion_phone_key((string) $run->Mobile);
+				$ghl_rows  = $this->Recent_Ghl_Messages($start, $end, $phone_key);
+				$wa_rows   = $this->Recent_Wa_Messages($start, $end, $phone_key);
+				$transcript = faq_suggestion_transcript($ghl_rows, $wa_rows, $this->max_transcript_chars());
+				if (trim($transcript) === '') {
+					$this->Update_Run($run_id, array('RunState' => 'done', 'Proposed' => 0, 'Created' => 0));
+					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
+				}
+				$this->load->library('FaqSuggestionService');
+				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names);
+			}
+		} catch (Exception $e) {
+			$this->Update_Run($run_id, array('RunState' => 'error', 'ErrorMessage' => $e->getMessage()));
+			return array('created' => 0, 'proposed' => 0, 'reason' => 'error', 'model' => '', 'run_id' => $run_id, 'error' => $e->getMessage());
 		}
 
-		$this->load->library('FaqSuggestionService');
-		$result = $this->faqsuggestionservice->suggest($transcript, $dest_names);
+		return $this->store_suggestions($run_id, $result, $dest_map) + array('run_id' => $run_id);
+	}
+
+	/**
+	 * Parse the AI reply, drop titles that already exist, store the new
+	 * candidates inside $run_id, and update the run with its counts / cost /
+	 * model. Shared by the chats and PDF generators. Returns
+	 * ['created'=>int, 'proposed'=>int, 'reason'=>string, 'model'=>string].
+	 */
+	protected function store_suggestions($run_id, $result, $dest_map)
+	{
+		$this->load->model('Faq_Model');
 
 		// name => id for resolving the AI's destination names back to CategoryIDs.
 		$name_to_id = array();
@@ -203,13 +362,22 @@ class Faq_Suggestion_Model extends CI_Model
 		$cost_each = empty($rows) ? 0 : round(((float) $result['cost_usd']) / count($rows), 6);
 		$created   = 0;
 		foreach ($rows as $row) {
-			$row['State']    = 'pending';
-			$row['RunKey']   = $run_key;
-			$row['Model']    = $result['model'];
-			$row['CostUsd']  = $cost_each;
+			$row['State']   = 'pending';
+			$row['RunKey']  = $run_key;
+			$row['RunID']   = (int) $run_id;
+			$row['Model']   = $result['model'];
+			$row['CostUsd'] = $cost_each;
 			$this->Create($row);
 			$created++;
 		}
+
+		$this->Update_Run($run_id, array(
+			'Model'    => $result['model'],
+			'CostUsd'  => (float) $result['cost_usd'],
+			'Proposed' => count($parsed),
+			'Created'  => $created,
+			'RunState' => 'done',
+		));
 
 		return array(
 			'created'  => $created,
@@ -236,16 +404,24 @@ class Faq_Suggestion_Model extends CI_Model
 	}
 
 	/**
-	 * GHL messages added on/after $cutoff, oldest first, shaped
+	 * GHL messages inside [$start, $end], oldest first, shaped
 	 * [['direction'=>, 'body'=>], ...]. Bounded so a busy window can't blow up
-	 * memory before the transcript cap trims it.
+	 * memory before the transcript cap trims it. When $phone_key is a non-empty
+	 * last-9-digits key, only messages to/from that number are returned.
 	 */
-	protected function Recent_Ghl_Messages($cutoff)
+	protected function Recent_Ghl_Messages($start, $end, $phone_key = '')
 	{
 		$this->db->select('direction, body');
 		$this->db->from('ghl_messages');
-		$this->db->where('date_added >=', $cutoff);
+		$this->db->where('date_added >=', $start);
+		$this->db->where('date_added <=', $end);
 		$this->db->where("TRIM(COALESCE(body, '')) !=", '');
+		if ($phone_key !== '') {
+			$like = $this->db->escape_like_str($phone_key);
+			// from_number / to_number hold E.164 ("+60…"); match on the trailing
+			// last-9 so any country-code formatting still resolves.
+			$this->db->where("(from_number LIKE '%{$like}' ESCAPE '!' OR to_number LIKE '%{$like}' ESCAPE '!')", null, false);
+		}
 		$this->db->order_by('date_added', 'ASC');
 		$this->db->order_by('id', 'ASC');
 		// Uncapped by default; set FAQ_SUGGESTION_MAX_GHL > 0 to bound the rows read.
@@ -258,18 +434,25 @@ class Faq_Suggestion_Model extends CI_Model
 	}
 
 	/**
-	 * WhatsApp chat exports uploaded on/after $cutoff, parsed into the message
-	 * shape chat_history_parse() returns. "Recent WA chats" = files the team
-	 * added within the window (an export's own line timestamps use the device
+	 * WhatsApp chat exports uploaded inside [$start, $end], parsed into the
+	 * message shape chat_history_parse() returns. "WA chats in range" = files the
+	 * team added within the window (an export's own line timestamps use the device
 	 * locale and are ambiguous to parse, so upload time is the reliable signal).
-	 * Reads at most FAQ_SUGGESTION_MAX_WA_FILES files (default 50).
+	 * When $phone_key is a non-empty last-9-digits key, only files whose dedup_key
+	 * is that number are read. Reads at most FAQ_SUGGESTION_MAX_WA_FILES files
+	 * (default 50).
 	 */
-	protected function Recent_Wa_Messages($cutoff)
+	protected function Recent_Wa_Messages($start, $end, $phone_key = '')
 	{
 		$this->db->select('StoredName');
 		$this->db->from('chat_history_files');
 		$this->db->where('Status', 'Y');
-		$this->db->where('CreatedAt >=', $cutoff);
+		$this->db->where('CreatedAt >=', $start);
+		$this->db->where('CreatedAt <=', $end);
+		if ($phone_key !== '') {
+			// chat_history_files.dedup_key IS the last-9-digits phone key.
+			$this->db->where('dedup_key', $phone_key);
+		}
 		$this->db->order_by('FileID', 'DESC');
 		// Uncapped by default; set FAQ_SUGGESTION_MAX_WA_FILES > 0 to bound files read.
 		$cap = (int) get_env('FAQ_SUGGESTION_MAX_WA_FILES');

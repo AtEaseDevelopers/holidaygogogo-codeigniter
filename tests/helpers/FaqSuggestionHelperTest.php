@@ -150,4 +150,74 @@ assert_eq('filter_new count', 2, count($new));
 assert_eq('filter_new[0]', 'Check-in time', $new[0]['title']);
 assert_eq('filter_new[1]', 'Baggage allowance', $new[1]['title']);
 
+// ---- date_range / valid_date ----------------------------------------------
+assert_eq('valid_date passes',      '2026-09-17', faq_suggestion_valid_date('2026-09-17'));
+assert_eq('valid_date trims',       '2026-09-17', faq_suggestion_valid_date('  2026-09-17 '));
+assert_eq('valid_date rejects bad', '', faq_suggestion_valid_date('2026-02-30'));
+assert_eq('valid_date rejects fmt', '', faq_suggestion_valid_date('17/09/2026'));
+assert_eq('valid_date rejects blank', '', faq_suggestion_valid_date(''));
+
+$r = faq_suggestion_date_range('2026-09-10', '2026-09-17');
+assert_eq('range start floored', '2026-09-10 00:00:00', $r['start']);
+assert_eq('range end raised',    '2026-09-17 23:59:59', $r['end']);
+assert_eq('range no error',      '', $r['error']);
+
+$r1 = faq_suggestion_date_range('2026-09-17', '2026-09-17'); // single day
+assert_eq('single-day start', '2026-09-17 00:00:00', $r1['start']);
+assert_eq('single-day end',   '2026-09-17 23:59:59', $r1['end']);
+
+$r2 = faq_suggestion_date_range('2026-09-20', '2026-09-10'); // start after end
+assert_true('reversed range errors',  $r2['error'] !== '');
+assert_eq('reversed range no start',  '', $r2['start']);
+
+$r3 = faq_suggestion_date_range('', '2026-09-10'); // blank start
+assert_true('blank start errors', $r3['error'] !== '');
+
+// ---- phone_key -------------------------------------------------------------
+assert_eq('phone_key last9 of e164', '123456789', faq_suggestion_phone_key('+60123456789'));
+assert_eq('phone_key strips format',  '123456789', faq_suggestion_phone_key('012-345 6789'));
+assert_eq('phone_key short kept',     '12345',     faq_suggestion_phone_key('12345'));
+assert_eq('phone_key blank',          '',          faq_suggestion_phone_key('  '));
+assert_eq('phone_key no digits',      '',          faq_suggestion_phone_key('abc'));
+
+// ---- fmt_date --------------------------------------------------------------
+assert_eq('fmt_date ymd',        '17 Sep 2026', faq_suggestion_fmt_date('2026-09-17'));
+assert_eq('fmt_date datetime',   '17 Sep 2026', faq_suggestion_fmt_date('2026-09-17 08:30:00'));
+assert_eq('fmt_date blank',      '', faq_suggestion_fmt_date(''));
+assert_eq('fmt_date zero date',  '', faq_suggestion_fmt_date('0000-00-00'));
+
+// ---- run_scope -------------------------------------------------------------
+assert_eq('scope pdf uses filename', 'japan-2026.pdf',
+	faq_suggestion_run_scope(array('Source' => 'pdf', 'FileName' => 'japan-2026.pdf')));
+assert_eq('scope pdf fallback', 'Uploaded PDF',
+	faq_suggestion_run_scope(array('Source' => 'pdf', 'FileName' => '')));
+assert_eq('scope chats range', '10 Sep 2026 – 17 Sep 2026',
+	faq_suggestion_run_scope(array('Source' => 'chats', 'StartDate' => '2026-09-10', 'EndDate' => '2026-09-17')));
+assert_eq('scope chats range + mobile', '10 Sep 2026 – 17 Sep 2026 · 0123456789',
+	faq_suggestion_run_scope(array('Source' => 'chats', 'StartDate' => '2026-09-10', 'EndDate' => '2026-09-17', 'Mobile' => '0123456789')));
+assert_eq('scope chats fallback', 'Recent chats',
+	faq_suggestion_run_scope(array('Source' => 'chats')));
+$obj = (object) array('Source' => 'chats', 'StartDate' => '2026-09-17', 'EndDate' => '2026-09-17');
+assert_eq('scope accepts object', '17 Sep 2026 – 17 Sep 2026', faq_suggestion_run_scope($obj));
+
+// ---- build_file_prompt -----------------------------------------------------
+$fp = faq_suggestion_build_file_prompt(array('Japan', 'Korea'));
+assert_true('file prompt has instructions', strlen($fp['instructions']) > 0);
+assert_true('file prompt input mentions json', stripos($fp['input'], 'json') !== false);
+assert_true('file prompt lists destinations', strpos($fp['input'], 'Japan') !== false);
+
+// ---- logs_to_prune ---------------------------------------------------------
+$now = mktime(12, 0, 0, 9, 18, 2026); // 2026-09-18 12:00:00
+$files = array(
+	array('path' => 'run_1.out', 'mtime' => $now),                 // today -> keep
+	array('path' => 'run_2.out', 'mtime' => $now - 2 * 86400),     // 2 days -> keep
+	array('path' => 'run_3.out', 'mtime' => $now - 3 * 86400 - 1), // just over 3 days -> prune
+	array('path' => 'run_4.out', 'mtime' => $now - 10 * 86400),    // 10 days -> prune
+);
+assert_eq('prune keeps last 3 days', array('run_3.out', 'run_4.out'),
+	faq_suggestion_logs_to_prune($files, $now, 3));
+assert_eq('prune empty list', array(), faq_suggestion_logs_to_prune(array(), $now, 3));
+assert_eq('prune floors keep_days to 1', array('run_2.out', 'run_3.out', 'run_4.out'),
+	faq_suggestion_logs_to_prune($files, $now, 0));
+
 echo "\nAll FaqSuggestionHelper tests passed.\n";

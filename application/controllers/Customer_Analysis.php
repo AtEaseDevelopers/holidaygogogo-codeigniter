@@ -5,8 +5,9 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  * Customer_Analysis — an Owner-only (level 10) tool. For one customer (a listing
  * row identified by its dedup_key), it merges the GHL synced chat and any
  * manually-uploaded WhatsApp exports into a single chronological transcript,
- * asks OpenAI to produce a combined report (profile + sales intelligence + next
- * actions), and stores it. Reached from the Action ▸ "AI Analysis" link on the
+ * asks OpenAI to produce a structured customer character profile (personality,
+ * mood, behaviour, preferences, expectations, complaints + a hot/cold call), and
+ * stores it. Reached from the Action ▸ "AI Analysis" link on the
  * Guest List / Customer / GHL Leads listings.
  *
  *   index()   GET  ?dedup_key=&phone=&name= — page with source counts + history

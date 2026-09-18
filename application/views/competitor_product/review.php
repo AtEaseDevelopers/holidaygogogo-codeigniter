@@ -9,7 +9,7 @@
                     </h3>
                 </div>
                 <div class="card-toolbar">
-                    <a href="<?php echo base_url('Competitor_Product'); ?>" class="btn btn-secondary font-weight-bold mr-3"><i class="la la-arrow-left"></i> Back</a>
+                    <a href="<?php echo base_url('Competitor_Product'); ?>" id="back_btn" class="btn btn-secondary font-weight-bold mr-3"><i class="la la-arrow-left"></i> Back</a>
                     <button type="button" id="analyse_selected" class="btn btn-primary font-weight-bold" <?php echo empty($has_ai) ? 'disabled title="AI analysis is currently unavailable"' : ''; ?>>
                         <i class="la la-robot"></i> Analyse Selected (<span id="sel_count">0</span>)
                     </button>
@@ -120,6 +120,16 @@
         refreshSel();
         $('[data-toggle="tooltip"]').tooltip();
         resumeRun();   // re-attach to a background analysis left running before a refresh
+
+        // Back button: return to wherever the user opened Review from (Jobs list or a
+        // host's Timeline) instead of always dumping them on the fresh-crawl index.
+        // Only trust an in-app referrer; otherwise keep the index fallback href.
+        var ref = document.referrer || '';
+        if (ref.indexOf('/Competitor_Product') !== -1 && ref.indexOf('/Review') === -1) {
+            $('#back_btn').attr('href', ref).on('click', function(e) {
+                if (window.history.length > 1) { e.preventDefault(); window.history.back(); }
+            });
+        }
     });
 
     // Renumber the visible No. column + refresh the "N found" count. Called after

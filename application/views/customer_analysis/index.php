@@ -5,9 +5,8 @@
  * button, the latest report expanded, and prior reports as a collapsed history.
  * Owner-only (the controller enforces level 10).
  *
- * Renders a combined report from customer_analysis_parse_ai_response():
- *   summary (profile) · sales_intel (stage/sentiment/language/budget/destinations/
- *   dates/objections) · next_actions · key_facts.
+ * Renders a customer character profile from customer_analysis_parse_ai_response():
+ *   summary (characteristics / mood / communication style) · temperature (hot/cold).
  */
 $total_msgs  = (int) $ghl_count + (int) $upload_count;
 $can_analyse = $total_msgs > 0;
@@ -17,14 +16,28 @@ if ( ! function_exists('ca_render_analysis')) {
 function ca_render_analysis($a, $expanded = true)
 {
     $si = is_array($a->sales_intel) ? $a->sales_intel : array();
-    $chip = function ($label, $items) {
+    $profile = isset($a->profile) && is_array($a->profile) ? $a->profile : array();
+    $chip = function ($label, $items, $tone = 'primary') {
         if (empty($items)) { return ''; }
         $out = '<div class="mb-3"><div class="font-weight-bold text-dark-75 mb-2" style="font-size:12px;">' . htmlspecialchars($label) . '</div><div>';
         foreach ($items as $it) {
-            $out .= '<span class="label label-light-primary label-inline font-weight-bold mr-2 mb-2" style="font-size:12px;">' . htmlspecialchars($it) . '</span>';
+            $out .= '<span class="label label-light-' . $tone . ' label-inline font-weight-bold mr-2 mb-2" style="font-size:12px;">' . htmlspecialchars($it) . '</span>';
         }
         return $out . '</div></div>';
     };
+    // Character-profile field labels (order = display order). Text fields render as
+    // a two-column grid; list fields render as chips below.
+    $ca_text_labels = array(
+        'character'            => 'Character & Personality',
+        'mood'                 => 'Mood',
+        'behavior'             => 'Behaviour',
+        'reply_pattern'        => 'Reply Pattern',
+        'response_expectation' => 'Response Expectation',
+        'language'             => 'Language',
+        'journey'              => 'Journey',
+        'family_needs'         => 'Family & Facility Needs',
+        'source'               => 'Source',
+    );
     ?>
     <div class="card card-custom mb-5">
         <div class="card-header py-3">
@@ -62,16 +75,40 @@ function ca_render_analysis($a, $expanded = true)
                     </div>
                 <?php } ?>
 
-                <?php if ( ! empty($a->next_actions)) { ?>
+                <?php
+                // Structured character profile (details_json). Only show fields the AI filled.
+                $ca_text_rows = array();
+                foreach ($ca_text_labels as $key => $label) {
+                    $val = isset($profile[$key]) ? trim((string) $profile[$key]) : '';
+                    if ($val !== '') { $ca_text_rows[$label] = $val; }
+                }
+                if ( ! empty($ca_text_rows)) { ?>
                     <div class="separator separator-dashed my-4"></div>
-                    <div class="font-weight-bolder text-dark mb-3"><i class="la la-bullseye text-primary mr-1"></i>Recommended Next Steps (Sales)</div>
-                    <div class="mb-2">
-                        <?php foreach ($a->next_actions as $i => $step) { ?>
-                            <div class="d-flex align-items-start mb-3">
-                                <span class="label label-primary label-inline font-weight-bolder mr-3 mt-1" style="min-width:22px;"><?php echo (int) $i + 1; ?></span>
-                                <div class="text-dark-75" style="font-size:13px; line-height:1.7;"><?php echo nl2br(htmlspecialchars($step)); ?></div>
+                    <div class="row">
+                        <?php foreach ($ca_text_rows as $label => $val) { ?>
+                            <div class="col-md-6 mb-4">
+                                <div class="text-muted font-weight-bolder text-uppercase mb-1" style="font-size:11px; letter-spacing:.5px;"><?php echo htmlspecialchars($label); ?></div>
+                                <div class="text-dark-75" style="font-size:13px; line-height:1.6;"><?php echo nl2br(htmlspecialchars($val)); ?></div>
                             </div>
                         <?php } ?>
+                    </div>
+                <?php }
+
+                $has_lists = ! empty($profile['preferences']) || ! empty($profile['expectations']) || ! empty($profile['complaints']);
+                if ($has_lists) { ?>
+                    <div class="separator separator-dashed my-4"></div>
+                    <?php
+                    echo $chip('Preferences', isset($profile['preferences']) ? $profile['preferences'] : array(), 'primary');
+                    echo $chip('Expectations', isset($profile['expectations']) ? $profile['expectations'] : array(), 'info');
+                    echo $chip('Complaints', isset($profile['complaints']) ? $profile['complaints'] : array(), 'danger');
+                }
+
+                $justification = isset($profile['justification']) ? trim((string) $profile['justification']) : '';
+                if ($justification !== '') { ?>
+                    <div class="separator separator-dashed my-4"></div>
+                    <div class="text-muted" style="font-size:12px; line-height:1.6;">
+                        <span class="font-weight-bolder"><i class="la la-quote-left mr-1"></i>Justification:</span>
+                        <?php echo nl2br(htmlspecialchars($justification)); ?>
                     </div>
                 <?php } ?>
 

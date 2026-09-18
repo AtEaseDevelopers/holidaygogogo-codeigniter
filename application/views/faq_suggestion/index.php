@@ -1,4 +1,35 @@
-<?php $can_edit = isset($can_edit) ? $can_edit : ((int)$this->session->level === 10); // OWNER or FAQ EDIT ACCESS (FE) ?>
+<?php
+	$can_edit = isset($can_edit) ? $can_edit : ((int)$this->session->level === 10); // OWNER or FAQ EDIT ACCESS (FE)
+
+	// Cell renderers for a run row — shared by the initial server render and,
+	// mirrored in JS below, by the live poll that updates a run in place.
+	if (!function_exists('faq_sugg_status_cell')) {
+		function faq_sugg_status_cell($r) {
+			$state = strtolower((string)$r->RunState);
+			if ($state === 'queued')  { return '<span class="label label-inline label-pill label-light-warning font-weight-bold"><i class="la la-clock-o"></i> Queued…</span>'; }
+			if ($state === 'running') { return '<span class="label label-inline label-pill label-light-info font-weight-bold"><i class="la la-spinner la-spin"></i> Running…</span>'; }
+			if ($state === 'error')   { return '<span class="label label-inline label-pill label-light-danger font-weight-bold" data-toggle="tooltip" title="' . htmlspecialchars((string)$r->ErrorMessage) . '">Error</span>'; }
+			return '<span class="label label-inline label-pill label-light-success font-weight-bold">Done</span>';
+		}
+	}
+	if (!function_exists('faq_sugg_count_cell')) {
+		function faq_sugg_count_cell($r) {
+			$state = strtolower((string)$r->RunState);
+			if ($state === 'queued' || $state === 'running') { return '<span class="text-muted">—</span>'; }
+			$html = '<span class="label label-inline label-pill label-light-dark font-weight-bold" data-toggle="tooltip" title="' . (int)$r->Created . ' stored of ' . (int)$r->Proposed . ' proposed">' . (int)$r->Created . '</span>';
+			if ((int)$r->PendingCount > 0) {
+				$html .= ' <span class="label label-inline label-pill label-light-warning font-weight-bold" data-toggle="tooltip" title="Still pending review">' . (int)$r->PendingCount . ' pending</span>';
+			}
+			return $html;
+		}
+	}
+	if (!function_exists('faq_sugg_cost_cell')) {
+		function faq_sugg_cost_cell($r) {
+			if ($r->CostUsd === null || $r->CostUsd === '') { return '<span class="text-muted">-</span>'; }
+			return '<span data-toggle="tooltip" title="Total AI cost for this run">$' . number_format((float)$r->CostUsd, 4) . '</span>';
+		}
+	}
+?>
 
 <style>
 	#kt_datatable .label.label-inline {
@@ -10,7 +41,6 @@
 		padding-bottom: 4px;
 		text-align: center;
 	}
-	.faq-sugg-tabs .btn { margin-right: 6px; }
 </style>
 
 <div class="d-flex flex-column-fluid">
@@ -41,101 +71,60 @@
 						<i class="la la-arrow-left"></i>Back
 					</a>
 					<?php if($can_edit) { ?>
-						<a href="<?php echo base_url('Faq_Suggestion/Generate'); ?>" id="faq_sugg_generate" class="btn btn-primary font-weight-bold ml-2" data-toggle="tooltip" title="Analyse the last few days of WhatsApp / GHL chats now and propose new FAQs">
-							<i class="la la-magic"></i>Generate Now
-						</a>
+						<button type="button" class="btn btn-primary font-weight-bold ml-2" data-toggle="modal" data-target="#faq_sugg_generate_modal" title="Choose a date range (and optionally a mobile number) to analyse WhatsApp / GHL chats and propose new FAQs">
+							<i class="la la-magic"></i>Generate
+						</button>
+						<button type="button" class="btn btn-info font-weight-bold ml-2" data-toggle="modal" data-target="#faq_sugg_pdf_modal" title="Upload a PDF brochure / itinerary and propose FAQs from it">
+							<i class="la la-file-pdf"></i>From PDF
+						</button>
 					<?php } ?>
 				</div>
 			</div>
 			<div class="card-body">
 				<p class="text-muted" style="margin-top:-6px;">
-					These candidate FAQs are mined automatically every 3 days from the last few days of WhatsApp &amp; GHL conversations. Review, edit, then accept a suggestion to add it to the FAQ library.
+					Each row is a generation run. <strong>Generate</strong> mines chats over a date range you choose (optionally for one mobile number); <strong>From PDF</strong> mines an uploaded document. Open a run to review, edit, and accept the FAQs it produced.
 				</p>
 
-				<?php
-					$tabs = array('pending' => 'Pending', 'accepted' => 'Accepted', 'all' => 'All');
-				?>
-				<div class="faq-sugg-tabs mb-4">
-					<?php foreach($tabs as $key => $label) { ?>
-						<a href="<?php echo base_url('Faq_Suggestion?state=') . $key; ?>" class="btn btn-sm font-weight-bold <?php echo ($state === $key) ? 'btn-primary' : 'btn-light'; ?>"><?php echo $label; ?></a>
-					<?php } ?>
-				</div>
-
-				<div class="dataTables_wrapper dt-bootstrap4 no-footer" <?php if(empty($suggestions)) { echo 'style="overflow-x:auto;"'; } ?>>
+				<div class="dataTables_wrapper dt-bootstrap4 no-footer" <?php if(empty($runs)) { echo 'style="overflow-x:auto;"'; } ?>>
 					<table id="kt_datatable" class="table table-bordered table-head-custom table-checkable dataTable no-footer dtr-inline">
 						<thead>
 							<tr>
 								<th style="text-align:center;">No.</th>
-								<th style="text-align:center;">Title</th>
-								<th style="text-align:center;">Questions</th>
-								<th style="text-align:center;">Destination</th>
-								<th style="text-align:center;">Status</th>
+								<th style="text-align:center;">Source</th>
+								<th style="text-align:center;">Scope</th>
+								<th style="text-align:center;">Suggestions</th>
 								<th style="text-align:center;">AI Cost</th>
-								<th style="text-align:center;">Suggested</th>
+								<th style="text-align:center;">Status</th>
+								<th style="text-align:center;">Date</th>
 								<th class="action" style="text-align:center;">Action</th>
 							</tr>
 						</thead>
 						<tbody>
-							<?php if(empty($suggestions)) { ?>
-								<tr><td colspan="8" style="text-align:center; padding-top:10px; padding-bottom:10px;">No FAQ Suggestions Found</td></tr>
-							<?php } else { $count = 1; foreach($suggestions as $s) { ?>
-								<tr>
+							<?php if(empty($runs)) { ?>
+								<tr><td colspan="8" style="text-align:center; padding-top:10px; padding-bottom:10px;">No generation runs yet. Click <strong>Generate</strong> or <strong>From PDF</strong> to create one.</td></tr>
+							<?php } else { $count = 1; foreach($runs as $r) {
+								$is_pdf = (strtolower((string)$r->Source) === 'pdf');
+								$view_url = base_url('Faq_Suggestion/View?id=') . (int)$r->RunID;
+							?>
+								<tr data-run-id="<?php echo (int)$r->RunID; ?>">
 									<td style="text-align:center; padding-top:15px; padding-bottom:15px;"><?php echo $count; ?></td>
+									<td style="text-align:center;">
+										<span class="label label-inline label-pill <?php echo $is_pdf ? 'label-light-info' : 'label-light-primary'; ?> font-weight-bold"><?php echo $is_pdf ? 'PDF' : 'Chats'; ?></span>
+									</td>
 									<td style="text-align:left;">
-										<strong><?php echo htmlspecialchars($s->Title); ?></strong>
-										<?php if(!empty($s->Reason)) { ?>
-											<div class="text-muted mt-1" style="font-size:12px;"><i class="la la-info-circle"></i> <?php echo htmlspecialchars($s->Reason); ?></div>
-										<?php } ?>
+										<a href="<?php echo $view_url; ?>"><strong><?php echo htmlspecialchars($r->Scope); ?></strong></a>
 									</td>
-									<td style="text-align:center;"><span class="label label-inline label-pill label-light-dark font-weight-bold"><?php echo (int)$s->QuestionCount; ?></span></td>
-									<td style="text-align:center;">
-										<?php
-											$destination_names = ($s->Destinations === null || $s->Destinations === '') ? array() : explode('||', $s->Destinations);
-											if(empty($destination_names)) {
-												echo '<span class="text-muted">-</span>';
-											} else {
-												foreach($destination_names as $destination_name) {
-													echo '<span class="label label-inline label-pill label-light-primary font-weight-bold mr-1 mb-1">' . htmlspecialchars($destination_name) . '</span>';
-												}
-											}
-										?>
-									</td>
-									<td style="text-align:center;">
-										<?php
-											if($s->State === 'accepted') {
-												echo '<span class="label label-inline label-pill label-light-success font-weight-bold">Accepted</span>';
-											} elseif($s->State === 'dismissed') {
-												echo '<span class="label label-inline label-pill label-light-danger font-weight-bold">Dismissed</span>';
-											} else {
-												echo '<span class="label label-inline label-pill label-light-warning font-weight-bold">Pending</span>';
-											}
-										?>
-									</td>
-									<td style="text-align:center;">
-									<?php if($s->CostUsd === null || $s->CostUsd === '') { ?>
-										<span class="text-muted">-</span>
-									<?php } else { ?>
-										<span data-toggle="tooltip" title="This suggestion's share of the AI cost for its generation run">$<?php echo number_format((float)$s->CostUsd, 4); ?></span>
-									<?php } ?>
-								</td>
-								<td style="text-align:center;"><?php echo htmlspecialchars($s->InsertDate ? date('j M Y', strtotime($s->InsertDate)) : '-'); ?></td>
+									<td style="text-align:center;" class="faq-run-count"><?php echo faq_sugg_count_cell($r); ?></td>
+									<td style="text-align:center;" class="faq-run-cost"><?php echo faq_sugg_cost_cell($r); ?></td>
+									<td style="text-align:center;" class="faq-run-status"><?php echo faq_sugg_status_cell($r); ?></td>
+									<td style="text-align:center;"><?php echo htmlspecialchars($r->InsertDate ? date('j M Y', strtotime($r->InsertDate)) : '-'); ?></td>
 									<td style="text-align:center;">
 										<div class="btn-group">
-											<?php if($can_edit && $s->State === 'pending') { ?>
-												<a href="<?php echo base_url('Faq_Suggestion/Update?id=') . (int)$s->SuggestionID; ?>" class="btn btn-icon btn-light-warning btn-sm" data-toggle="tooltip" title="Edit suggestion before accepting">
-													<i class="la la-edit"></i>
-												</a>
-												<a href="<?php echo base_url('Faq_Suggestion/Accept?id=') . (int)$s->SuggestionID; ?>" onclick="return confirm('Create a real FAQ from this suggestion?');" class="btn btn-icon btn-light-success btn-sm ml-1" data-toggle="tooltip" title="Accept — create a FAQ from this suggestion">
-													<i class="la la-check"></i>
-												</a>
-											<?php } ?>
-											<?php if($s->State === 'accepted' && !empty($s->AcceptedFAQID)) { ?>
-												<a href="<?php echo base_url('Faq/Update?faq_id=') . (int)$s->AcceptedFAQID; ?>" class="btn btn-icon btn-light-primary btn-sm ml-1" data-toggle="tooltip" title="Open the FAQ created from this suggestion">
-													<i class="la la-external-link-alt"></i>
-												</a>
-											<?php } ?>
+											<a href="<?php echo $view_url; ?>" class="btn btn-icon btn-light-primary btn-sm" data-toggle="tooltip" title="Open run — review the FAQs it produced">
+												<i class="la la-eye"></i>
+											</a>
 											<?php if($can_edit) { ?>
-												<button onclick="Delete_Record('<?php echo base_url('assets/image/sweetalert.jpg'); ?>', '<?php echo 'Suggestion : ' . str_replace('\'', '', $s->Title); ?>', '<?php echo base_url('Faq_Suggestion/Delete'); ?>', 'id', <?php echo (int)$s->SuggestionID; ?>, 'Y', '<?php echo base_url('Faq_Suggestion?state=') . $state; ?>')" class="btn btn-icon btn-light-danger btn-sm ml-1" data-toggle="tooltip" title="Delete suggestion">
+												<button onclick="Delete_Record('<?php echo base_url('assets/image/sweetalert.jpg'); ?>', '<?php echo 'Run : ' . str_replace('\'', '', $r->Scope); ?>', '<?php echo base_url('Faq_Suggestion/Delete_Run'); ?>', 'id', <?php echo (int)$r->RunID; ?>, 'Y', '<?php echo base_url('Faq_Suggestion'); ?>')" class="btn btn-icon btn-light-danger btn-sm ml-1" data-toggle="tooltip" title="Delete this run and its suggestions">
 													<i class="la la-trash"></i>
 												</button>
 											<?php } ?>
@@ -152,16 +141,134 @@
 	</div>
 </div>
 
+<?php if($can_edit) {
+	$today      = date('Y-m-d');
+	$week_start = date('Y-m-d', strtotime('-7 days'));
+?>
+<!-- Generate from chats -->
+<div class="modal fade" id="faq_sugg_generate_modal" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-dialog-centered" role="document">
+		<form method="post" action="<?php echo base_url('Faq_Suggestion/Generate'); ?>" id="faq_sugg_generate_form">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title"><i class="la la-magic"></i> Generate from Chats</h5>
+					<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+				</div>
+				<div class="modal-body">
+					<p class="text-muted">Analyse WhatsApp &amp; GHL chats within a date range and propose new FAQs. Leave the mobile number blank to include everyone.</p>
+					<div class="form-group">
+						<label>Date range <span class="text-danger">*</span></label>
+						<div class="row">
+							<div class="col-6">
+								<input type="date" name="start_date" class="form-control" value="<?php echo $week_start; ?>" max="<?php echo $today; ?>" required>
+								<small class="text-muted">From</small>
+							</div>
+							<div class="col-6">
+								<input type="date" name="end_date" class="form-control" value="<?php echo $today; ?>" max="<?php echo $today; ?>" required>
+								<small class="text-muted">To</small>
+							</div>
+						</div>
+					</div>
+					<div class="form-group mb-0">
+						<label>Mobile number <span class="text-muted">(optional)</span></label>
+						<input type="text" name="mobile" class="form-control" placeholder="e.g. 0123456789 — leave blank for all customers">
+						<small class="text-muted">Scope the analysis to one customer's conversation.</small>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-light font-weight-bold" data-dismiss="modal">Cancel</button>
+					<button type="submit" class="btn btn-primary font-weight-bold" id="faq_sugg_generate_submit">
+						<i class="la la-magic"></i>Generate
+					</button>
+				</div>
+			</div>
+		</form>
+	</div>
+</div>
+
+<!-- Generate from PDF -->
+<div class="modal fade" id="faq_sugg_pdf_modal" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-dialog-centered" role="document">
+		<form method="post" action="<?php echo base_url('Faq_Suggestion/Generate_Pdf'); ?>" id="faq_sugg_pdf_form" enctype="multipart/form-data">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title"><i class="la la-file-pdf"></i> Generate from PDF</h5>
+					<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+				</div>
+				<div class="modal-body">
+					<p class="text-muted">Upload a tour brochure, itinerary, or price sheet (PDF, up to 20 MB). The AI reads it and proposes FAQs a customer would ask about.</p>
+					<div class="form-group mb-0">
+						<label>PDF file <span class="text-danger">*</span></label>
+						<input type="file" name="file" class="form-control-file" accept="application/pdf,.pdf" required>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-light font-weight-bold" data-dismiss="modal">Cancel</button>
+					<button type="submit" class="btn btn-info font-weight-bold" id="faq_sugg_pdf_submit">
+						<i class="la la-file-pdf"></i>Generate
+					</button>
+				</div>
+			</div>
+		</form>
+	</div>
+</div>
+<?php } ?>
+
 <script>
 	$('[data-toggle="tooltip"]').tooltip();
 
-	// The manual "Generate Now" runs a synchronous OpenAI call that can take a
-	// while — confirm once, then show a spinner so the user doesn't double-click.
-	$('#faq_sugg_generate').on('click', function(e) {
-		if(!window.confirm('Analyse the last few days of chats and propose new FAQs now? This can take up to a minute.')) {
-			e.preventDefault();
-			return false;
-		}
-		$(this).addClass('disabled').html('<i class="la la-spinner la-spin"></i>Generating...');
+	// Submitting queues a background run and redirects; disable the button so the
+	// user doesn't double-submit while the redirect happens.
+	$('#faq_sugg_generate_form').on('submit', function() {
+		$('#faq_sugg_generate_submit').prop('disabled', true).html('<i class="la la-spinner la-spin"></i>Starting...');
 	});
+	$('#faq_sugg_pdf_form').on('submit', function() {
+		$('#faq_sugg_pdf_submit').prop('disabled', true).html('<i class="la la-spinner la-spin"></i>Starting...');
+	});
+
+	// --- Live status poll: update queued/running runs in place until all done ---
+	var faqRunsTimer = null;
+
+	function faqEsc(s) { return $('<div>').text(s == null ? '' : String(s)).html(); }
+
+	function faqStatusHtml(r) {
+		if (r.RunState === 'queued')  { return '<span class="label label-inline label-pill label-light-warning font-weight-bold"><i class="la la-clock-o"></i> Queued…</span>'; }
+		if (r.RunState === 'running') { return '<span class="label label-inline label-pill label-light-info font-weight-bold"><i class="la la-spinner la-spin"></i> Running…</span>'; }
+		if (r.RunState === 'error')   { return '<span class="label label-inline label-pill label-light-danger font-weight-bold" data-toggle="tooltip" title="' + faqEsc(r.ErrorMessage) + '">Error</span>'; }
+		return '<span class="label label-inline label-pill label-light-success font-weight-bold">Done</span>';
+	}
+	function faqCountHtml(r) {
+		if (r.RunState === 'queued' || r.RunState === 'running') { return '<span class="text-muted">—</span>'; }
+		var html = '<span class="label label-inline label-pill label-light-dark font-weight-bold" data-toggle="tooltip" title="' + r.Created + ' stored of ' + r.Proposed + ' proposed">' + r.Created + '</span>';
+		if (r.PendingCount > 0) { html += ' <span class="label label-inline label-pill label-light-warning font-weight-bold" data-toggle="tooltip" title="Still pending review">' + r.PendingCount + ' pending</span>'; }
+		return html;
+	}
+	function faqCostHtml(r) {
+		if (r.CostUsd === null || r.CostUsd === '') { return '<span class="text-muted">-</span>'; }
+		return '<span data-toggle="tooltip" title="Total AI cost for this run">$' + Number(r.CostUsd).toFixed(4) + '</span>';
+	}
+
+	function faqRenderRuns(data) {
+		(data.runs || []).forEach(function(r) {
+			var $tr = $('tr[data-run-id="' + r.RunID + '"]');
+			if (!$tr.length) return;
+			$tr.find('.faq-run-status').html(faqStatusHtml(r));
+			$tr.find('.faq-run-count').html(faqCountHtml(r));
+			$tr.find('.faq-run-cost').html(faqCostHtml(r));
+		});
+		$('[data-toggle="tooltip"]').tooltip();
+
+		if (data.running) {
+			if (!faqRunsTimer) { faqRunsTimer = setInterval(faqPollRuns, 3000); }
+		} else if (faqRunsTimer) {
+			clearInterval(faqRunsTimer); faqRunsTimer = null;
+		}
+	}
+
+	function faqPollRuns() {
+		$.getJSON('<?php echo base_url('Faq_Suggestion/Runs_Status'); ?>').done(faqRenderRuns);
+	}
+
+	// Poll once on load; it self-schedules a 3s loop while anything is queued/running.
+	$(document).ready(faqPollRuns);
 </script>

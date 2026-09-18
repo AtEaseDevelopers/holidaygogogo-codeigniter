@@ -65,7 +65,37 @@ class FaqSuggestionService
 		}
 		$spec = faq_suggestion_build_prompt($transcript, $destination_names);
 		$raw  = $this->request($spec['instructions'], $spec['input']);
+		return $this->pack_result($raw);
+	}
 
+	/**
+	 * Mine an uploaded document into candidate FAQs. $base64 is the raw file
+	 * contents base64-encoded; $ext its extension ('pdf', 'png', …). The file is
+	 * sent to the Responses API as an input_file / input_image part (reusing the
+	 * Competitor feature's pure part-builder). Returns the raw JSON reply +
+	 * usage/cost. Throws on an unsupported type or any API failure.
+	 */
+	public function suggest_file($base64, $ext, $destination_names = array())
+	{
+		$part = competitor_file_input_part($ext, (string) $base64);
+		if ($part === null) {
+			throw new Exception('Unsupported file type. Upload a PDF or image.');
+		}
+		$spec  = faq_suggestion_build_file_prompt($destination_names);
+		$input = array(array(
+			'role'    => 'user',
+			'content' => array(
+				array('type' => 'input_text', 'text' => $spec['input']),
+				$part,
+			),
+		));
+		$raw = $this->request($spec['instructions'], $input);
+		return $this->pack_result($raw);
+	}
+
+	/** Wrap a raw JSON reply with the model + token usage / cost of the last call. */
+	protected function pack_result($raw)
+	{
 		$usage = $this->last_usage;
 		return array(
 			'raw'           => $raw,

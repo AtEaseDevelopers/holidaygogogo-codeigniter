@@ -15,7 +15,7 @@
 						</h3>
 					</div>
 					<div class="card-toolbar">
-						<a href="<?php echo base_url('Faq_Suggestion'); ?>" class="btn btn-light font-weight-bold" style="margin-right:6px;">
+						<a href="<?php echo isset($run_url) ? $run_url : base_url('Faq_Suggestion'); ?>" class="btn btn-light font-weight-bold" style="margin-right:6px;">
 							<i class="la la-arrow-left"></i>Back
 						</a>
 						<button type="submit" class="btn btn-primary font-weight-bold" style="margin-right:6px;" data-toggle="tooltip" title="Save your edits to this suggestion">

@@ -80,15 +80,25 @@ check_true('request carries customer name', strpos($req['input'], 'Ali Bin Abu')
 check_true('request carries transcript', strpos($req['input'], 'Customer: hi') !== false);
 check_true('request instructions ask for strict JSON', stripos($req['instructions'], 'STRICT JSON') !== false);
 check_true('request instructions do NOT ask for sales_intel (disabled)', strpos($req['instructions'], 'sales_intel') === false);
-check_true('request instructions ask for next_actions (sales next steps)', strpos($req['instructions'], 'next_actions') !== false);
+check_true('request instructions do NOT ask for next_actions (dropped)', strpos($req['instructions'], 'next_actions') === false);
 check_true('request instructions do NOT ask for key_facts (dropped)', strpos($req['instructions'], 'key_facts') === false);
+check_true('request instructions ask for customer characteristics/mood profile', stripos($req['instructions'], 'characteristic') !== false && stripos($req['instructions'], 'mood') !== false);
+// The structured character-profile fields are all present in the shape.
+foreach (array_keys(customer_analysis_profile_text_fields()) as $__f) {
+    check_true("request instructions ask for profile field '$__f'", strpos($req['instructions'], '"' . $__f . '"') !== false);
+}
+foreach (array_keys(customer_analysis_profile_list_fields()) as $__f) {
+    check_true("request instructions ask for list field '$__f'", strpos($req['instructions'], '"' . $__f . '"') !== false);
+}
 check_true('request instructions ask for hot/cold temperature', strpos($req['instructions'], 'temperature') !== false && stripos($req['instructions'], 'hot') !== false && stripos($req['instructions'], 'cold') !== false);
 
-// The incremental-update request also asks for the sales next steps.
-$reqUpd = customer_analysis_build_update_request('Ali', array('summary' => 'old', 'next_actions' => array('x')), "Customer: still keen");
+// The incremental-update request refreshes the character profile (no next steps),
+// and carries the prior profile fields so the model can keep what still holds.
+$reqUpd = customer_analysis_build_update_request('Ali', array('summary' => 'old', 'profile' => array('character' => 'cautious buyer')), "Customer: still keen");
 check_true('update request carries prior summary', strpos($reqUpd['input'], 'old') !== false);
+check_true('update request carries prior profile field', strpos($reqUpd['input'], 'cautious buyer') !== false);
 check_true('update request carries new transcript', strpos($reqUpd['input'], 'still keen') !== false);
-check_true('update request asks for next_actions', strpos($reqUpd['instructions'], 'next_actions') !== false);
+check_true('update request does NOT ask for next_actions (dropped)', strpos($reqUpd['instructions'], 'next_actions') === false);
 check_true('update request does NOT ask for key_facts (dropped)', strpos($reqUpd['instructions'], 'key_facts') === false);
 
 // ---- customer_analysis_normalize_temperature --------------------------------
@@ -102,18 +112,20 @@ check_true('request falls back to (unknown) name', strpos($reqNoName['input'], '
 // ---- customer_analysis_parse_ai_response ------------------------------------
 $json = '```json
 {
-  "summary": "Family of 4 keen on Japan in Dec.",
-  "sales_intel": {
-    "stage": "Quoted",
-    "sentiment": "Positive",
-    "language": "English",
-    "budget_signals": ["Asked if RM4999 is per pax"],
-    "interested_destinations": ["Japan", "Osaka"],
-    "interested_dates": ["December 2026"],
-    "objections": ["Worried about kids activities"]
-  },
-  "next_actions": ["Send Osaka itinerary PDF", "Confirm pax count"],
-  "key_facts": ["2 adults 2 kids", "Kids aged 6 and 9"]
+  "summary": "Cautious family planner keen on a Japan trip.",
+  "character": "Detail-oriented and price-sensitive",
+  "mood": "Warm but hesitant; anxious about kids",
+  "behavior": "Asks many questions before deciding",
+  "language": "English",
+  "reply_pattern": "Replies late at night, sometimes goes quiet",
+  "response_expectation": "Expects prompt answers on pricing",
+  "journey": "Asked about Redang then switched to Japan",
+  "family_needs": "2 adults 2 young kids — needs an extra room",
+  "source": "Facebook ad",
+  "justification": "Repeatedly asked about per-pax price and kid facilities",
+  "preferences": ["Sea view room", "Direct flights"],
+  "expectations": ["Clear itinerary", "Fast quote"],
+  "complaints": ["Felt earlier reply was slow"]
 }
 ```';
 $json = str_replace('"summary":', '"temperature": "Hot", "temperature_reason": "Asked to confirm dates and pax", "summary":', $json);
@@ -121,18 +133,20 @@ $rec = customer_analysis_parse_ai_response($json);
 check_true('parse recovers object from json fence', is_array($rec));
 check('parse temperature (Hot -> hot)', 'hot', $rec['temperature']);
 check('parse temperature_reason', 'Asked to confirm dates and pax', $rec['temperature_reason']);
-check('parse summary', 'Family of 4 keen on Japan in Dec.', $rec['summary']);
-check('parse stage', 'Quoted', $rec['sales_intel']['stage']);
-check('parse destinations list', array('Japan', 'Osaka'), $rec['sales_intel']['interested_destinations']);
-check('parse next_actions list', array('Send Osaka itinerary PDF', 'Confirm pax count'), $rec['next_actions']);
-check('parse key_facts list', array('2 adults 2 kids', 'Kids aged 6 and 9'), $rec['key_facts']);
+check('parse summary', 'Cautious family planner keen on a Japan trip.', $rec['summary']);
+check('parse profile.character', 'Detail-oriented and price-sensitive', $rec['profile']['character']);
+check('parse profile.mood', 'Warm but hesitant; anxious about kids', $rec['profile']['mood']);
+check('parse profile.journey', 'Asked about Redang then switched to Japan', $rec['profile']['journey']);
+check('parse profile.family_needs', '2 adults 2 young kids — needs an extra room', $rec['profile']['family_needs']);
+check('parse profile.preferences list', array('Sea view room', 'Direct flights'), $rec['profile']['preferences']);
+check('parse profile.complaints list', array('Felt earlier reply was slow'), $rec['profile']['complaints']);
 
-// Missing fields default cleanly; a string list is split; nested array coerced.
-$partial = customer_analysis_parse_ai_response('{"summary":"Just a lead","sales_intel":{"budget_signals":"tight budget; under RM2000"}}');
+// Missing fields default cleanly; a string list is split into an array.
+$partial = customer_analysis_parse_ai_response('{"summary":"Just a lead","preferences":"sea view; halal food"}');
 check('parse defaults missing temperature to empty', '', $partial['temperature']);
-check('parse defaults missing stage to empty', '', $partial['sales_intel']['stage']);
-check('parse defaults missing next_actions to empty list', array(), $partial['next_actions']);
-check('parse splits a string list on ;', array('tight budget', 'under RM2000'), $partial['sales_intel']['budget_signals']);
+check('parse defaults missing profile.character to empty', '', $partial['profile']['character']);
+check('parse defaults missing profile.complaints to empty list', array(), $partial['profile']['complaints']);
+check('parse splits a string list on ;', array('sea view', 'halal food'), $partial['profile']['preferences']);
 
 // Stray prose around the object is tolerated.
 $withProse = customer_analysis_parse_ai_response('Here is the analysis: {"summary":"ok"} hope it helps');

@@ -24,6 +24,8 @@ class Customer_Analysis_Model extends CI_Model
 		$sales_intel  = isset($data['sales_intel']) && is_array($data['sales_intel']) ? $data['sales_intel'] : array();
 		$next_actions = isset($data['next_actions']) && is_array($data['next_actions']) ? $data['next_actions'] : array();
 		$key_facts    = isset($data['key_facts']) && is_array($data['key_facts']) ? $data['key_facts'] : array();
+		// The structured character profile lives in details_json.
+		$profile      = isset($data['profile']) && is_array($data['profile']) ? $data['profile'] : array();
 
 		$row = array(
 			'dedup_key'     => (string) (isset($data['dedup_key']) ? $data['dedup_key'] : ''),
@@ -40,7 +42,7 @@ class Customer_Analysis_Model extends CI_Model
 			'sales_intel'   => json_encode($sales_intel, JSON_UNESCAPED_UNICODE),
 			'next_actions'  => json_encode($next_actions, JSON_UNESCAPED_UNICODE),
 			'key_facts'     => json_encode($key_facts, JSON_UNESCAPED_UNICODE),
-			'details_json'  => isset($data['details_json']) ? $data['details_json'] : null,
+			'details_json'  => $profile ? json_encode($profile, JSON_UNESCAPED_UNICODE) : (isset($data['details_json']) ? $data['details_json'] : null),
 			'raw_json'      => isset($data['raw_json']) ? $data['raw_json'] : null,
 			'model'         => isset($data['model']) ? $data['model'] : null,
 			'input_tokens'  => isset($data['input_tokens']) ? (int) $data['input_tokens'] : 0,
@@ -149,6 +151,11 @@ class Customer_Analysis_Model extends CI_Model
 	/** Decode the stored JSON columns back onto the row object in place. */
 	private function decode_row($row)
 	{
+		// Structured character profile (details_json) — normalised to a stable shape.
+		$this->load->helper('customer_analysis');
+		$prof = json_decode((string) $row->details_json, true);
+		$row->profile = customer_analysis_normalize_profile(is_array($prof) ? $prof : array());
+
 		$si = json_decode((string) $row->sales_intel, true);
 		if ( ! is_array($si)) {
 			$si = array();

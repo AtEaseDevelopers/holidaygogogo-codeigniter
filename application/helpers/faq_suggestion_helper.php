@@ -30,6 +30,66 @@ if (!function_exists('faq_suggestion_cutoff')) {
 	}
 }
 
+if (!function_exists('faq_suggestion_date_range')) {
+	/**
+	 * Validate + normalise the user-chosen date range (two 'Y-m-d' strings from
+	 * the "Generate" form) into the inclusive datetime bounds the generation
+	 * queries use: the start floored to 00:00:00 and the end raised to 23:59:59
+	 * (so a single-day range still covers the whole day).
+	 *
+	 * Returns ['start'=>string, 'end'=>string, 'error'=>string]; on any problem
+	 * 'error' carries a human message and start/end are ''. Pure.
+	 */
+	function faq_suggestion_date_range($start, $end)
+	{
+		$s = faq_suggestion_valid_date($start);
+		$e = faq_suggestion_valid_date($end);
+		if ($s === '' || $e === '') {
+			return array('start' => '', 'end' => '', 'error' => 'Please choose a valid start and end date.');
+		}
+		if ($s > $e) {
+			return array('start' => '', 'end' => '', 'error' => 'The start date must be on or before the end date.');
+		}
+		return array('start' => $s . ' 00:00:00', 'end' => $e . ' 23:59:59', 'error' => '');
+	}
+}
+
+if (!function_exists('faq_suggestion_valid_date')) {
+	/**
+	 * Return the 'Y-m-d' string when $raw is a real calendar date in that format,
+	 * or '' otherwise (rejects '2026-02-30', bad formats, blanks). Pure.
+	 */
+	function faq_suggestion_valid_date($raw)
+	{
+		$raw = trim((string) $raw);
+		if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $raw, $m)) {
+			return '';
+		}
+		if (!checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+			return '';
+		}
+		return $raw;
+	}
+}
+
+if (!function_exists('faq_suggestion_phone_key')) {
+	/**
+	 * The last-9-digits key used to match a typed mobile number against stored
+	 * conversations — the same normalisation guest_contact_normalize_key() uses
+	 * for the chat_history_files.dedup_key and enough of the tail to match a GHL
+	 * from_number / to_number regardless of country-code formatting. Returns ''
+	 * when there are no digits (no mobile filter). Pure.
+	 */
+	function faq_suggestion_phone_key($raw)
+	{
+		$digits = preg_replace('/\D+/', '', (string) $raw);
+		if ($digits === '' || $digits === null) {
+			return '';
+		}
+		return strlen($digits) <= 9 ? $digits : substr($digits, -9);
+	}
+}
+
 if (!function_exists('faq_suggestion_norm_msg')) {
 	/**
 	 * Normalise a message body for duplicate detection: lowercase, every run of
@@ -239,6 +299,135 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"Conversations:\n" . (string) $transcript;
 
 		return array('instructions' => $instructions, 'input' => $input);
+	}
+}
+
+if (!function_exists('faq_suggestion_build_file_prompt')) {
+	/**
+	 * Build the OpenAI Responses API instructions + user prelude text for mining
+	 * FAQs from an UPLOADED DOCUMENT (a PDF brochure / itinerary / price sheet or
+	 * a screenshot). The caller appends the file itself as an input_file /
+	 * input_image content part. Same JSON contract as
+	 * faq_suggestion_build_prompt() so faq_suggestion_parse_response() handles
+	 * both — the literal word "json" appears so Responses json_object mode is
+	 * satisfied. $destination_names is the allowed destination vocabulary.
+	 */
+	function faq_suggestion_build_file_prompt($destination_names = array())
+	{
+		$dest = array();
+		foreach ((array) $destination_names as $n) {
+			$n = trim((string) $n);
+			if ($n !== '') {
+				$dest[] = $n;
+			}
+		}
+		$dest_line = empty($dest) ? '(none configured)' : implode(', ', $dest);
+
+		$instructions =
+			"You are a customer-support knowledge analyst for a Malaysian tour agency. " .
+			"You read an uploaded document (a tour brochure, itinerary, price sheet, or a screenshot of one) " .
+			"and distil the information a customer would ask about into reusable internal FAQ entries. " .
+			"PRIORITISE from the customer's point of view: surface the questions that help the MOST customers — " .
+			"the ones that most affect a booking decision " .
+			"(e.g. pricing & deposits, payment, booking / cancellation / refund process, what's included, " .
+			"visa & documents, flights & logistics, itinerary specifics). " .
+			"Write a clear, generic answer grounded in the document's contents. " .
+			"For EACH FAQ also give a short 'reason' (one sentence) explaining why it is valuable to customers. " .
+			"ORDER the suggestions from most to least helpful — highest customer impact FIRST. " .
+			"Never invent facts not supported by the document, and never include a specific customer's private data. " .
+			"Prefer 5 to 12 high-value FAQs. Answer ONLY with a JSON object.";
+
+		$input =
+			"Return json with this exact shape, with the most helpful FAQ first:\n" .
+			"{\"suggestions\":[{" .
+			"\"title\":\"short FAQ title\"," .
+			"\"reason\":\"one sentence: why this FAQ helps customers\"," .
+			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
+			"\"items\":[{\"q\":\"the customer question\",\"a\":\"a clear reusable answer\"}]" .
+			"}]}\n\n" .
+			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
+			$dest_line . "\n\n" .
+			"Read the attached document and extract the FAQs now.";
+
+		return array('instructions' => $instructions, 'input' => $input);
+	}
+}
+
+if (!function_exists('faq_suggestion_logs_to_prune')) {
+	/**
+	 * Which worker log (.out) files to delete when keeping only the last
+	 * $keep_days days. $files is a list of ['path'=>string, 'mtime'=>int]; a file
+	 * is pruned when its mtime is older than $keep_days*86400 before $now_ts.
+	 * $keep_days is floored to >= 1 so a bad config can't wipe everything. Pure.
+	 */
+	function faq_suggestion_logs_to_prune($files, $now_ts, $keep_days = 3)
+	{
+		$keep_days = (int) $keep_days;
+		if ($keep_days < 1) {
+			$keep_days = 1;
+		}
+		$cutoff = (int) $now_ts - $keep_days * 86400;
+		$out = array();
+		foreach ((array) $files as $f) {
+			$path  = isset($f['path']) ? (string) $f['path'] : '';
+			$mtime = isset($f['mtime']) ? (int) $f['mtime'] : 0;
+			if ($path !== '' && $mtime < $cutoff) {
+				$out[] = $path;
+			}
+		}
+		return $out;
+	}
+}
+
+if (!function_exists('faq_suggestion_run_scope')) {
+	/**
+	 * A short human label describing what a generation run covered, for the runs
+	 * listing / detail header. For a PDF run it's the uploaded file name; for a
+	 * chats run it's the date range and (optionally) the mobile number filter.
+	 * Accepts the run as an array or object. Pure.
+	 */
+	function faq_suggestion_run_scope($run)
+	{
+		$get = function ($k) use ($run) {
+			if (is_array($run)) {
+				return isset($run[$k]) ? $run[$k] : '';
+			}
+			return isset($run->$k) ? $run->$k : '';
+		};
+
+		$source = strtolower(trim((string) $get('Source')));
+		if ($source === 'pdf') {
+			$file = trim((string) $get('FileName'));
+			return $file !== '' ? $file : 'Uploaded PDF';
+		}
+
+		$start = faq_suggestion_fmt_date($get('StartDate'));
+		$end   = faq_suggestion_fmt_date($get('EndDate'));
+		$parts = array();
+		if ($start !== '' && $end !== '') {
+			$parts[] = $start . ' – ' . $end;
+		}
+		$mobile = trim((string) $get('Mobile'));
+		if ($mobile !== '') {
+			$parts[] = $mobile;
+		}
+		return empty($parts) ? 'Recent chats' : implode(' · ', $parts);
+	}
+}
+
+if (!function_exists('faq_suggestion_fmt_date')) {
+	/**
+	 * Format a 'Y-m-d' (or 'Y-m-d H:i:s') string as 'j M Y' ("17 Sep 2026"),
+	 * passing blanks / unparseable values through as ''. Pure.
+	 */
+	function faq_suggestion_fmt_date($raw)
+	{
+		$raw = trim((string) $raw);
+		if ($raw === '' || strpos($raw, '0000-00-00') === 0) {
+			return '';
+		}
+		$ts = strtotime($raw);
+		return $ts ? date('j M Y', $ts) : '';
 	}
 }
 
