@@ -55,15 +55,17 @@ class FaqSuggestionService
 	/**
 	 * Mine one transcript into candidate FAQs. $transcript is the labelled
 	 * conversation text (faq_suggestion_transcript); $destination_names is the
-	 * allowed destination vocabulary. Returns the raw JSON reply + usage/cost.
+	 * allowed destination vocabulary; $existing_faqs are the FAQs that already
+	 * exist (['title'=>, 'questions'=>[]]) so the model skips duplicates. Returns
+	 * the raw JSON reply + usage/cost.
 	 */
-	public function suggest($transcript, $destination_names = array())
+	public function suggest($transcript, $destination_names = array(), $existing_faqs = array())
 	{
 		$transcript = trim((string) $transcript);
 		if ($transcript === '') {
 			throw new Exception('No recent conversations to analyse.');
 		}
-		$spec = faq_suggestion_build_prompt($transcript, $destination_names);
+		$spec = faq_suggestion_build_prompt($transcript, $destination_names, $existing_faqs);
 		$raw  = $this->request($spec['instructions'], $spec['input']);
 		return $this->pack_result($raw);
 	}
@@ -72,16 +74,18 @@ class FaqSuggestionService
 	 * Mine an uploaded document into candidate FAQs. $base64 is the raw file
 	 * contents base64-encoded; $ext its extension ('pdf', 'png', …). The file is
 	 * sent to the Responses API as an input_file / input_image part (reusing the
-	 * Competitor feature's pure part-builder). Returns the raw JSON reply +
-	 * usage/cost. Throws on an unsupported type or any API failure.
+	 * Competitor feature's pure part-builder). $existing_faqs are the FAQs that
+	 * already exist (['title'=>, 'questions'=>[]]) so the model skips duplicates.
+	 * Returns the raw JSON reply + usage/cost. Throws on an unsupported type or any
+	 * API failure.
 	 */
-	public function suggest_file($base64, $ext, $destination_names = array())
+	public function suggest_file($base64, $ext, $destination_names = array(), $existing_faqs = array())
 	{
 		$part = competitor_file_input_part($ext, (string) $base64);
 		if ($part === null) {
 			throw new Exception('Unsupported file type. Upload a PDF or image.');
 		}
-		$spec  = faq_suggestion_build_file_prompt($destination_names);
+		$spec  = faq_suggestion_build_file_prompt($destination_names, $existing_faqs);
 		$input = array(array(
 			'role'    => 'user',
 			'content' => array(

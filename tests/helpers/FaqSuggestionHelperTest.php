@@ -102,6 +102,23 @@ assert_true('input lists destination Korea trimmed', strpos($p['input'], 'Korea'
 $p2 = faq_suggestion_build_prompt('x', array());
 assert_true('no destinations -> (none configured)', strpos($p2['input'], '(none configured)') !== false);
 
+// build_prompt with existing FAQs injected so the model can skip duplicates.
+$existing_faqs = array(
+	array('title' => 'Deposit amount', 'questions' => array('How much is the deposit?')),
+	array('title' => 'Check-in time',  'questions' => array('What time is check-in?')),
+);
+$pe = faq_suggestion_build_prompt("Customer: hi", array('Japan'), $existing_faqs);
+assert_true('prompt lists an existing FAQ title',    strpos($pe['input'], 'Deposit amount') !== false);
+assert_true('prompt lists an existing FAQ question', strpos($pe['input'], 'How much is the deposit?') !== false);
+assert_true('prompt instructs to skip existing',     stripos($pe['input'] . $pe['instructions'], 'already') !== false);
+assert_false('no existing block when none given',    strpos($p2['input'], 'already exist') !== false);
+
+// ---- existing_block --------------------------------------------------------
+$blk = faq_suggestion_existing_block($existing_faqs);
+assert_true('block has title',    strpos($blk, 'Deposit amount') !== false);
+assert_true('block has question', strpos($blk, 'How much is the deposit?') !== false);
+assert_eq('block empty for none', '', faq_suggestion_existing_block(array()));
+
 // ---- parse_response --------------------------------------------------------
 $dest_map = array('Japan' => 5, 'Korea' => 8);
 $json = array('suggestions' => array(
@@ -149,6 +166,28 @@ $new = faq_suggestion_filter_new($sugg, array('Visa Rules'));
 assert_eq('filter_new count', 2, count($new));
 assert_eq('filter_new[0]', 'Check-in time', $new[0]['title']);
 assert_eq('filter_new[1]', 'Baggage allowance', $new[1]['title']);
+
+// filter_new also drops a suggestion whose QUESTION already exists as a FAQ
+// question, even when its title is worded differently (reworded-title case).
+$sugg2 = array(
+	array('title' => 'Deposit info', 'items' => array(array('q' => 'How much is the deposit?', 'a' => 'RM500.'))),
+	array('title' => 'Refund policy', 'items' => array(array('q' => 'Can I get a refund?', 'a' => 'Yes.'))),
+);
+$new2 = faq_suggestion_filter_new($sugg2, array(), array('How much is the deposit?'));
+assert_eq('filter_new by question count', 1, count($new2));
+assert_eq('filter_new by question kept',  'Refund policy', $new2[0]['title']);
+
+// A suggestion whose title matches an existing question is also dropped.
+$sugg3 = array(array('title' => 'How much is the deposit', 'items' => array(array('q' => 'x?', 'a' => 'y'))));
+assert_eq('filter_new title vs existing question', 0,
+	count(faq_suggestion_filter_new($sugg3, array(), array('How much is the deposit?'))));
+
+// Two batch suggestions sharing one identical question -> second dropped.
+$sugg4 = array(
+	array('title' => 'A', 'items' => array(array('q' => 'What is the deposit?', 'a' => '1'))),
+	array('title' => 'B', 'items' => array(array('q' => 'What is the deposit?', 'a' => '2'))),
+);
+assert_eq('filter_new in-batch question dedupe', 1, count(faq_suggestion_filter_new($sugg4)));
 
 // ---- date_range / valid_date ----------------------------------------------
 assert_eq('valid_date passes',      '2026-09-17', faq_suggestion_valid_date('2026-09-17'));
@@ -205,6 +244,9 @@ $fp = faq_suggestion_build_file_prompt(array('Japan', 'Korea'));
 assert_true('file prompt has instructions', strlen($fp['instructions']) > 0);
 assert_true('file prompt input mentions json', stripos($fp['input'], 'json') !== false);
 assert_true('file prompt lists destinations', strpos($fp['input'], 'Japan') !== false);
+$fpe = faq_suggestion_build_file_prompt(array('Japan'), $existing_faqs);
+assert_true('file prompt lists existing FAQ', strpos($fpe['input'], 'Deposit amount') !== false);
+assert_true('file prompt instructs skip existing', stripos($fpe['input'] . $fpe['instructions'], 'already') !== false);
 
 // ---- logs_to_prune ---------------------------------------------------------
 $now = mktime(12, 0, 0, 9, 18, 2026); // 2026-09-18 12:00:00

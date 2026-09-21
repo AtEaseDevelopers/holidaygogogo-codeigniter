@@ -286,8 +286,11 @@ class Faq_Suggestion_Model extends CI_Model
 		}
 		$this->Update_Run($run_id, array('RunState' => 'running'));
 
-		$dest_map   = $this->Destination_Name_Map();
-		$dest_names = array_values($dest_map);
+		$dest_map      = $this->Destination_Name_Map();
+		$dest_names    = array_values($dest_map);
+		// The FAQs that already exist — fed to the AI so it skips duplicates up
+		// front, and reused by store_suggestions() for the post-filter safety net.
+		$existing_faqs = $this->Existing_Faqs();
 
 		try {
 			if (strtolower((string) $run->Source) === 'pdf') {
@@ -298,7 +301,7 @@ class Faq_Suggestion_Model extends CI_Model
 				}
 				$ext = strtolower(pathinfo((string) $run->StoredName, PATHINFO_EXTENSION));
 				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest_file(base64_encode($data), $ext, $dest_names);
+				$result = $this->faqsuggestionservice->suggest_file(base64_encode($data), $ext, $dest_names, $existing_faqs);
 			} else {
 				$start     = substr((string) $run->StartDate, 0, 10) . ' 00:00:00';
 				$end       = substr((string) $run->EndDate, 0, 10) . ' 23:59:59';
@@ -311,14 +314,14 @@ class Faq_Suggestion_Model extends CI_Model
 					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
 				}
 				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names);
+				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs);
 			}
 		} catch (Exception $e) {
 			$this->Update_Run($run_id, array('RunState' => 'error', 'ErrorMessage' => $e->getMessage()));
 			return array('created' => 0, 'proposed' => 0, 'reason' => 'error', 'model' => '', 'run_id' => $run_id, 'error' => $e->getMessage());
 		}
 
-		return $this->store_suggestions($run_id, $result, $dest_map) + array('run_id' => $run_id);
+		return $this->store_suggestions($run_id, $result, $dest_map, $existing_faqs) + array('run_id' => $run_id);
 	}
 
 	/**
@@ -327,7 +330,7 @@ class Faq_Suggestion_Model extends CI_Model
 	 * model. Shared by the chats and PDF generators. Returns
 	 * ['created'=>int, 'proposed'=>int, 'reason'=>string, 'model'=>string].
 	 */
-	protected function store_suggestions($run_id, $result, $dest_map)
+	protected function store_suggestions($run_id, $result, $dest_map, $existing_faqs = null)
 	{
 		$this->load->model('Faq_Model');
 
@@ -337,7 +340,22 @@ class Faq_Suggestion_Model extends CI_Model
 			$name_to_id[$name] = $id;
 		}
 		$parsed = faq_suggestion_parse_response($result['raw'], $name_to_id, 20);
-		$parsed = faq_suggestion_filter_new($parsed, $this->Existing_Titles());
+
+		// Safety net: drop any candidate whose title OR question already matches an
+		// existing FAQ / prior suggestion (the prompt asked the model to skip these,
+		// but this catches a reworded duplicate it may have missed).
+		if ($existing_faqs === null) {
+			$existing_faqs = $this->Existing_Faqs();
+		}
+		$existing_titles    = array();
+		$existing_questions = array();
+		foreach ($existing_faqs as $f) {
+			$existing_titles[] = isset($f['title']) ? $f['title'] : '';
+			foreach ((isset($f['questions']) && is_array($f['questions'])) ? $f['questions'] : array() as $q) {
+				$existing_questions[] = $q;
+			}
+		}
+		$parsed = faq_suggestion_filter_new($parsed, $existing_titles, $existing_questions);
 
 		// Build every valid suggestion first, so the run's AI cost can be split
 		// evenly across the rows actually stored (one AI call produces them all).
@@ -479,22 +497,42 @@ class Faq_Suggestion_Model extends CI_Model
 	}
 
 	/**
-	 * Titles already in use — active FAQs plus pending/accepted suggestions — so
-	 * a run doesn't re-propose an FAQ that already exists or is awaiting review.
+	 * The FAQs that already exist — active FAQs plus pending/accepted suggestions
+	 * (each ['title'=>string, 'questions'=>[string,...]]). Used two ways so a run
+	 * doesn't re-propose an FAQ that already exists or is awaiting review: fed into
+	 * the AI prompt (compare-first, semantic dedupe) and into the post-filter
+	 * safety net (faq_suggestion_filter_new matches titles AND questions). Question
+	 * text comes from decoding the stored Description JSON via Faq_Model.
 	 */
-	function Existing_Titles()
+	function Existing_Faqs()
 	{
-		$titles = array();
-		foreach ($this->db->select('Title')->where('Status', 'Y')->get('faq')->result() as $r) {
-			$titles[] = (string) $r->Title;
+		$this->load->model('Faq_Model');
+
+		$out = array();
+		foreach ($this->db->select('Title, Description')->where('Status', 'Y')->get('faq')->result() as $r) {
+			$out[] = array('title' => (string) $r->Title, 'questions' => $this->decode_questions($r->Description));
 		}
-		$this->db->select('Title');
+
+		$this->db->select('Title, Description');
 		$this->db->where('Status', 'Y');
 		$this->db->where_in('State', array('pending', 'accepted'));
 		foreach ($this->db->get('faq_suggestions')->result() as $r) {
-			$titles[] = (string) $r->Title;
+			$out[] = array('title' => (string) $r->Title, 'questions' => $this->decode_questions($r->Description));
 		}
-		return $titles;
+		return $out;
+	}
+
+	/** The non-empty question texts inside a stored FAQ Description JSON. */
+	protected function decode_questions($description)
+	{
+		$questions = array();
+		foreach (Faq_Model::Decode_Items((string) $description) as $it) {
+			$q = trim((string) (isset($it['q']) ? $it['q'] : ''));
+			if ($q !== '') {
+				$questions[] = $q;
+			}
+		}
+		return $questions;
 	}
 
 	/** Active destination categories as CategoryID => Name (IsDestination='YES'). */

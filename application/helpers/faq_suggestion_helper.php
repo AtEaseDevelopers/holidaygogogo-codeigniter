@@ -248,6 +248,48 @@ if (!function_exists('faq_suggestion_transcript')) {
 	}
 }
 
+if (!function_exists('faq_suggestion_existing_block')) {
+	/**
+	 * Render the FAQs that already exist into a compact bullet list for the
+	 * prompt, so the model can compare against them and skip anything already
+	 * covered (a semantic dedupe the title-only post-filter can't do — it catches
+	 * a reworded duplicate before it's ever proposed). $existing_faqs is a list of
+	 * ['title'=>string, 'questions'=>[string,...]]; each becomes
+	 *   "- <title> (<q1>; <q2>; …)".
+	 * Capped at $max entries so a large FAQ corpus can't blow the prompt up.
+	 * Returns '' when there is nothing to show. Pure.
+	 */
+	function faq_suggestion_existing_block($existing_faqs, $max = 300)
+	{
+		$max   = (int) $max;
+		$lines = array();
+		foreach ((array) $existing_faqs as $f) {
+			$title = trim((string) (isset($f['title']) ? $f['title'] : ''));
+			$qs    = isset($f['questions']) && is_array($f['questions']) ? $f['questions'] : array();
+			$clean = array();
+			foreach ($qs as $q) {
+				$q = trim((string) $q);
+				if ($q !== '') {
+					$clean[] = $q;
+				}
+			}
+			if ($title === '' && empty($clean)) {
+				continue;
+			}
+			$label = $title !== '' ? $title : $clean[0];
+			$line  = '- ' . $label;
+			if (!empty($clean)) {
+				$line .= ' (' . implode('; ', $clean) . ')';
+			}
+			$lines[] = $line;
+			if ($max > 0 && count($lines) >= $max) {
+				break;
+			}
+		}
+		return implode("\n", $lines);
+	}
+}
+
 if (!function_exists('faq_suggestion_build_prompt')) {
 	/**
 	 * Build the OpenAI Responses API instructions + input for FAQ mining. The
@@ -257,8 +299,11 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 	 * names (chosen from the provided vocabulary) and a list of question/answer
 	 * pairs — the same shape a FAQ stores. $destination_names is the allowed
 	 * destination vocabulary so the model tags with real, resolvable destinations.
+	 * $existing_faqs (['title'=>, 'questions'=>[]] list) are the FAQs that already
+	 * exist — injected so the model skips duplicates up front (see
+	 * faq_suggestion_existing_block).
 	 */
-	function faq_suggestion_build_prompt($transcript, $destination_names = array())
+	function faq_suggestion_build_prompt($transcript, $destination_names = array(), $existing_faqs = array())
 	{
 		$dest = array();
 		foreach ((array) $destination_names as $n) {
@@ -281,9 +326,17 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"For EACH FAQ also give a short 'reason' (one sentence) explaining why it is valuable to customers — " .
 			"how often it came up in the chats and why it matters to a booking. " .
 			"ORDER the suggestions from most to least helpful — highest customer impact and frequency FIRST. " .
+			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
+			"skip it even if you would word the question differently; only return genuinely NEW questions. " .
 			"Never include a specific customer's name, phone number, a price quoted to one person, or any other private data. " .
 			"Prefer 5 to 12 high-value FAQs; skip one-off or purely transactional chatter. " .
 			"Answer ONLY with a JSON object.";
+
+		$existing_block = faq_suggestion_existing_block($existing_faqs);
+		$existing_line  = $existing_block === '' ? '' :
+			"EXISTING FAQs — these are ALREADY answered, so do NOT propose any FAQ already covered here " .
+			"(skip it even if worded differently); only return questions NOT in this list:\n" .
+			$existing_block . "\n\n";
 
 		$input =
 			"Return json with this exact shape, with the most helpful FAQ first:\n" .
@@ -296,6 +349,7 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"List the suggestions in order of how much they help customers — most impactful and most frequently asked first.\n\n" .
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .
+			$existing_line .
 			"Conversations:\n" . (string) $transcript;
 
 		return array('instructions' => $instructions, 'input' => $input);
@@ -311,8 +365,10 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 	 * faq_suggestion_build_prompt() so faq_suggestion_parse_response() handles
 	 * both — the literal word "json" appears so Responses json_object mode is
 	 * satisfied. $destination_names is the allowed destination vocabulary.
+	 * $existing_faqs (['title'=>, 'questions'=>[]] list) are the FAQs that already
+	 * exist — injected so the model skips duplicates up front.
 	 */
-	function faq_suggestion_build_file_prompt($destination_names = array())
+	function faq_suggestion_build_file_prompt($destination_names = array(), $existing_faqs = array())
 	{
 		$dest = array();
 		foreach ((array) $destination_names as $n) {
@@ -334,8 +390,16 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			"Write a clear, generic answer grounded in the document's contents. " .
 			"For EACH FAQ also give a short 'reason' (one sentence) explaining why it is valuable to customers. " .
 			"ORDER the suggestions from most to least helpful — highest customer impact FIRST. " .
+			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
+			"skip it even if worded differently; only return genuinely NEW questions. " .
 			"Never invent facts not supported by the document, and never include a specific customer's private data. " .
 			"Prefer 5 to 12 high-value FAQs. Answer ONLY with a JSON object.";
+
+		$existing_block = faq_suggestion_existing_block($existing_faqs);
+		$existing_line  = $existing_block === '' ? '' :
+			"EXISTING FAQs — these are ALREADY answered, so do NOT propose any FAQ already covered here " .
+			"(skip it even if worded differently); only return questions NOT in this list:\n" .
+			$existing_block . "\n\n";
 
 		$input =
 			"Return json with this exact shape, with the most helpful FAQ first:\n" .
@@ -347,6 +411,7 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			"}]}\n\n" .
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .
+			$existing_line .
 			"Read the attached document and extract the FAQs now.";
 
 		return array('instructions' => $instructions, 'input' => $input);
@@ -535,27 +600,60 @@ if (!function_exists('faq_suggestion_norm_title')) {
 
 if (!function_exists('faq_suggestion_filter_new')) {
 	/**
-	 * Drop suggestions whose normalised title already exists in $existing_titles
-	 * (titles already stored as a FAQ or a prior suggestion) or is duplicated
-	 * within this batch — so a scheduled run doesn't re-propose the same FAQ over
-	 * and over. Order is preserved. Pure.
+	 * Safety-net dedupe (the prompt already asks the model to skip existing FAQs;
+	 * this catches what slips through). Drop a suggestion when its normalised title
+	 * OR any of its normalised questions already exists — matched against
+	 * $existing_titles AND $existing_questions (both drawn from FAQs / prior
+	 * suggestions), or against something emitted earlier in this same batch. This
+	 * is what makes a REWORDED title for an existing question ("Deposit info" vs
+	 * the FAQ "Deposit amount", both asking "How much is the deposit?") still get
+	 * dropped. Order is preserved. Pure.
 	 */
-	function faq_suggestion_filter_new($suggestions, $existing_titles = array())
+	function faq_suggestion_filter_new($suggestions, $existing_titles = array(), $existing_questions = array())
 	{
 		$seen = array();
-		foreach ((array) $existing_titles as $t) {
-			$key = faq_suggestion_norm_title($t);
+		$remember = function ($text) use (&$seen) {
+			$key = faq_suggestion_norm_title($text);
 			if ($key !== '') {
 				$seen[$key] = true;
 			}
+		};
+		foreach ((array) $existing_titles as $t) {
+			$remember($t);
 		}
+		foreach ((array) $existing_questions as $q) {
+			$remember($q);
+		}
+
 		$out = array();
 		foreach ((array) $suggestions as $s) {
-			$key = faq_suggestion_norm_title(isset($s['title']) ? $s['title'] : '');
-			if ($key === '' || isset($seen[$key])) {
+			$title_key = faq_suggestion_norm_title(isset($s['title']) ? $s['title'] : '');
+			if ($title_key === '') {
 				continue;
 			}
-			$seen[$key] = true;
+			// This suggestion's keys: its title plus each of its questions.
+			$keys = array($title_key);
+			if (isset($s['items']) && is_array($s['items'])) {
+				foreach ($s['items'] as $it) {
+					$qk = faq_suggestion_norm_title(isset($it['q']) ? $it['q'] : '');
+					if ($qk !== '') {
+						$keys[] = $qk;
+					}
+				}
+			}
+			$dup = false;
+			foreach ($keys as $k) {
+				if (isset($seen[$k])) {
+					$dup = true;
+					break;
+				}
+			}
+			if ($dup) {
+				continue;
+			}
+			foreach ($keys as $k) {
+				$seen[$k] = true;
+			}
 			$out[] = $s;
 		}
 		return $out;
