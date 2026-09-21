@@ -210,6 +210,10 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                                     <option value="<?php echo html_escape($status_option); ?>" <?php echo (isset($package['status_value']) && $package['status_value'] === $status_option) ? 'selected' : ''; ?>><?php echo html_escape(ucfirst($status_option)); ?></option>
                                 <?php } ?>
                             </select>
+                            <span class="form-text text-muted" style="font-size:11px;">
+                                <strong>Active</strong> — customer is still considering, not yet confirmed or cancelled.
+                                <strong>Inactive</strong> — cancelled, or confirmed no longer proceeding.
+                            </span>
                         </div>
                     </div>
                     <div class="col-md-8">
@@ -302,7 +306,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                                 <tr>
                                     <th style="text-align:left;">Currency</th>
                                     <th class="text-right">Rate to MYR</th>
-                                    <th class="text-right">Bank Charge / unit</th>
+                                    <th class="text-right">Bank Charge / line</th>
                                     <th class="text-right">Total (currency)</th>
                                     <th class="text-right">Total in MYR</th>
                                 </tr>
@@ -428,59 +432,64 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         </form>
 
         <?php } elseif ($active_step === 'logistics') { ?>
-        <!-- STEP 4: HOTEL PRICING + FLIGHT SCHEDULE (drives the Quotation PDF) -->
+        <!-- STEP 4: HOTEL PRICING + FLIGHT OPTIONS (drives the Quotation PDF) -->
         <?php
         $this->load->helper('costing_quote');
         $qm = $quote_meta;
         $q_val = function ($key) use ($qm) {
             return isset($qm[$key]) && $qm[$key] !== null ? (string) $qm[$key] : '';
         };
-        $q_price = ($q_val('quote_flight_price') !== '' && is_numeric($qm['quote_flight_price']))
-            ? number_format((float) $qm['quote_flight_price'], 2, '.', '')
-            : '';
         // Seed the footer notes editor with the standard boilerplate when empty.
         $footer_notes_val = trim($q_val('quote_footer_notes'));
         if ($footer_notes_val === '') {
             $footer_notes_val = costing_quote_default_footer_notes();
         }
-        // At least one blank row so the table is never empty.
-        $hotel_rows = !empty($quote_hotels) ? $quote_hotels : array(array());
-        $flight_rows = !empty($quote_flights) ? $quote_flights : array(array());
 
-        // Renders one hotel row. $tpl=true emits the blank JS template (index "__H__").
-        $render_hotel_row = function ($i, $row, $tpl = false) {
-            $idx = $tpl ? '__H__' : (int) $i;
-            $name = $tpl ? '' : html_escape(isset($row['hotel_name']) ? $row['hotel_name'] : '');
-            $twin = ($tpl || !isset($row['twin_triple_price']) || $row['twin_triple_price'] === null || $row['twin_triple_price'] === '')
-                ? '' : number_format((float) $row['twin_triple_price'], 2, '.', '');
-            $single = ($tpl || !isset($row['single_supp_price']) || $row['single_supp_price'] === null || $row['single_supp_price'] === '')
-                ? '' : number_format((float) $row['single_supp_price'], 2, '.', '');
-            ob_start(); ?>
-            <tr class="cw-hotel-row">
-                <td><input type="text" class="form-control" name="hotels[<?php echo $idx; ?>][hotel_name]" value="<?php echo $name; ?>" placeholder="e.g. Tahiti Central Phu Quoc or similar"></td>
-                <td style="width:150px;"><input type="text" class="form-control text-right" name="hotels[<?php echo $idx; ?>][twin_triple_price]" value="<?php echo $twin; ?>" placeholder="0.00"></td>
-                <td style="width:150px;"><input type="text" class="form-control text-right" name="hotels[<?php echo $idx; ?>][single_supp_price]" value="<?php echo $single; ?>" placeholder="0.00"></td>
-                <td style="width:44px;"><button type="button" class="btn btn-icon btn-light-danger cw-hotel-remove" data-toggle="tooltip" title="Remove hotel"><i class="la la-trash"></i></button></td>
-            </tr>
-            <?php return ob_get_clean();
-        };
-        // Renders one flight row. $tpl=true emits the blank JS template (index "__F__").
-        $render_flight_row = function ($i, $row, $tpl = false) {
-            $idx = $tpl ? '__F__' : (int) $i;
-            $g = function ($k) use ($row, $tpl) {
-                return $tpl ? '' : html_escape(isset($row[$k]) ? $row[$k] : '');
-            };
-            ob_start(); ?>
-            <tr class="cw-flight-row">
-                <td><input type="text" class="form-control" name="flights[<?php echo $idx; ?>][travel_date]" value="<?php echo $g('travel_date'); ?>" placeholder="15 Jan 2027"></td>
-                <td><input type="text" class="form-control" name="flights[<?php echo $idx; ?>][sector]" value="<?php echo $g('sector'); ?>" placeholder="KUL - PQC"></td>
-                <td><input type="text" class="form-control" name="flights[<?php echo $idx; ?>][flight_no]" value="<?php echo $g('flight_no'); ?>" placeholder="AK 545"></td>
-                <td><input type="text" class="form-control" name="flights[<?php echo $idx; ?>][timing]" value="<?php echo $g('timing'); ?>" placeholder="1250 - 1355"></td>
-                <td><input type="text" class="form-control" name="flights[<?php echo $idx; ?>][duration]" value="<?php echo $g('duration'); ?>" placeholder="1hr 45mins"></td>
-                <td style="width:44px;"><button type="button" class="btn btn-icon btn-light-danger cw-flight-remove" data-toggle="tooltip" title="Remove flight"><i class="la la-trash"></i></button></td>
-            </tr>
-            <?php return ob_get_clean();
-        };
+        // Hotel pricing columns (4.2) + flight mode (4.3), normalised.
+        $hotel_columns = costing_quote_hotel_columns_normalize($q_val('quote_hotel_columns'));
+        $flight_mode   = costing_quote_normalize_flight_mode($q_val('quote_flight_mode'));
+
+        // Hotel rows for the JS renderer (name + per-column prices + single supp).
+        $hotel_state = array();
+        foreach ((array) $quote_hotels as $h) {
+            $prices = costing_quote_hotel_prices_normalize(
+                (isset($h['prices_json']) && $h['prices_json'] !== null && $h['prices_json'] !== '')
+                    ? $h['prices_json']
+                    : array(isset($h['twin_triple_price']) ? $h['twin_triple_price'] : null),
+                count($hotel_columns)
+            );
+            $hotel_state[] = array(
+                'hotel_name'        => isset($h['hotel_name']) ? (string) $h['hotel_name'] : '',
+                'prices'            => array_map(function ($p) { return $p === null ? '' : (string) $p; }, $prices),
+                'single_supp_price' => (isset($h['single_supp_price']) && $h['single_supp_price'] !== null && $h['single_supp_price'] !== '')
+                    ? number_format((float) $h['single_supp_price'], 2, '.', '') : '',
+            );
+        }
+
+        // Flight options for the JS renderer (each with its own schedule rows).
+        $flight_option_state = array();
+        foreach ((array) $quote_flight_options as $opt) {
+            $rows = array();
+            foreach ((array) (isset($opt['flights']) ? $opt['flights'] : array()) as $f) {
+                $rows[] = array(
+                    'travel_date' => (string) (isset($f['travel_date']) ? $f['travel_date'] : ''),
+                    'sector'      => (string) (isset($f['sector']) ? $f['sector'] : ''),
+                    'flight_no'   => (string) (isset($f['flight_no']) ? $f['flight_no'] : ''),
+                    'timing'      => (string) (isset($f['timing']) ? $f['timing'] : ''),
+                    'duration'    => (string) (isset($f['duration']) ? $f['duration'] : ''),
+                );
+            }
+            $flight_option_state[] = array(
+                'title'         => (string) (isset($opt['title']) ? $opt['title'] : ''),
+                'airline'       => (string) (isset($opt['airline']) ? $opt['airline'] : ''),
+                'price'         => (isset($opt['price']) && $opt['price'] !== null && $opt['price'] !== '')
+                    ? number_format((float) $opt['price'], 2, '.', '') : '',
+                'fare_includes' => (string) (isset($opt['fare_includes']) ? $opt['fare_includes'] : ''),
+                'fare_expiry'   => (string) (isset($opt['fare_expiry']) ? $opt['fare_expiry'] : ''),
+                'rows'          => $rows,
+            );
+        }
+        $combination_pricing = isset($combination_pricing) ? $combination_pricing : array();
         ?>
         <form method="post" action="<?php echo base_url('Costing/Save_Logistics'); ?>" id="cw-logi-form">
             <input type="hidden" name="package_id" value="<?php echo $package_id; ?>">
@@ -488,7 +497,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             <!-- Hotel pricing -->
             <div class="cw-panel">
                 <div class="cw-panel-title">Hotel Pricing (per person)</div>
-                <div class="cw-panel-sub">The pricing table shown on the customer Quotation PDF. Prices are per person in RM.</div>
+                <div class="cw-panel-sub">The pricing table shown on the customer Quotation PDF. Prices are per person in RM. Add columns for different room types / pax bands, and pull hotel names &amp; selling rates straight from the Costing Template.</div>
                 <div class="row">
                     <div class="col-md-6 mb-4">
                         <label class="font-weight-bold mb-1">Pricing basis</label>
@@ -501,20 +510,13 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                         <small class="text-muted">Red note shown beside the travel date.</small>
                     </div>
                 </div>
-                <table class="table table-sm cw-logi-table">
-                    <thead>
-                        <tr>
-                            <th>Hotel</th>
-                            <th class="text-right" style="width:150px;">Twin / Triple (RM)</th>
-                            <th class="text-right" style="width:150px;">Single Supp (RM)</th>
-                            <th style="width:44px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="cw-hotel-body">
-                        <?php foreach ($hotel_rows as $i => $row) { echo $render_hotel_row($i, $row); } ?>
-                    </tbody>
-                </table>
-                <template id="cw-hotel-tpl"><?php echo $render_hotel_row(0, array(), true); ?></template>
+                <div class="d-flex flex-wrap mb-3" style="gap:8px;">
+                    <button type="button" class="btn btn-sm btn-light-success font-weight-bold" id="cw-hotel-pull" data-toggle="tooltip" title="Fill hotels + prices from the Costing Template combinations"><i class="la la-download"></i>Pull from Costing</button>
+                    <button type="button" class="btn btn-sm btn-light-primary font-weight-bold" id="cw-hotel-addcol"><i class="la la-columns"></i>Add Price Column</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm cw-logi-table" id="cw-hotel-table"><thead></thead><tbody></tbody></table>
+                </div>
                 <button type="button" class="btn btn-light-primary font-weight-bold" id="cw-hotel-add"><i class="la la-plus"></i>Add Hotel</button>
                 <div class="mt-4">
                     <label class="font-weight-bold mb-1">Hotel note</label>
@@ -522,44 +524,24 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 </div>
             </div>
 
-            <!-- Flight schedule -->
+            <!-- Flight -->
             <div class="cw-panel">
-                <div class="cw-panel-title">Flight Schedule</div>
-                <div class="cw-panel-sub">The flight table shown on the customer Quotation PDF.</div>
-                <div class="mb-4">
-                    <label class="font-weight-bold mb-1">Flight schedule title</label>
-                    <input type="text" class="form-control" name="quote_flight_title" value="<?php echo html_escape($q_val('quote_flight_title')); ?>" placeholder="e.g. FLIGHT SCHEDULE (AIRASIA - ECONOMY CLASS BASED ON 25 PAX)">
-                </div>
-                <table class="table table-sm cw-logi-table">
-                    <thead>
-                        <tr>
-                            <th>Travel Date</th>
-                            <th>Sector</th>
-                            <th>Flight No</th>
-                            <th>Timing</th>
-                            <th>Duration</th>
-                            <th style="width:44px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="cw-flight-body">
-                        <?php foreach ($flight_rows as $i => $row) { echo $render_flight_row($i, $row); } ?>
-                    </tbody>
-                </table>
-                <template id="cw-flight-tpl"><?php echo $render_flight_row(0, array(), true); ?></template>
-                <button type="button" class="btn btn-light-primary font-weight-bold" id="cw-flight-add"><i class="la la-plus"></i>Add Flight</button>
-                <div class="row mt-4">
-                    <div class="col-md-4 mb-4">
-                        <label class="font-weight-bold mb-1">Price per person (Adult / Child) RM</label>
-                        <input type="text" class="form-control text-right" name="quote_flight_price" value="<?php echo html_escape($q_price); ?>" placeholder="0.00">
-                    </div>
-                    <div class="col-md-8 mb-4">
-                        <label class="font-weight-bold mb-1">Fare includes</label>
-                        <input type="text" class="form-control" name="quote_flight_fare_note" value="<?php echo html_escape($q_val('quote_flight_fare_note')); ?>" placeholder="e.g. 7kg carry-on, 20kg baggage, Standard seat, Value Pack">
+                <div class="cw-panel-title">Flight</div>
+                <div class="cw-panel-sub">Choose how flights appear on the quotation, then add one or more airline options for comparison.</div>
+                <div class="row">
+                    <div class="col-md-5 mb-4">
+                        <label class="font-weight-bold mb-1">Flight mode</label>
+                        <select class="form-control" name="quote_flight_mode" id="cw-flight-mode">
+                            <?php foreach (costing_quote_flight_modes() as $mk => $ml) { ?>
+                                <option value="<?php echo html_escape($mk); ?>" <?php echo ($flight_mode === $mk) ? 'selected' : ''; ?>><?php echo html_escape($ml); ?></option>
+                            <?php } ?>
+                        </select>
+                        <small class="text-muted">No Flight hides the whole flight section. Include shows the schedule only; FIT / GIT also show pricing.</small>
                     </div>
                 </div>
-                <div class="mb-2">
-                    <label class="font-weight-bold mb-1">Fare expiry</label>
-                    <input type="text" class="form-control" name="quote_flight_expiry" value="<?php echo html_escape($q_val('quote_flight_expiry')); ?>" placeholder="e.g. Expired valid until 10 September 2026">
+                <div id="cw-flight-wrap">
+                    <div id="cw-flight-options"></div>
+                    <button type="button" class="btn btn-light-primary font-weight-bold" id="cw-flight-add-option"><i class="la la-plus"></i>Add Flight Option</button>
                 </div>
             </div>
 
@@ -574,6 +556,17 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 <a href="<?php echo base_url('Costing/Package/' . $package_id . '?step=itinerary'); ?>" class="btn btn-light font-weight-bold"><i class="la la-arrow-left mr-2"></i>Back</a>
                 <button type="submit" class="btn btn-primary font-weight-bold">Save &amp; Continue<i class="la la-arrow-right ml-2"></i></button>
             </div>
+
+            <!-- Bootstrap state for the JS renderer -->
+            <script type="application/json" id="cw-logi-state"><?php echo json_encode(array(
+                'columns'      => $hotel_columns,
+                'hotels'       => $hotel_state,
+                'flightMode'   => $flight_mode,
+                'options'      => $flight_option_state,
+                'comboPricing' => $combination_pricing,
+                'airlines'     => costing_quote_airlines(),
+                'titlePresets' => costing_quote_hotel_title_presets(),
+            )); ?></script>
         </form>
 
         <?php } else { ?>
@@ -641,6 +634,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     var EXISTING_COMBOS = <?php echo json_encode(array_map(function ($combo) {
         return array(
             'name' => isset($combo['name']) ? $combo['name'] : '',
+            'is_general' => !empty($combo['is_general']) ? 1 : 0,
             'selling_price_per_pax' => (isset($combo['selling_price_per_pax']) && $combo['selling_price_per_pax'] !== null && $combo['selling_price_per_pax'] !== '')
                 ? (float) $combo['selling_price_per_pax'] : null,
             'items' => array_map(function ($it) {
@@ -660,12 +654,24 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     function money(n) { return 'RM ' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2); }
     function totalPax() { return (parseInt(adultInput.value, 10) || 0) + (parseInt(childInput.value, 10) || 0); }
 
+    // Pure per-unit MYR conversion (NO bank charge). The bank charge is a per-line
+    // fee added ONCE to the line total, not per unit (feedback 18 Sep 2026, 2.2).
     function rowMyrPerUnit(row) {
         var currencyId = row.querySelector('.cw-currency').value;
         var info = RATE_MAP[currencyId] || { rate_to_myr: 0, bank_charges_myr: 0 };
         var cost = parseFloat(row.querySelector('.cw-cost').value) || 0;
-        var perUnit = Math.round(cost * (Number(info.rate_to_myr) || 0) * 100) / 100 + (Number(info.bank_charges_myr) || 0);
-        return Math.round(perUnit * 100) / 100;
+        return Math.round(cost * (Number(info.rate_to_myr) || 0) * 100) / 100;
+    }
+
+    // Line total in MYR: converted amount + the bank charge once (only when the
+    // line actually has an amount).
+    function rowTotalMyr(row) {
+        var perUnit = rowMyrPerUnit(row);
+        var count = parseFloat(row.querySelector('.cw-count').value) || 0;
+        var info = RATE_MAP[row.querySelector('.cw-currency').value] || { bank_charges_myr: 0 };
+        var converted = Math.round(perUnit * count * 100) / 100;
+        var bank = Number(info.bank_charges_myr) || 0;
+        return converted > 0 ? Math.round((converted + bank) * 100) / 100 : 0;
     }
 
     function autoCount(row) {
@@ -686,10 +692,11 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
 
         var perUnit = rowMyrPerUnit(row);
         var count = parseFloat(countInput.value) || 0;
-        var total = Math.round(perUnit * count * 100) / 100;
+        var total = rowTotalMyr(row);
 
-        // Freeze the "MYR (convert)" figure (bank charge baked in) + the bank charge
-        // itself onto hidden inputs so the saved value is exactly what the user sees.
+        // Freeze the pure "MYR (convert)" per-unit figure + the per-line bank charge
+        // onto hidden inputs so the saved value is exactly what the user sees. Bank
+        // is applied once to the line total, never baked into the per-unit figure.
         var info = RATE_MAP[row.querySelector('.cw-currency').value] || { bank_charges_myr: 0 };
         var myrHidden = row.querySelector('.cw-myr-hidden');
         var bankHidden = row.querySelector('.cw-bank-hidden');
@@ -699,7 +706,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
 
         var myrCell = row.querySelector('.cw-myr');
         myrCell.querySelector('.cw-myr-val').textContent = money(perUnit);
-        myrCell.querySelector('.cw-bank-note').textContent = bankVal > 0 ? ('incl. ' + money(bankVal) + ' bank') : '';
+        myrCell.querySelector('.cw-bank-note').textContent = (bankVal > 0 && total > 0) ? ('+ ' + money(bankVal) + ' bank / line') : '';
         row.querySelector('.cw-total').textContent = money(total);
         return { total: total };
     }
@@ -714,12 +721,28 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     //   cost after markup / pax = cost/pax ÷ (1 − margin%/100)   [suggested]
     //   selling price / pax     = manual override, else the suggestion
     //   revenue = selling/pax × pax, profit/pax = selling/pax − cost/pax.
+    // Sum a card's own cost rows (also freezes each row's MYR via processRow).
+    function cardRowsCost(card) {
+        var cost = 0;
+        card.querySelectorAll('.cw-crow').forEach(function (row) { cost += processRow(row).total; });
+        return Math.round(cost * 100) / 100;
+    }
+
     function recalcCombos(margin, pax) {
         function set(card, sel, val) { var el = card.querySelector(sel); if (el) { el.textContent = money(val); } }
+
+        // General Combination (item 6): its items are common to all, so its cost is
+        // ADDED to every regular combination. Compute + show its subtotal first.
+        var generalTotal = 0;
+        var generalCard = combosWrap.querySelector('.cw-combo-card.cw-combo-general');
+        if (generalCard) {
+            generalTotal = cardRowsCost(generalCard);
+            set(generalCard, '.cw-combo-cost', generalTotal);
+        }
+
         combosWrap.querySelectorAll('.cw-combo-card').forEach(function (card) {
-            var cost = 0;
-            card.querySelectorAll('.cw-crow').forEach(function (row) { cost += processRow(row).total; });
-            cost = Math.round(cost * 100) / 100;
+            if (card.classList.contains('cw-combo-general')) { return; } // priced above
+            var cost = Math.round((cardRowsCost(card) + generalTotal) * 100) / 100;
             var costPax = Math.round((cost / pax) * 100) / 100;
             var divisor = 1 - (margin / 100);
             var markupPax = divisor > 0 ? Math.round((costPax / divisor) * 100) / 100 : costPax;
@@ -767,7 +790,6 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             var info = RATE_MAP[cid] || { code: '', rate_to_myr: 0, bank_charges_myr: 0 };
             var unit = parseFloat(row.querySelector('.cw-cost').value) || 0;
             var count = parseFloat(row.querySelector('.cw-count').value) || 0;
-            var perUnit = rowMyrPerUnit(row);
             if (!acc[cid]) {
                 acc[cid] = {
                     code: info.code || '',
@@ -778,7 +800,8 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 };
             }
             acc[cid].foreign += unit * count;
-            acc[cid].myr += Math.round(perUnit * count * 100) / 100;
+            // Bank charge is added once per line inside rowTotalMyr().
+            acc[cid].myr += rowTotalMyr(row);
         });
 
         var list = Object.keys(acc).map(function (k) { return acc[k]; });
@@ -960,20 +983,74 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         return tr;
     }
 
+    // Read a combination card's current cost rows back into plain item objects, so
+    // a combination can be duplicated into a new one (feedback 18 Sep 2026, 2.1 —
+    // common cost items like Tour Leader / Flight are shared across combinations,
+    // only the Ground Cost differs, so the user copies then amends what's different).
+    function readComboItems(card) {
+        var out = [];
+        card.querySelectorAll('.cw-crow').forEach(function (row) {
+            var remark = row.nextElementSibling;
+            var nameEl = row.querySelector('input[name$="[name]"]');
+            var catEl = row.querySelector('input[name$="[category]"]');
+            out.push({
+                name: nameEl ? nameEl.value : '',
+                category: catEl ? catEl.value : 'miscellaneous',
+                multiplier_type: row.querySelector('.cw-mult-type').value,
+                currency_id: row.querySelector('.cw-currency').value,
+                unit_price: row.querySelector('.cw-cost').value,
+                count: row.querySelector('.cw-count').value,
+                remark: (remark && remark.querySelector('.cw-remark')) ? remark.querySelector('.cw-remark').value : ''
+            });
+        });
+        return out;
+    }
+
     // Build a combination card (name + its own cost table + item picker + totals).
     // sellingPerPax: saved manual selling price (edit mode), or null to auto-fill
     // from the suggested Cost after Markup on every recalc until the user edits it.
-    function addComboCard(name, items, sellingPerPax) {
+    // isGeneral = the single "General Combination" whose common items (Tour Leader,
+    // Flight, …) are added to every other combination (item 6). It has no selling
+    // price / profit of its own and cannot be removed or duplicated.
+    function addComboCard(name, items, sellingPerPax, isGeneral) {
         var c = comboSeq++;
         var card = document.createElement('div');
-        card.className = 'cw-combo-card';
+        card.className = 'cw-combo-card' + (isGeneral ? ' cw-combo-general' : '');
         card.setAttribute('data-c', c);
         card.dataset.rseq = '0';
+
+        var headHtml = isGeneral
+            ? '<div class="cw-combo-head">' +
+                  '<input type="text" class="form-control cw-combo-name font-weight-bold" name="combinations[' + c + '][name]" value="General – applies to all packages" readonly style="background:#f3f6f9;">' +
+                  '<input type="hidden" name="combinations[' + c + '][is_general]" value="1">' +
+              '</div>' +
+              '<div class="cw-panel-sub" style="margin:-4px 0 8px;">Common items entered here (Tour Leader, Flight, …) are automatically added to every combination below — no need to re-key them.</div>'
+            : '<div class="cw-combo-head">' +
+                  '<input type="text" class="form-control cw-combo-name" name="combinations[' + c + '][name]" placeholder="Combination name (e.g. Premium)" value="">' +
+                  '<button type="button" class="btn btn-icon btn-light-primary cw-combo-dup" title="Duplicate this combination (copy all cost items into a new one)"><i class="la la-copy"></i></button>' +
+                  '<button type="button" class="btn btn-icon btn-light-danger cw-combo-remove" title="Remove combination"><i class="la la-trash"></i></button>' +
+              '</div>';
+
+        var summaryHtml = isGeneral
+            ? '<div class="cw-summary cw-combo-summary">' +
+                  '<div class="cw-summary-box"><div class="lbl">General Cost (added to every package)</div><div class="val cw-combo-cost" style="color:#187DE4;">RM 0.00</div></div>' +
+              '</div>'
+            : '<div class="cw-summary cw-combo-summary">' +
+                  '<div class="cw-summary-box"><div class="lbl">Total Cost <span style="font-weight:400; font-size:10px; color:#8a8f9c;">(incl. general)</span></div><div class="val cw-combo-cost">RM 0.00</div></div>' +
+                  '<div class="cw-summary-box"><div class="lbl">Cost / Pax</div><div class="val cw-combo-costpax">RM 0.00</div></div>' +
+                  '<div class="cw-summary-box"><div class="lbl">Cost after Markup</div><div class="val cw-combo-markuppax" style="color:#187DE4;">RM 0.00</div></div>' +
+                  '<div class="cw-summary-box"><div class="lbl">Selling Price / Pax</div><input type="number" step="0.01" min="0" class="form-control cw-combo-sell-input mt-1" name="combinations[' + c + '][selling_price_per_pax]" placeholder="0.00"></div>' +
+                  '<div class="cw-summary-box"><div class="lbl">Total Revenue</div><div class="val cw-combo-revenue">RM 0.00</div></div>' +
+                  '<div class="cw-summary-box"><div class="lbl">Profit / Pax</div><div class="val cw-combo-profitpax" style="color:#1BC5BD;">RM 0.00</div><div class="cw-combo-profit-total" style="font-size:11px; font-weight:600; color:#6d7288; margin-top:3px;">Total Profit: RM 0.00</div></div>' +
+              '</div>';
+
         card.innerHTML =
-            '<div class="cw-combo-head">' +
-                '<input type="text" class="form-control cw-combo-name" name="combinations[' + c + '][name]" placeholder="Combination name (e.g. Premium)" value="">' +
-                '<button type="button" class="btn btn-icon btn-light-danger cw-combo-remove" title="Remove combination"><i class="la la-trash"></i></button>' +
-            '</div>' +
+            headHtml +
+            // #2.3 Add-item toolbar sits at the TOP so items can be added without
+            // scrolling to the bottom of a long combination. New rows still slot into
+            // their category section automatically.
+            '<div class="d-flex align-items-center mb-2" style="gap:8px;"><span class="cw-combo-pick-slot"></span>' +
+                '<button type="button" class="btn btn-sm btn-success font-weight-bold cw-combo-add-item"><i class="la la-plus"></i>Add Item</button></div>' +
             '<div class="table-responsive"><table class="table table-bordered cw-cost-table mb-2">' +
                 '<thead><tr>' +
                     '<th style="text-align:left;">Details</th>' +
@@ -986,20 +1063,11 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 '</tr></thead>' +
                 '<tbody class="cw-combo-body"></tbody>' +
             '</table></div>' +
-            '<div class="d-flex align-items-center" style="gap:8px;"><span class="cw-combo-pick-slot"></span>' +
-                '<button type="button" class="btn btn-sm btn-success font-weight-bold cw-combo-add-item"><i class="la la-plus"></i>Add Item</button></div>' +
-            '<div class="cw-summary cw-combo-summary">' +
-                '<div class="cw-summary-box"><div class="lbl">Total Cost</div><div class="val cw-combo-cost">RM 0.00</div></div>' +
-                '<div class="cw-summary-box"><div class="lbl">Cost / Pax</div><div class="val cw-combo-costpax">RM 0.00</div></div>' +
-                '<div class="cw-summary-box"><div class="lbl">Cost after Markup</div><div class="val cw-combo-markuppax" style="color:#187DE4;">RM 0.00</div></div>' +
-                '<div class="cw-summary-box"><div class="lbl">Selling Price / Pax</div><input type="number" step="0.01" min="0" class="form-control cw-combo-sell-input mt-1" name="combinations[' + c + '][selling_price_per_pax]" placeholder="0.00"></div>' +
-                '<div class="cw-summary-box"><div class="lbl">Total Revenue</div><div class="val cw-combo-revenue">RM 0.00</div></div>' +
-                '<div class="cw-summary-box"><div class="lbl">Profit / Pax</div><div class="val cw-combo-profitpax" style="color:#1BC5BD;">RM 0.00</div><div class="cw-combo-profit-total" style="font-size:11px; font-weight:600; color:#6d7288; margin-top:3px;">Total Profit: RM 0.00</div></div>' +
-            '</div>';
+            summaryHtml;
 
         card.querySelector('.cw-combo-pick-slot').appendChild(masterItemPicker());
         combosWrap.appendChild(card);
-        card.querySelector('.cw-combo-name').value = name || '';
+        if (!isGeneral) { card.querySelector('.cw-combo-name').value = name || ''; }
         // A saved manual selling price is authoritative — mark it "touched" so the
         // recalc never overwrites it with the auto Cost after Markup.
         if (sellingPerPax !== undefined && sellingPerPax !== null && sellingPerPax !== '') {
@@ -1061,17 +1129,34 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             recalc();
             return;
         }
+        var dupCard = e.target.closest('.cw-combo-dup');
+        if (dupCard) {
+            var src = dupCard.closest('.cw-combo-card');
+            if (src) {
+                var srcName = src.querySelector('.cw-combo-name').value;
+                addComboCard(srcName ? (srcName + ' (copy)') : '', readComboItems(src), null);
+                recalc();
+            }
+            return;
+        }
         var rmCard = e.target.closest('.cw-combo-remove');
         if (rmCard) { var cc = rmCard.closest('.cw-combo-card'); if (cc) { cc.remove(); recalc(); } }
     });
 
-    document.getElementById('cw-combo-add').addEventListener('click', function () { addComboCard('', []); recalc(); });
+    document.getElementById('cw-combo-add').addEventListener('click', function () { addComboCard('', [], null, false); recalc(); });
     adultInput.addEventListener('input', recalc);
     childInput.addEventListener('input', recalc);
     marginInput.addEventListener('input', recalc);
 
-    // Render saved combinations (edit mode) before the first price pass.
-    EXISTING_COMBOS.forEach(function (combo) { addComboCard(combo.name, combo.items, combo.selling_price_per_pax); });
+    // Render the General Combination first (its common items fold into every combo),
+    // then the saved regular combinations. Exactly one general card always exists.
+    var generalExisting = null, regularCombos = [];
+    EXISTING_COMBOS.forEach(function (combo) {
+        if (combo.is_general && !generalExisting) { generalExisting = combo; }
+        else { regularCombos.push(combo); }
+    });
+    addComboCard(generalExisting ? generalExisting.name : '', generalExisting ? generalExisting.items : [], null, true);
+    regularCombos.forEach(function (combo) { addComboCard(combo.name, combo.items, combo.selling_price_per_pax, false); });
 
     recalc();
 })();
@@ -1175,49 +1260,196 @@ jQuery(function () {
 </script>
 <?php } elseif ($active_step === 'logistics') { ?>
 <script>
-// Hotel & Flight rows: plain-input tables cloned from a blank <template>. Each
-// "Add" clones its template (replacing the __H__ / __F__ index placeholder with a
-// running sequence) and appends the row; the delete button removes it (keeping at
-// least one row, cleared, so the table never empties).
+// Hotel pricing + flight options are STATE-DRIVEN (rendered from a JS model), so
+// dynamic pricing columns (4.2), pull-from-costing (4.1), flight modes (4.3) and
+// multiple airline options (item 3 + 4.4) all stay in sync. On any structural
+// change we read the DOM back into state, mutate, then re-render.
 jQuery(function () {
-    function wireTable(bodyId, addId, tplId, indexToken, removeSel, rowSel) {
-        var body = document.getElementById(bodyId);
-        var addBtn = document.getElementById(addId);
-        var tpl = document.getElementById(tplId);
-        if (!body || !addBtn || !tpl) { return; }
-        var seq = body.querySelectorAll(rowSel).length;
+    var stateEl = document.getElementById('cw-logi-state');
+    if (!stateEl) { return; }
+    var S = JSON.parse(stateEl.textContent || '{}');
+    S.columns = (S.columns && S.columns.length) ? S.columns : ['Twin / Triple'];
+    S.hotels = S.hotels || [];
+    S.options = S.options || [];
+    S.comboPricing = S.comboPricing || [];
+    S.airlines = S.airlines || {};
+    S.titlePresets = S.titlePresets || [];
+    S.flightMode = S.flightMode || 'fit';
+    if (!S.hotels.length) { S.hotels = [blankHotel()]; }
+    if (!S.options.length) { S.options = [blankOption()]; }
 
-        addBtn.addEventListener('click', function () {
-            var html = tpl.innerHTML.replace(new RegExp(indexToken, 'g'), seq++);
-            var wrap = document.createElement('tbody');
-            wrap.innerHTML = html.trim();
-            var row = wrap.firstElementChild;
-            body.appendChild(row);
-            if (window.jQuery && jQuery.fn.tooltip) {
-                jQuery(row).find('[data-toggle="tooltip"]').tooltip();
-            }
-        });
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    function blankHotel() { return { hotel_name: '', prices: S && S.columns ? S.columns.map(function () { return ''; }) : [''], single_supp_price: '' }; }
+    function blankRow() { return { travel_date: '', sector: '', flight_no: '', timing: '', duration: '' }; }
+    function blankOption() { return { title: '', airline: '', price: '', fare_includes: '', fare_expiry: '', rows: [blankRow()] }; }
 
-        body.addEventListener('click', function (e) {
-            var btn = e.target.closest(removeSel);
-            if (!btn) { return; }
-            var row = btn.closest(rowSel);
-            var rows = body.querySelectorAll(rowSel);
-            if (rows.length <= 1) {
-                // Keep at least one row — clear its inputs instead of removing.
-                row.querySelectorAll('input').forEach(function (el) { el.value = ''; });
-                return;
-            }
-            row.remove();
+    /* ---------------- HOTELS ---------------- */
+    var hotelTable = document.getElementById('cw-hotel-table');
+    var hotelThead = hotelTable.querySelector('thead');
+    var hotelTbody = hotelTable.querySelector('tbody');
+
+    // Datalist of pricing-column title presets (shared by every column header).
+    var titleListId = 'cw-hotel-title-presets';
+    (function () {
+        var dl = document.createElement('datalist'); dl.id = titleListId;
+        dl.innerHTML = S.titlePresets.map(function (t) { return '<option value="' + esc(t) + '">'; }).join('');
+        hotelTable.parentNode.appendChild(dl);
+    })();
+
+    function readHotels() {
+        S.columns = Array.prototype.map.call(hotelThead.querySelectorAll('.cw-hcol-label'), function (el) { return el.value; });
+        if (!S.columns.length) { S.columns = ['Twin / Triple']; }
+        S.hotels = Array.prototype.map.call(hotelTbody.querySelectorAll('.cw-hotel-row'), function (tr) {
+            return {
+                hotel_name: tr.querySelector('.cw-hotel-name').value,
+                prices: Array.prototype.map.call(tr.querySelectorAll('.cw-hotel-price'), function (el) { return el.value; }),
+                single_supp_price: tr.querySelector('.cw-hotel-single').value
+            };
         });
     }
 
-    wireTable('cw-hotel-body', 'cw-hotel-add', 'cw-hotel-tpl', '__H__', '.cw-hotel-remove', '.cw-hotel-row');
-    wireTable('cw-flight-body', 'cw-flight-add', 'cw-flight-tpl', '__F__', '.cw-flight-remove', '.cw-flight-row');
+    function renderHotels() {
+        var ths = '<tr><th>Hotel</th>';
+        S.columns.forEach(function (label, c) {
+            ths += '<th style="width:160px;"><input type="text" class="form-control form-control-sm cw-hcol-label" name="quote_hotel_columns[]" list="' + titleListId + '" value="' + esc(label) + '" placeholder="Column title">' +
+                (S.columns.length > 1 ? '<button type="button" class="btn btn-icon btn-sm btn-light-danger mt-1 cw-hcol-remove" data-c="' + c + '" data-toggle="tooltip" title="Remove column"><i class="la la-times"></i></button>' : '') +
+                '</th>';
+        });
+        ths += '<th class="text-right" style="width:150px;">Single Supp (RM)</th><th style="width:44px;"></th></tr>';
+        hotelThead.innerHTML = ths;
 
-    if (window.jQuery && jQuery.fn.tooltip) {
-        jQuery('[data-toggle="tooltip"]').tooltip();
+        hotelTbody.innerHTML = S.hotels.map(function (h, i) {
+            var priceCells = S.columns.map(function (label, c) {
+                var v = (h.prices && h.prices[c] != null) ? h.prices[c] : '';
+                return '<td><input type="text" class="form-control text-right cw-hotel-price" name="hotels[' + i + '][prices][' + c + ']" value="' + esc(v) + '" placeholder="0.00"></td>';
+            }).join('');
+            return '<tr class="cw-hotel-row">' +
+                '<td><input type="text" class="form-control cw-hotel-name" name="hotels[' + i + '][hotel_name]" value="' + esc(h.hotel_name || '') + '" placeholder="e.g. 4* Hotel or similar"></td>' +
+                priceCells +
+                '<td><input type="text" class="form-control text-right cw-hotel-single" name="hotels[' + i + '][single_supp_price]" value="' + esc(h.single_supp_price || '') + '" placeholder="0.00"></td>' +
+                '<td class="text-center"><button type="button" class="btn btn-icon btn-light-danger btn-sm cw-hotel-remove" data-i="' + i + '" data-toggle="tooltip" title="Remove hotel"><i class="la la-trash"></i></button></td>' +
+                '</tr>';
+        }).join('');
+        retip(hotelTable);
     }
+
+    hotelTable.addEventListener('click', function (e) {
+        var rmCol = e.target.closest('.cw-hcol-remove');
+        if (rmCol) { readHotels(); var c = +rmCol.getAttribute('data-c'); if (S.columns.length > 1) { S.columns.splice(c, 1); S.hotels.forEach(function (h) { h.prices.splice(c, 1); }); renderHotels(); } return; }
+        var rmRow = e.target.closest('.cw-hotel-remove');
+        if (rmRow) { readHotels(); S.hotels.splice(+rmRow.getAttribute('data-i'), 1); if (!S.hotels.length) { S.hotels = [blankHotel()]; } renderHotels(); return; }
+    });
+    document.getElementById('cw-hotel-add').addEventListener('click', function () { readHotels(); S.hotels.push(blankHotel()); renderHotels(); });
+    document.getElementById('cw-hotel-addcol').addEventListener('click', function () { readHotels(); S.columns.push(''); S.hotels.forEach(function (h) { h.prices.push(''); }); renderHotels(); });
+
+    // 4.1 — pull hotel names + first-column selling rate from the Costing combinations.
+    document.getElementById('cw-hotel-pull').addEventListener('click', function () {
+        if (!S.comboPricing.length) {
+            if (typeof Swal !== 'undefined') { Swal.fire({ icon: 'info', title: 'No combinations', text: 'Add combinations with a selling price in the Cost Template first.' }); }
+            else { alert('Add combinations in the Cost Template first.'); }
+            return;
+        }
+        var doPull = function () {
+            readHotels();
+            S.hotels = S.comboPricing.map(function (combo) {
+                var prices = S.columns.map(function () { return ''; });
+                prices[0] = (combo.price_per_pax != null && combo.price_per_pax !== '') ? String(combo.price_per_pax) : '';
+                return { hotel_name: combo.name || '', prices: prices, single_supp_price: '' };
+            });
+            if (!S.hotels.length) { S.hotels = [blankHotel()]; }
+            renderHotels();
+        };
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({ icon: 'question', title: 'Pull from Costing?', text: 'This replaces the hotel rows with your ' + S.comboPricing.length + ' combination(s) and their selling price per pax.', showCancelButton: true, confirmButtonText: 'Pull' })
+                .then(function (r) { if (r.value) { doPull(); } });
+        } else if (confirm('Replace hotel rows with the costing combinations?')) { doPull(); }
+    });
+
+    /* ---------------- FLIGHTS ---------------- */
+    var modeSel = document.getElementById('cw-flight-mode');
+    var flightWrap = document.getElementById('cw-flight-wrap');
+    var optionsWrap = document.getElementById('cw-flight-options');
+    var airlineListId = 'cw-airline-presets';
+    (function () {
+        var dl = document.createElement('datalist'); dl.id = airlineListId;
+        dl.innerHTML = Object.keys(S.airlines).map(function (k) { return '<option value="' + esc(S.airlines[k]) + '">'; }).join('');
+        optionsWrap.parentNode.appendChild(dl);
+    })();
+
+    function showsSection() { return modeSel.value !== 'none'; }
+    function showsPricing() { return modeSel.value === 'fit' || modeSel.value === 'git'; }
+
+    function readOptions() {
+        S.options = Array.prototype.map.call(optionsWrap.querySelectorAll('.cw-fopt'), function (card) {
+            return {
+                title: card.querySelector('.cw-fopt-title').value,
+                airline: card.querySelector('.cw-fopt-airline').value,
+                price: card.querySelector('.cw-fopt-price') ? card.querySelector('.cw-fopt-price').value : '',
+                fare_includes: card.querySelector('.cw-fopt-fare') ? card.querySelector('.cw-fopt-fare').value : '',
+                fare_expiry: card.querySelector('.cw-fopt-expiry') ? card.querySelector('.cw-fopt-expiry').value : '',
+                rows: Array.prototype.map.call(card.querySelectorAll('.cw-frow'), function (tr) {
+                    return {
+                        travel_date: tr.querySelector('[data-f="travel_date"]').value,
+                        sector: tr.querySelector('[data-f="sector"]').value,
+                        flight_no: tr.querySelector('[data-f="flight_no"]').value,
+                        timing: tr.querySelector('[data-f="timing"]').value,
+                        duration: tr.querySelector('[data-f="duration"]').value
+                    };
+                })
+            };
+        });
+    }
+
+    function renderOptions() {
+        flightWrap.style.display = showsSection() ? '' : 'none';
+        var pricing = showsPricing();
+        optionsWrap.innerHTML = S.options.map(function (o, oi) {
+            var rows = (o.rows && o.rows.length) ? o.rows : [blankRow()];
+            var rowsHtml = rows.map(function (r, ri) {
+                function inp(f, ph) { return '<td><input type="text" class="form-control form-control-sm" data-f="' + f + '" name="flight_options[' + oi + '][rows][' + ri + '][' + f + ']" value="' + esc(r[f] || '') + '" placeholder="' + ph + '"></td>'; }
+                return '<tr class="cw-frow">' + inp('travel_date', '13 Nov 2026') + inp('sector', 'KUL - HCM') + inp('flight_no', 'AK 001') + inp('timing', '0700 - 1000') + inp('duration', '3hr 15mins') +
+                    '<td class="text-center"><button type="button" class="btn btn-icon btn-sm btn-light-danger cw-frow-remove" data-o="' + oi + '" data-r="' + ri + '" data-toggle="tooltip" title="Remove flight"><i class="la la-trash"></i></button></td></tr>';
+            }).join('');
+
+            var pricingHtml = pricing ? (
+                '<div class="row mt-2">' +
+                    '<div class="col-md-4 mb-2"><label class="font-weight-bold mb-1">Price / pax (Adult / Child) RM</label><input type="text" class="form-control text-right cw-fopt-price" name="flight_options[' + oi + '][price]" value="' + esc(o.price || '') + '" placeholder="0.00"></div>' +
+                    '<div class="col-md-8 mb-2"><label class="font-weight-bold mb-1">Fare includes</label><input type="text" class="form-control cw-fopt-fare" name="flight_options[' + oi + '][fare_includes]" value="' + esc(o.fare_includes || '') + '" placeholder="e.g. 20kg baggage, standard seat"></div>' +
+                    '<div class="col-md-12 mb-2"><label class="font-weight-bold mb-1">Fare expiry</label><input type="text" class="form-control cw-fopt-expiry" name="flight_options[' + oi + '][fare_expiry]" value="' + esc(o.fare_expiry || '') + '" placeholder="e.g. Valid until 10 Oct 2026"></div>' +
+                '</div>'
+            ) : '';
+
+            return '<div class="cw-combo-card cw-fopt" data-o="' + oi + '" style="margin-bottom:16px;">' +
+                '<div class="cw-combo-head">' +
+                    '<input type="text" class="form-control cw-fopt-title" name="flight_options[' + oi + '][title]" value="' + esc(o.title || '') + '" placeholder="Option ' + (oi + 1) + ' title (e.g. Option 1 - AirAsia)">' +
+                    '<button type="button" class="btn btn-icon btn-light-danger cw-fopt-remove" data-o="' + oi + '" data-toggle="tooltip" title="Remove flight option"><i class="la la-trash"></i></button>' +
+                '</div>' +
+                '<div class="row mb-2"><div class="col-md-5"><label class="font-weight-bold mb-1">Airline</label><input type="text" class="form-control cw-fopt-airline" name="flight_options[' + oi + '][airline]" list="' + airlineListId + '" value="' + esc(o.airline || '') + '" placeholder="e.g. Malaysia Airlines (MH)"></div></div>' +
+                '<div class="table-responsive"><table class="table table-sm cw-logi-table mb-2"><thead><tr><th>Travel Date</th><th>Sector</th><th>Flight No</th><th>Timing</th><th>Duration</th><th style="width:44px;"></th></tr></thead>' +
+                    '<tbody>' + rowsHtml + '</tbody></table></div>' +
+                '<button type="button" class="btn btn-sm btn-light-primary font-weight-bold cw-frow-add" data-o="' + oi + '"><i class="la la-plus"></i>Add Flight</button>' +
+                pricingHtml +
+            '</div>';
+        }).join('');
+        retip(optionsWrap);
+    }
+
+    optionsWrap.addEventListener('click', function (e) {
+        var rmOpt = e.target.closest('.cw-fopt-remove');
+        if (rmOpt) { readOptions(); S.options.splice(+rmOpt.getAttribute('data-o'), 1); if (!S.options.length) { S.options = [blankOption()]; } renderOptions(); return; }
+        var addRow = e.target.closest('.cw-frow-add');
+        if (addRow) { readOptions(); var o = +addRow.getAttribute('data-o'); S.options[o].rows = S.options[o].rows || []; S.options[o].rows.push(blankRow()); renderOptions(); return; }
+        var rmRow = e.target.closest('.cw-frow-remove');
+        if (rmRow) { readOptions(); var oo = +rmRow.getAttribute('data-o'); S.options[oo].rows.splice(+rmRow.getAttribute('data-r'), 1); if (!S.options[oo].rows.length) { S.options[oo].rows = [blankRow()]; } renderOptions(); return; }
+    });
+    document.getElementById('cw-flight-add-option').addEventListener('click', function () { readOptions(); S.options.push(blankOption()); renderOptions(); });
+    modeSel.addEventListener('change', function () { readOptions(); renderOptions(); });
+
+    function retip(scope) { if (window.jQuery && jQuery.fn.tooltip) { jQuery(scope).find('[data-toggle="tooltip"]').tooltip(); } }
+
+    renderHotels();
+    renderOptions();
+    retip(document);
 });
 </script>
 <?php } ?>

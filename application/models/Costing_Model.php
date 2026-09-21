@@ -214,6 +214,9 @@ class Costing_Model extends CI_Model
             // "Hotel & Flights" step.
             'quote_hotels'  => $this->Read_Quote_Hotels((int) $package['id']),
             'quote_flights' => $this->Read_Quote_Flights((int) $package['id']),
+            // 18 Sep 2026 rework: flight options (item 3 + 4.4) — each with its own
+            // airline + schedule + pricing.
+            'quote_flight_options' => $this->Read_Quote_Flight_Options((int) $package['id']),
             'quote_meta'    => array(
                 'quote_pricing_basis'    => isset($package['quote_pricing_basis']) ? $package['quote_pricing_basis'] : '',
                 'quote_travel_date_note' => isset($package['quote_travel_date_note']) ? $package['quote_travel_date_note'] : '',
@@ -223,11 +226,22 @@ class Costing_Model extends CI_Model
                 'quote_flight_fare_note' => isset($package['quote_flight_fare_note']) ? $package['quote_flight_fare_note'] : '',
                 'quote_flight_expiry'    => isset($package['quote_flight_expiry']) ? $package['quote_flight_expiry'] : '',
                 'quote_footer_notes'     => isset($package['quote_footer_notes']) ? $package['quote_footer_notes'] : '',
+                // 18 Sep 2026: flight mode (4.3) + hotel pricing columns (4.2).
+                'quote_flight_mode'      => isset($package['quote_flight_mode']) ? $package['quote_flight_mode'] : '',
+                'quote_hotel_columns'    => isset($package['quote_hotel_columns']) ? $package['quote_hotel_columns'] : '',
             ),
+            // 4.1: combination name + per-pax selling price, so the Hotel step can
+            // auto-fill the hotel table from the Costing Template's combinations.
+            'combination_pricing' => $booking
+                ? $this->Combination_Pricing_List((int) $booking['id'], (int) $base_currency['id'], $booking['travel_date'], (float) $financials['margin_percentage'], (int) $booking['total_pax'])
+                : array(),
             'sales_agents' => $this->Read_Sales_Agents(),
             'quotation_token' => $booking && !empty($booking['quotation_token']) ? $booking['quotation_token'] : '',
             'item_master' => $this->Read_Item_Master(),
-            'currency_rate_map' => $this->Read_Currency_Rate_Map($booking ? $booking['travel_date'] : null, (int) $base_currency['id']),
+            // Feedback 18 Sep 2026 (2.4): the cost step previews (and freezes on save)
+            // the LATEST exchange rate, so amending/recalculating a package always
+            // picks up the current rate instead of the one captured at creation.
+            'currency_rate_map' => $this->Read_Currency_Rate_Map(null, (int) $base_currency['id']),
             'combinations' => $booking ? $this->Read_Combinations((int) $booking['id'], (int) $base_currency['id'], $booking['travel_date']) : array(),
         );
     }
@@ -524,6 +538,8 @@ class Costing_Model extends CI_Model
                 'name' => $combo['name'],
                 // #5 Manual per-pax selling price (NULL = use the suggested markup).
                 'selling_price_per_pax' => isset($combo['selling_price_per_pax']) ? $combo['selling_price_per_pax'] : null,
+                // General combination (item 6): its cost folds into every other combo.
+                'is_general' => !empty($combo['is_general']) ? 1 : 0,
                 'sort_order' => $sort,
             ));
             $combination_id = (int) $this->db->insert_id();
@@ -559,10 +575,18 @@ class Costing_Model extends CI_Model
         if (!empty($payload['snapshot'])) {
             $this->Save_Snapshot_Rates($booking_id, (array) $payload['snapshot']);
         } else {
+            // Feedback 18 Sep 2026 (2.4): every save (create OR amend) re-captures the
+            // LATEST exchange rate rather than re-freezing the previously saved (stale)
+            // snapshot. The frozen snapshot still protects a saved quote from drifting
+            // until it is next amended/recalculated — it just refreshes on that action.
+            $latest = $this->Read_Currency_Rate_Map(null, 0);
             $seed = array();
             foreach ($this->Read_Snapshot_Panel($booking_id) as $panel_row) {
-                $seed[$panel_row['currency_id']] = array(
-                    'rate_to_myr' => $panel_row['rate_to_myr'],
+                $currency_id = (int) $panel_row['currency_id'];
+                $seed[$currency_id] = array(
+                    'rate_to_myr' => isset($latest[$currency_id]['rate_to_myr'])
+                        ? $latest[$currency_id]['rate_to_myr']
+                        : $panel_row['rate_to_myr'],
                     'remark'      => $panel_row['remark'],
                 );
             }
@@ -995,18 +1019,63 @@ class Costing_Model extends CI_Model
     }
 
     /**
+     * Flight OPTIONS for a package (feedback 18 Sep 2026, item 3 + 4.4 — multiple
+     * airline options compared in one quotation). Each option carries its meta
+     * (title/airline/price/fare) and its own nested schedule rows ('flights').
+     *
+     * @return array list of option rows, each with a 'flights' array
+     */
+    public function Read_Quote_Flight_Options($package_id)
+    {
+        $package_id = (int) $package_id;
+        $options = $this->db
+            ->where('package_id', $package_id)
+            ->order_by('sort_order', 'ASC')
+            ->order_by('id', 'ASC')
+            ->get('costing_quote_flight_options')
+            ->result_array();
+
+        if (empty($options)) {
+            return array();
+        }
+
+        $flights = $this->db
+            ->where('package_id', $package_id)
+            ->order_by('sort_order', 'ASC')
+            ->order_by('id', 'ASC')
+            ->get('costing_quote_flights')
+            ->result_array();
+
+        $by_option = array();
+        foreach ($flights as $flight) {
+            $by_option[(int) $flight['option_id']][] = $flight;
+        }
+
+        foreach ($options as &$option) {
+            $oid = (int) $option['id'];
+            $option['flights'] = isset($by_option[$oid]) ? $by_option[$oid] : array();
+        }
+        unset($option);
+
+        return $options;
+    }
+
+    /**
      * Replace-all save of a package's hotel + flight quote tables plus the
      * quote-level free-text fields (pricing basis, notes, flight price/expiry).
      * Mirrors Save_Itinerary_Days: wipe the package's child rows, re-insert the
      * non-empty ones in posted order, then update the scalar fields on the package.
      *
      * @param int   $package_id
-     * @param array $hotels       list of [hotel_name, twin_triple_price, single_supp_price]
-     * @param array $flights      list of [travel_date, sector, flight_no, timing, duration]
-     * @param array $level_fields posted quote-level fields (see costing_quote_prepare_level)
+     * @param array $hotels         list of [hotel_name, prices[], single_supp_price]
+     * @param array $flight_options list of options, each [title, airline, price,
+     *                              fare_includes, fare_expiry, rows[]] (18 Sep 2026)
+     * @param array $level_fields   posted quote-level fields (8 legacy + flight mode
+     *                              + hotel columns; see costing_quote_prepare_level /
+     *                              costing_quote_prepare_extra_level)
      * @return bool
      */
-    public function Save_Quote_Details($package_id, $hotels, $flights, $level_fields = array())
+    public function Save_Quote_Details($package_id, $hotels, $flight_options, $level_fields = array())
     {
         $this->load->helper('costing_quote');
         $package_id = (int) $package_id;
@@ -1014,12 +1083,19 @@ class Costing_Model extends CI_Model
             return false;
         }
 
+        // Hotel pricing columns drive how many per-column prices each hotel row keeps.
+        $columns = costing_quote_hotel_columns_normalize(
+            isset($level_fields['quote_hotel_columns']) ? $level_fields['quote_hotel_columns'] : null
+        );
+        $col_count = count($columns);
+
         $this->db->trans_start();
 
+        // ---- Hotels (per-column prices) -------------------------------------
         $this->db->where('package_id', $package_id)->delete('costing_quote_hotels');
         $sort = 0;
         foreach ((array) $hotels as $row) {
-            $prepared = costing_quote_hotel_prepare_row($row);
+            $prepared = costing_quote_hotel_prepare_row($row, $col_count);
             if ($prepared['is_empty']) {
                 continue;
             }
@@ -1029,21 +1105,49 @@ class Costing_Model extends CI_Model
             $this->db->insert('costing_quote_hotels', $prepared);
         }
 
+        // ---- Flight options + their schedule rows (replace-all) -------------
         $this->db->where('package_id', $package_id)->delete('costing_quote_flights');
-        $sort = 0;
-        foreach ((array) $flights as $row) {
-            $prepared = costing_quote_flight_prepare_row($row);
-            if ($prepared['is_empty']) {
+        $this->db->where('package_id', $package_id)->delete('costing_quote_flight_options');
+        $opt_sort = 0;
+        $row_sort = 0;
+        foreach ((array) $flight_options as $option) {
+            $option = (array) $option;
+            $prepared_opt = costing_quote_flight_option_prepare($option);
+
+            $prepared_rows = array();
+            foreach ((array) (isset($option['rows']) ? $option['rows'] : array()) as $row) {
+                $prow = costing_quote_flight_prepare_row($row);
+                if ($prow['is_empty']) {
+                    continue;
+                }
+                unset($prow['is_empty']);
+                $prepared_rows[] = $prow;
+            }
+
+            // Skip an option only when it has neither meta nor a single schedule row.
+            if ($prepared_opt['is_empty'] && empty($prepared_rows)) {
                 continue;
             }
-            unset($prepared['is_empty']);
-            $prepared['package_id'] = $package_id;
-            $prepared['sort_order'] = $sort++;
-            $this->db->insert('costing_quote_flights', $prepared);
+            unset($prepared_opt['is_empty']);
+            $prepared_opt['package_id'] = $package_id;
+            $prepared_opt['sort_order'] = $opt_sort++;
+            $this->db->insert('costing_quote_flight_options', $prepared_opt);
+            $option_id = (int) $this->db->insert_id();
+
+            foreach ($prepared_rows as $prow) {
+                $prow['package_id'] = $package_id;
+                $prow['option_id']  = $option_id;
+                $prow['sort_order'] = $row_sort++;
+                $this->db->insert('costing_quote_flights', $prow);
+            }
         }
 
-        $this->db->where('id', $package_id)
-            ->update('costing_packages', costing_quote_prepare_level($level_fields));
+        // ---- Package-level fields (8 legacy + flight mode + hotel columns) --
+        $update = array_merge(
+            costing_quote_prepare_level($level_fields),
+            costing_quote_prepare_extra_level($level_fields)
+        );
+        $this->db->where('id', $package_id)->update('costing_packages', $update);
 
         $this->db->trans_complete();
         return (bool) $this->db->trans_status();
@@ -1091,7 +1195,7 @@ class Costing_Model extends CI_Model
         }
 
         $booking = $this->db
-            ->select('cb.*, cp.name AS package_name, cp.tour_code, cp.customer_name, cp.sales_admin_id, sales_admin.Name AS sales_admin_name, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes')
+            ->select('cb.*, cp.name AS package_name, cp.tour_code, cp.customer_name, cp.sales_admin_id, sales_admin.Name AS sales_admin_name, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns')
             ->from('costing_bookings cb')
             ->join('costing_packages cp', 'cp.id = cb.package_id')
             ->join('admin sales_admin', 'sales_admin.AdminID = cp.sales_admin_id', 'left')
@@ -1126,8 +1230,13 @@ class Costing_Model extends CI_Model
         // item names + its own selling price. The customer picks ONE, so prices are
         // NOT summed. When present, the PDF shows these options instead of the
         // internal item list.
+        // Fold the General Combination's cost into every combination (item 6) — its
+        // common items apply to all and it is never shown as its own option.
+        $folded_combos = costing_fold_general_combination(
+            $this->Read_Combinations((int) $booking['id'], $base_currency_id, $booking['travel_date'])
+        );
         $combo_input = array();
-        foreach ($this->Read_Combinations((int) $booking['id'], $base_currency_id, $booking['travel_date']) as $combo) {
+        foreach ($folded_combos as $combo) {
             $names = array();
             foreach ($combo['items'] as $combo_item) {
                 $names[] = $combo_item['name'];
@@ -1160,6 +1269,7 @@ class Costing_Model extends CI_Model
             // the customer Quotation PDF's primary content (screenshot layout).
             'quote_hotels'  => $this->Read_Quote_Hotels((int) $booking['package_id']),
             'quote_flights' => $this->Read_Quote_Flights((int) $booking['package_id']),
+            'quote_flight_options' => $this->Read_Quote_Flight_Options((int) $booking['package_id']),
             'quote_meta'    => array(
                 'quote_pricing_basis'    => isset($booking['quote_pricing_basis']) ? $booking['quote_pricing_basis'] : '',
                 'quote_travel_date_note' => isset($booking['quote_travel_date_note']) ? $booking['quote_travel_date_note'] : '',
@@ -1169,6 +1279,8 @@ class Costing_Model extends CI_Model
                 'quote_flight_fare_note' => isset($booking['quote_flight_fare_note']) ? $booking['quote_flight_fare_note'] : '',
                 'quote_flight_expiry'    => isset($booking['quote_flight_expiry']) ? $booking['quote_flight_expiry'] : '',
                 'quote_footer_notes'     => isset($booking['quote_footer_notes']) ? $booking['quote_footer_notes'] : '',
+                'quote_flight_mode'      => isset($booking['quote_flight_mode']) ? $booking['quote_flight_mode'] : '',
+                'quote_hotel_columns'    => isset($booking['quote_hotel_columns']) ? $booking['quote_hotel_columns'] : '',
             ),
             'items'         => $items,
             'combinations'  => $combo_summary['combinations'],
@@ -1522,12 +1634,46 @@ class Costing_Model extends CI_Model
      *
      * @return array list of ['id','name','cost_myr','items'=>[cost rows]]
      */
+    /**
+     * Combination name + effective per-pax selling price (manual override, else the
+     * suggested cost-after-markup) for a booking. Powers the Hotel step's "Pull from
+     * Costing" (feedback 4.1): the hotel name + twin/triple price come from each
+     * combination's selling rate. Returns [ ['name','price_per_pax'], ... ].
+     */
+    public function Combination_Pricing_List($booking_id, $base_currency_id, $travel_date, $margin_percent, $total_pax)
+    {
+        $this->load->helper('costing_calc');
+        // Fold the General Combination cost into every combination first (item 6).
+        $folded = costing_fold_general_combination(
+            $this->Read_Combinations((int) $booking_id, (int) $base_currency_id, $travel_date)
+        );
+        $combo_input = array();
+        foreach ($folded as $combo) {
+            $combo_input[] = array(
+                'name'                  => $combo['name'],
+                'item_names'            => array(),
+                'cost_myr'              => $combo['cost_myr'],
+                'selling_price_per_pax' => isset($combo['selling_price_per_pax']) ? $combo['selling_price_per_pax'] : null,
+            );
+        }
+        $summary = costing_combination_summary($combo_input, max(0, (float) $margin_percent), (int) $total_pax);
+
+        $out = array();
+        foreach ($summary['combinations'] as $combo) {
+            $out[] = array(
+                'name'          => $combo['name'],
+                'price_per_pax' => $combo['selling_price_per_pax'],
+            );
+        }
+        return $out;
+    }
+
     public function Read_Combinations($booking_id, $base_currency_id, $travel_date = null)
     {
         $booking_id = (int) $booking_id;
 
         $combos = $this->db
-            ->select('id, name, selling_price_per_pax')
+            ->select('id, name, selling_price_per_pax, is_general')
             ->where('costing_booking_id', $booking_id)
             ->order_by('sort_order', 'ASC')
             ->order_by('id', 'ASC')
@@ -1569,6 +1715,7 @@ class Costing_Model extends CI_Model
                 'selling_price_per_pax' => ($combo['selling_price_per_pax'] === null || $combo['selling_price_per_pax'] === '')
                     ? null
                     : round((float) $combo['selling_price_per_pax'], 2),
+                'is_general' => !empty($combo['is_general']) ? 1 : 0,
                 'items'    => $items,
             );
         }
@@ -1817,16 +1964,21 @@ class Costing_Model extends CI_Model
                 continue;
             }
 
+            // General Combination (18 Sep 2026, item 6): its items are common to all
+            // and folded into every combination; it is never a customer option.
+            $is_general = !empty($combo['is_general']) ? 1 : 0;
+
             if ($name === '') {
-                $name = 'Combination ' . $seq;
+                $name = $is_general ? 'General' : ('Combination ' . $seq);
             }
 
             // #5 Optional manual selling price per pax. Blank/absent => NULL (the
-            // quotation falls back to the suggested Cost after Markup).
+            // quotation falls back to the suggested Cost after Markup). A general
+            // combination is never priced on its own.
             $selling = isset($combo['selling_price_per_pax']) ? trim((string) $combo['selling_price_per_pax']) : '';
-            $selling_price_per_pax = ($selling !== '' && is_numeric($selling)) ? round(max(0, (float) $selling), 2) : null;
+            $selling_price_per_pax = (!$is_general && $selling !== '' && is_numeric($selling)) ? round(max(0, (float) $selling), 2) : null;
 
-            $out[] = array('name' => $name, 'rows' => $rows, 'selling_price_per_pax' => $selling_price_per_pax);
+            $out[] = array('name' => $name, 'rows' => $rows, 'selling_price_per_pax' => $selling_price_per_pax, 'is_general' => $is_general);
         }
 
         return $out;

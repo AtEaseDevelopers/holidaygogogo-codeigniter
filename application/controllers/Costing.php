@@ -197,17 +197,22 @@ class Costing extends MY_Controller
             'quote_pricing_basis'    => $this->input->post('quote_pricing_basis'),
             'quote_travel_date_note' => $this->input->post('quote_travel_date_note'),
             'quote_hotel_note'       => $this->input->post('quote_hotel_note'),
+            // Legacy package-level flight fields — superseded by flight options, kept
+            // for the prepare contract (posted blank by the new form).
             'quote_flight_title'     => $this->input->post('quote_flight_title'),
             'quote_flight_price'     => $this->input->post('quote_flight_price'),
             'quote_flight_fare_note' => $this->input->post('quote_flight_fare_note'),
             'quote_flight_expiry'    => $this->input->post('quote_flight_expiry'),
             'quote_footer_notes'     => $this->input->post('quote_footer_notes'),
+            // 18 Sep 2026 rework: flight mode (4.3) + hotel pricing columns (4.2).
+            'quote_flight_mode'      => $this->input->post('quote_flight_mode'),
+            'quote_hotel_columns'    => (array) $this->input->post('quote_hotel_columns'),
         );
 
         if ($package_id > 0 && $this->Costing_Model->Save_Quote_Details(
             $package_id,
             (array) $this->input->post('hotels'),
-            (array) $this->input->post('flights'),
+            (array) $this->input->post('flight_options'),
             $level_fields
         )) {
             $this->session->set_flashdata('message_success', 'Hotel & flight details saved.');

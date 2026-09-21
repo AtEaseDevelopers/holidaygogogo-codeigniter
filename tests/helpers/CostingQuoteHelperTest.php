@@ -96,6 +96,72 @@ $assertions['blank footer -> default lines'] = count($defaultLines) === 5;
 $customLines = costing_quote_footer_note_lines("Line one\n\n  Line two  \nLine three");
 $assertions['custom footer trims blanks'] = $customLines === array('Line one', 'Line two', 'Line three');
 
+// --- 18 Sep 2026 feedback: flight modes (4.3) ------------------------------
+$modes = costing_quote_flight_modes();
+$assertions['modes: four options']    = count($modes) === 4;
+$assertions['modes: has none/fit/git'] = isset($modes['none'], $modes['include'], $modes['fit'], $modes['git']);
+$assertions['mode: normalize known']  = costing_quote_normalize_flight_mode('git') === 'git';
+$assertions['mode: normalize blank -> fit'] = costing_quote_normalize_flight_mode('') === 'fit';
+$assertions['mode: normalize junk -> fit']  = costing_quote_normalize_flight_mode('zzz') === 'fit';
+$assertions['mode: none hides section']  = costing_quote_flight_mode_shows_section('none') === false;
+$assertions['mode: include shows section'] = costing_quote_flight_mode_shows_section('include') === true;
+$assertions['mode: include no pricing']  = costing_quote_flight_mode_shows_pricing('include') === false;
+$assertions['mode: fit shows pricing']   = costing_quote_flight_mode_shows_pricing('fit') === true;
+$assertions['mode: git shows pricing']   = costing_quote_flight_mode_shows_pricing('git') === true;
+$assertions['mode: none no pricing']     = costing_quote_flight_mode_shows_pricing('none') === false;
+
+// --- airlines (item 3) -----------------------------------------------------
+$airlines = costing_quote_airlines();
+$assertions['airlines: MH/AK/OD present'] = isset($airlines['MH'], $airlines['AK'], $airlines['OD']);
+
+// --- hotel columns + prices (4.2) ------------------------------------------
+$assertions['hotel cols: default one'] = costing_quote_hotel_columns_normalize(null) === array('Twin / Triple');
+$assertions['hotel cols: from json']   = costing_quote_hotel_columns_normalize('["Twin","Triple"]') === array('Twin', 'Triple');
+$assertions['hotel cols: trims + drops blank'] = costing_quote_hotel_columns_normalize(array(' Twin ', '', 'Triple')) === array('Twin', 'Triple');
+$assertions['hotel cols: all blank -> default'] = costing_quote_hotel_columns_normalize(array('', '  ')) === array('Twin / Triple');
+
+$assertions['hotel prices: pads to count'] = costing_quote_hotel_prices_normalize(array('1000'), 3) === array(1000.0, null, null);
+$assertions['hotel prices: truncates'] = costing_quote_hotel_prices_normalize(array('1', '2', '3'), 2) === array(1.0, 2.0);
+$assertions['hotel prices: from json'] = costing_quote_hotel_prices_normalize('["1,999","699"]', 2) === array(1999.0, 699.0);
+
+$titles = costing_quote_hotel_title_presets();
+$assertions['hotel titles: has twin/triple presets'] = in_array('Twin', $titles, true) && in_array('Triple', $titles, true);
+
+// Hotel prepare with multi-column prices.
+$hotelMulti = costing_quote_hotel_prepare_row(array(
+    'hotel_name' => '4* Hotel',
+    'prices'     => array('4268', '3881'),
+    'single_supp_price' => '1166',
+), 2);
+$assertions['hotel multi: prices_json aligned'] = $hotelMulti['prices_json'] === json_encode(array(4268.0, 3881.0));
+$assertions['hotel multi: first col -> twin_triple (legacy)'] = $hotelMulti['twin_triple_price'] === 4268.0;
+$assertions['hotel multi: single kept'] = $hotelMulti['single_supp_price'] === 1166.0;
+$assertions['hotel multi: not empty'] = $hotelMulti['is_empty'] === false;
+$hotelMultiBlank = costing_quote_hotel_prepare_row(array('prices' => array('', '')), 2);
+$assertions['hotel multi blank: empty'] = $hotelMultiBlank['is_empty'] === true;
+
+// --- flight options (4.4) --------------------------------------------------
+$opt = costing_quote_flight_option_prepare(array(
+    'title' => ' Option 1 ', 'airline' => 'AK', 'price' => 'RM 1,000',
+    'fare_includes' => '20kg + MOB', 'fare_expiry' => '20 Sep 2026',
+));
+$assertions['opt: title trimmed'] = $opt['title'] === 'Option 1';
+$assertions['opt: airline kept']  = $opt['airline'] === 'AK';
+$assertions['opt: price float']   = $opt['price'] === 1000.0;
+$assertions['opt: fare kept']     = $opt['fare_includes'] === '20kg + MOB';
+$assertions['opt: not empty']     = $opt['is_empty'] === false;
+$optBlank = costing_quote_flight_option_prepare(array('title' => '', 'price' => ''));
+$assertions['opt: all blank empty'] = $optBlank['is_empty'] === true;
+$assertions['opt: blank null title'] = $optBlank['title'] === null;
+
+// --- extra level (mode + hotel columns) ------------------------------------
+$extra = costing_quote_prepare_extra_level(array('quote_flight_mode' => 'git', 'quote_hotel_columns' => array('Twin', 'Triple')));
+$assertions['extra: mode normalized'] = $extra['quote_flight_mode'] === 'git';
+$assertions['extra: columns json']    = $extra['quote_hotel_columns'] === json_encode(array('Twin', 'Triple'));
+$assertions['extra: only two keys']   = (array_keys($extra) === array('quote_flight_mode', 'quote_hotel_columns'));
+// Legacy level contract unchanged.
+$assertions['level still eight fields'] = count(costing_quote_level_fields()) === 8;
+
 $failed = 0;
 foreach ($assertions as $label => $ok) {
     echo ($ok ? '  PASS  ' : '  FAIL  ') . $label . PHP_EOL;

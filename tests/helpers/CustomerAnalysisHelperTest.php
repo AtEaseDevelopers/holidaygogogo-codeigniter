@@ -91,11 +91,15 @@ foreach (array_keys(customer_analysis_profile_list_fields()) as $__f) {
     check_true("request instructions ask for list field '$__f'", strpos($req['instructions'], '"' . $__f . '"') !== false);
 }
 check_true('request instructions ask for hot/cold temperature', strpos($req['instructions'], 'temperature') !== false && stripos($req['instructions'], 'hot') !== false && stripos($req['instructions'], 'cold') !== false);
+check_true('request instructions ask for approach_suggestion', strpos($req['instructions'], '"approach_suggestion"') !== false);
+check_true('approach guidance says use the customer chat language', stripos($req['instructions'], "customer's chat language") !== false || stripos($req['instructions'], "customer's own chat language") !== false);
 
 // The incremental-update request refreshes the character profile (no next steps),
 // and carries the prior profile fields so the model can keep what still holds.
-$reqUpd = customer_analysis_build_update_request('Ali', array('summary' => 'old', 'profile' => array('character' => 'cautious buyer')), "Customer: still keen");
+$reqUpd = customer_analysis_build_update_request('Ali', array('summary' => 'old', 'approach_suggestion' => 'ping about dates', 'profile' => array('character' => 'cautious buyer')), "Customer: still keen");
 check_true('update request carries prior summary', strpos($reqUpd['input'], 'old') !== false);
+check_true('update request carries prior approach_suggestion', strpos($reqUpd['input'], 'ping about dates') !== false);
+check_true('update request asks for approach_suggestion', strpos($reqUpd['instructions'], '"approach_suggestion"') !== false);
 check_true('update request carries prior profile field', strpos($reqUpd['input'], 'cautious buyer') !== false);
 check_true('update request carries new transcript', strpos($reqUpd['input'], 'still keen') !== false);
 check_true('update request does NOT ask for next_actions (dropped)', strpos($reqUpd['instructions'], 'next_actions') === false);
@@ -128,11 +132,12 @@ $json = '```json
   "complaints": ["Felt earlier reply was slow"]
 }
 ```';
-$json = str_replace('"summary":', '"temperature": "Hot", "temperature_reason": "Asked to confirm dates and pax", "summary":', $json);
+$json = str_replace('"summary":', '"temperature": "Hot", "temperature_reason": "Asked to confirm dates and pax", "approach_suggestion": "Hi! 帮你比较 Redang 几间酒店 😊", "summary":', $json);
 $rec = customer_analysis_parse_ai_response($json);
 check_true('parse recovers object from json fence', is_array($rec));
 check('parse temperature (Hot -> hot)', 'hot', $rec['temperature']);
 check('parse temperature_reason', 'Asked to confirm dates and pax', $rec['temperature_reason']);
+check('parse approach_suggestion', 'Hi! 帮你比较 Redang 几间酒店 😊', $rec['approach_suggestion']);
 check('parse summary', 'Cautious family planner keen on a Japan trip.', $rec['summary']);
 check('parse profile.character', 'Detail-oriented and price-sensitive', $rec['profile']['character']);
 check('parse profile.mood', 'Warm but hesitant; anxious about kids', $rec['profile']['mood']);
@@ -144,6 +149,7 @@ check('parse profile.complaints list', array('Felt earlier reply was slow'), $re
 // Missing fields default cleanly; a string list is split into an array.
 $partial = customer_analysis_parse_ai_response('{"summary":"Just a lead","preferences":"sea view; halal food"}');
 check('parse defaults missing temperature to empty', '', $partial['temperature']);
+check('parse defaults missing approach_suggestion to empty', '', $partial['approach_suggestion']);
 check('parse defaults missing profile.character to empty', '', $partial['profile']['character']);
 check('parse defaults missing profile.complaints to empty list', array(), $partial['profile']['complaints']);
 check('parse splits a string list on ;', array('sea view', 'halal food'), $partial['profile']['preferences']);

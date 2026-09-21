@@ -280,6 +280,42 @@ if (!function_exists('costing_combination_summary')) {
     }
 }
 
+if (!function_exists('costing_fold_general_combination')) {
+    /**
+     * Fold the "General Combination" cost into every other combination (feedback
+     * 18 Sep 2026, item 6 / general request). The general combination holds the
+     * cost items common to all packages (Tour Leader, Flight, …), entered once; its
+     * cost is ADDED to each regular combination's cost_myr, and the general
+     * combination itself is removed from the list (it is never a customer option).
+     *
+     * When more than one combination is flagged general their costs sum. All other
+     * keys on each regular combination are preserved untouched.
+     *
+     * @param array $combinations each: ['cost_myr', 'is_general'(optional), ...]
+     * @return array regular combinations with cost_myr including the general cost
+     */
+    function costing_fold_general_combination($combinations)
+    {
+        $general = 0.0;
+        foreach ((array) $combinations as $combo) {
+            if (!empty($combo['is_general'])) {
+                $general += (float) (isset($combo['cost_myr']) ? $combo['cost_myr'] : 0);
+            }
+        }
+        $general = round($general, 2);
+
+        $out = array();
+        foreach ((array) $combinations as $combo) {
+            if (!empty($combo['is_general'])) {
+                continue;
+            }
+            $combo['cost_myr'] = round((float) (isset($combo['cost_myr']) ? $combo['cost_myr'] : 0) + $general, 2);
+            $out[] = $combo;
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('costing_build_snapshot_rows')) {
     /**
      * Build the distinct-currency snapshot skeleton from the cost rows, pre-filling
@@ -387,17 +423,18 @@ if (!function_exists('costing_multiplier_count')) {
 
 if (!function_exists('costing_row_myr')) {
     /**
-     * Convert one cost line the way the cost template shows it: the foreign Cost
-     * is converted to MYR and the per-unit bank charge is baked in ("MYR (convert)
-     * — already include bank charges"), then multiplied by the count (No of Day /
-     * No of pax) to give the line Total in MYR.
+     * Convert one cost line the way the cost template shows it: the foreign Cost is
+     * converted to MYR per unit ("MYR (convert)"), multiplied by the count (No of
+     * Day / No of pax), and the bank charge is added ONCE to the line total — it is
+     * a per-transaction fee on the total amount, NOT a per-unit charge (feedback
+     * 18 Sep 2026, item 2.2). No amount on the line (count 0 or rate 0) => no bank.
      *
-     *   myr_per_unit = round(cost_foreign * rate, 2) + bank_charges_myr
-     *   total_myr    = round(myr_per_unit * count, 2)
+     *   myr_per_unit = round(cost_foreign * rate, 2)
+     *   total_myr    = round(myr_per_unit * count, 2) + bank_charges_myr   (once)
      *
      * @param float $cost_foreign     unit cost in the row's currency
      * @param float $rate             rate_to_myr for that currency (>=0)
-     * @param float $bank_charges_myr per-unit bank charge already in MYR (>=0)
+     * @param float $bank_charges_myr per-line bank charge in MYR, applied once (>=0)
      * @param float $count            No of Day / No of pax / 1
      * @return array ['myr_per_unit','total_myr'] (floats, 2dp)
      */
@@ -410,11 +447,13 @@ if (!function_exists('costing_row_myr')) {
         $bank = max(0.0, (float) $bank_charges_myr);
         $count = max(0.0, (float) $count);
 
-        $myr_per_unit = round((float) $cost_foreign * $rate, 2) + $bank;
-        $total_myr    = round($myr_per_unit * $count, 2);
+        $myr_per_unit = round((float) $cost_foreign * $rate, 2);
+        $converted    = round($myr_per_unit * $count, 2);
+        // Bank charge is a single per-line fee — only when the line has an amount.
+        $total_myr    = $converted > 0 ? round($converted + $bank, 2) : 0.0;
 
         return [
-            'myr_per_unit' => round($myr_per_unit, 2),
+            'myr_per_unit' => $myr_per_unit,
             'total_myr'    => $total_myr,
         ];
     }
@@ -425,17 +464,18 @@ if (!function_exists('costing_row_totals')) {
      * Resolve a cost row's MYR figures, preferring a FROZEN per-unit value saved
      * with the row over recomputing from the (master/live) rate.
      *
-     * The "MYR (convert)" column already bakes in the bank charge; once a row is
+     * The "MYR (convert)" column is the pure per-unit conversion; once a row is
      * saved we persist that per-unit figure in its own column so it never drifts
-     * when the exchange-rate master or bank charge changes later. When a frozen
-     * value is present ($stored_myr_per_unit not null/''), it wins and only the
-     * line total is derived from it. When absent (legacy pre-freeze rows), fall
+     * when the exchange-rate master changes later. When a frozen value is present
+     * ($stored_myr_per_unit not null/''), it wins and the line total is derived
+     * from it with the bank charge added ONCE (a per-line fee, never per unit —
+     * feedback 18 Sep 2026, item 2.2). When absent (legacy pre-freeze rows), fall
      * back to converting from the rate + bank charge like costing_row_myr().
      *
      * @param float|null $stored_myr_per_unit frozen per-unit MYR, or null/'' to compute
      * @param float $cost_foreign
      * @param float $rate
-     * @param float $bank_charges_myr
+     * @param float $bank_charges_myr  per-line bank charge in MYR, applied once
      * @param float $count
      * @return array ['myr_per_unit','total_myr'] (floats, 2dp)
      */
@@ -443,9 +483,11 @@ if (!function_exists('costing_row_totals')) {
     {
         if ($stored_myr_per_unit !== null && $stored_myr_per_unit !== '') {
             $per_unit = round(max(0.0, (float) $stored_myr_per_unit), 2);
+            $bank     = max(0.0, (float) $bank_charges_myr);
+            $converted = round($per_unit * max(0.0, (float) $count), 2);
             return [
                 'myr_per_unit' => $per_unit,
-                'total_myr'    => round($per_unit * max(0.0, (float) $count), 2),
+                'total_myr'    => $converted > 0 ? round($converted + $bank, 2) : 0.0,
             ];
         }
 

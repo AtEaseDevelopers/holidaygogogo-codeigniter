@@ -38,6 +38,7 @@ class Customer_Analysis_Model extends CI_Model
 			'covered_upload' => isset($data['covered_upload']) ? (int) $data['covered_upload'] : 0,
 			'temperature'   => ! empty($data['temperature']) ? $data['temperature'] : null,
 			'temperature_reason' => isset($data['temperature_reason']) ? $data['temperature_reason'] : null,
+			'approach_suggestion' => isset($data['approach_suggestion']) ? $data['approach_suggestion'] : null,
 			'summary'       => isset($data['summary']) ? $data['summary'] : null,
 			'sales_intel'   => json_encode($sales_intel, JSON_UNESCAPED_UNICODE),
 			'next_actions'  => json_encode($next_actions, JSON_UNESCAPED_UNICODE),

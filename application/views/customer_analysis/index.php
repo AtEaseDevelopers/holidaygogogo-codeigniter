@@ -45,7 +45,7 @@ function ca_render_analysis($a, $expanded = true)
                 <h3 class="card-label">
                     <?php echo $expanded ? 'Latest Analysis' : 'Analysis'; ?>
                     <?php $temp = strtolower(trim((string) $a->temperature));
-                    if (false && $temp === 'hot') { // hot/cold badge UI hidden for now; feature retained ?>
+                    if ($temp === 'hot') { ?>
                         <span class="label label-danger label-inline font-weight-bolder ml-2" data-toggle="tooltip" title="<?php echo htmlspecialchars($a->temperature_reason ?: ''); ?>"><i class="la la-fire mr-1"></i>HOT</span>
                     <?php } elseif ($temp === 'cold') { ?>
                         <span class="label label-info label-inline font-weight-bolder ml-2" data-toggle="tooltip" title="<?php echo htmlspecialchars($a->temperature_reason ?: ''); ?>"><i class="la la-snowflake mr-1"></i>COLD</span>
@@ -72,6 +72,22 @@ function ca_render_analysis($a, $expanded = true)
                     <div class="mb-5">
                         <div class="font-weight-bolder text-dark mb-2">Customer Profile</div>
                         <div class="text-dark-75" style="font-size:13px; line-height:1.7;"><?php echo nl2br(htmlspecialchars($a->summary)); ?></div>
+                    </div>
+                <?php } ?>
+
+                <?php $approach = isset($a->approach_suggestion) ? trim((string) $a->approach_suggestion) : '';
+                if ($approach !== '') { ?>
+                    <div class="alert alert-custom alert-light-primary fade show mb-5" role="alert">
+                        <div class="alert-icon"><i class="la la-comments-o"></i></div>
+                        <div class="alert-text" style="width:100%;">
+                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                <span class="font-weight-bolder text-dark">How to Approach This Customer</span>
+                                <button type="button" class="btn btn-icon btn-xs btn-light-primary js-ca-copy-approach" data-toggle="tooltip" title="Copy message">
+                                    <i class="la la-copy"></i>
+                                </button>
+                            </div>
+                            <div class="js-ca-approach-text text-dark-75" style="font-size:13px; line-height:1.7; white-space:pre-wrap;"><?php echo htmlspecialchars($approach); ?></div>
+                        </div>
                     </div>
                 <?php } ?>
 
@@ -288,6 +304,27 @@ function ca_render_analysis($a, $expanded = true)
         if (!confirm('Delete this analysis? This cannot be undone.')) { return; }
         var id = $(this).attr('data-id');
         $.post(DELETE_URL, { id: id }, function () { window.location.reload(); }, 'json');
+    });
+
+    // Copy the ready-to-send approach message to the clipboard.
+    $(document).on('click', '.js-ca-copy-approach', function () {
+        var $btn = $(this);
+        var text = $btn.closest('.alert-text').find('.js-ca-approach-text').text();
+        var done = function () {
+            var $icon = $btn.find('i');
+            var prev = $icon.attr('class');
+            $icon.attr('class', 'la la-check');
+            setTimeout(function () { $icon.attr('class', prev); }, 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, done);
+        } else {
+            var $t = $('<textarea>').val(text).css({ position: 'fixed', opacity: 0 }).appendTo('body');
+            $t[0].select();
+            try { document.execCommand('copy'); } catch (e) {}
+            $t.remove();
+            done();
+        }
     });
 })();
 </script>

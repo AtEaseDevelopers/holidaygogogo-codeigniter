@@ -179,33 +179,39 @@ $img = costing_row_myr(30, 4.0, 0, 5);
 $assertions['row: USD30@4 -> 120/unit'] = $approx($img['myr_per_unit'], 120.00);
 $assertions['row: 120 x 5 days -> 600'] = $approx($img['total_myr'], 600.00);
 
-// Bank charge is baked into per-unit MYR and multiplied by the count.
+// Bank charge is a per-line fee: applied ONCE to the line total (on the total
+// unit/amount), NOT baked into every per-unit MYR and multiplied by the count.
+// The per-unit "MYR (convert)" is the pure foreign->MYR conversion.
+//   myr_per_unit = round(cost * rate, 2)
+//   total_myr    = round(myr_per_unit * count, 2) + bank   (bank once)
 $bc = costing_row_myr(100, 4.5, 10, 3);
-$assertions['row: 100@4.5 + 10 bank -> 460/unit'] = $approx($bc['myr_per_unit'], 460.00);
-$assertions['row: 460 x 3 -> 1380']               = $approx($bc['total_myr'], 1380.00);
+$assertions['row: 100@4.5 -> 450/unit (pure, no bank)'] = $approx($bc['myr_per_unit'], 450.00);
+$assertions['row: 450 x 3 + 10 bank once -> 1360']      = $approx($bc['total_myr'], 1360.00);
 
-$assertions['row: fixed count 1']        = $approx(costing_row_myr(100, 4.5, 0, 1)['total_myr'], 450.00);
-$assertions['row: zero count -> 0 total'] = $approx(costing_row_myr(100, 4.5, 10, 0)['total_myr'], 0.00);
+$assertions['row: fixed count 1 + bank once'] = $approx(costing_row_myr(100, 4.5, 10, 1)['total_myr'], 460.00);
+$assertions['row: zero count -> 0 total (no bank)'] = $approx(costing_row_myr(100, 4.5, 10, 0)['total_myr'], 0.00);
 $assertions['row: negative rate -> 0 rate'] = $approx(costing_row_myr(100, -4.5, 0, 1)['total_myr'], 0.00);
-$assertions['row: negative bank clamped'] = $approx(costing_row_myr(100, 4.5, -10, 1)['myr_per_unit'], 450.00);
+$assertions['row: bank not in per-unit'] = $approx(costing_row_myr(100, 4.5, -10, 1)['myr_per_unit'], 450.00);
 $assertions['row: rounds per-unit 2dp']   = $approx(costing_row_myr(10.005, 1.0, 0, 1)['myr_per_unit'], 10.01);
 
-// costing_row_totals: a frozen per-unit MYR (saved on the row, bank charge already
-// baked in at save time) WINS and is never recomputed from the rate/bank charge —
-// only the line total is derived from it. This is what freezing into a stored
-// column buys: the "MYR (convert)" value can't drift when the master rate moves.
-$frozen = costing_row_totals(460.00, 100, 4.5, 10, 3);
-$assertions['totals: frozen per-unit wins']    = $approx($frozen['myr_per_unit'], 460.00);
-$assertions['totals: frozen x count -> total'] = $approx($frozen['total_myr'], 1380.00);
-$moved = costing_row_totals(460.00, 100, 9.9, 999, 2); // master rate changed after save
-$assertions['totals: frozen ignores moved rate']       = $approx($moved['myr_per_unit'], 460.00);
-$assertions['totals: frozen ignores moved rate total'] = $approx($moved['total_myr'], 920.00);
+// costing_row_totals: a frozen per-unit MYR (the pure conversion saved on the row)
+// WINS and is never recomputed from the rate — only the line total is derived from
+// it, with the bank charge added ONCE. This is what freezing into a stored column
+// buys: the "MYR (convert)" value can't drift when the master rate moves, yet the
+// bank charge stays a single per-line fee.
+$frozen = costing_row_totals(450.00, 100, 4.5, 10, 3);
+$assertions['totals: frozen per-unit wins']    = $approx($frozen['myr_per_unit'], 450.00);
+$assertions['totals: frozen x count + bank once -> total'] = $approx($frozen['total_myr'], 1360.00);
+$moved = costing_row_totals(450.00, 100, 9.9, 10, 2); // master rate changed after save
+$assertions['totals: frozen ignores moved rate']       = $approx($moved['myr_per_unit'], 450.00);
+$assertions['totals: frozen ignores moved rate total'] = $approx($moved['total_myr'], 910.00);
 // Legacy rows (no frozen value) fall back to converting from rate + bank charge.
 $legacy = costing_row_totals(null, 100, 4.5, 10, 3);
-$assertions['totals: null -> computes like row_myr'] = $approx($legacy['myr_per_unit'], 460.00);
-$assertions['totals: null legacy total']             = $approx($legacy['total_myr'], 1380.00);
+$assertions['totals: null -> computes like row_myr'] = $approx($legacy['myr_per_unit'], 450.00);
+$assertions['totals: null legacy total']             = $approx($legacy['total_myr'], 1360.00);
 $assertions['totals: empty string -> legacy']        = $approx(costing_row_totals('', 30, 4.0, 0, 5)['total_myr'], 600.00);
 $assertions['totals: frozen 0 stays 0']              = $approx(costing_row_totals(0.0, 100, 4.5, 10, 3)['myr_per_unit'], 0.00);
+$assertions['totals: frozen 0 -> 0 total (no bank)'] = $approx(costing_row_totals(0.0, 100, 4.5, 10, 3)['total_myr'], 0.00);
 $assertions['totals: negative frozen clamped']       = $approx(costing_row_totals(-5, 100, 4.5, 10, 3)['myr_per_unit'], 0.00);
 
 /* ------------------------------------------------------------------ *
@@ -219,8 +225,8 @@ $bd_map = [
     3 => ['code' => 'THB', 'rate_to_myr' => 0.13, 'bank_charges_myr' => 0.0],
 ];
 $bd_rows = [
-    ['currency_id' => 2, 'unit_price' => 100, 'count' => 2, 'include' => 1], // USD 200 -> (450+10)*2 = 920
-    ['currency_id' => 2, 'unit_price' => 50,  'count' => 1, 'include' => 1], // USD 50  -> (225+10)*1 = 235
+    ['currency_id' => 2, 'unit_price' => 100, 'count' => 2, 'include' => 1], // USD 200 -> 450*2 + 10 bank once = 910
+    ['currency_id' => 2, 'unit_price' => 50,  'count' => 1, 'include' => 1], // USD 50  -> 225*1 + 10 bank once = 235
     ['currency_id' => 3, 'unit_price' => 1000, 'count' => 1, 'include' => 1], // THB 1000 -> 130
     ['currency_id' => 1, 'unit_price' => 300, 'count' => 1, 'include' => 1], // MYR 300 -> 300
     ['currency_id' => 2, 'unit_price' => 999, 'count' => 9, 'include' => 0], // excluded
@@ -233,7 +239,7 @@ $assertions['breakdown: one entry per used currency'] = (count($bd) === 3);
 $assertions['breakdown: ordered by code (MYR,THB,USD)'] =
     ($bd[0]['code'] === 'MYR' && $bd[1]['code'] === 'THB' && $bd[2]['code'] === 'USD');
 $assertions['breakdown: USD total_foreign summed'] = $approx($by['USD']['total_foreign'], 250.00);
-$assertions['breakdown: USD total_myr summed (incl bank)'] = $approx($by['USD']['total_myr'], 1155.00);
+$assertions['breakdown: USD total_myr summed (bank once per line)'] = $approx($by['USD']['total_myr'], 1145.00);
 $assertions['breakdown: USD rate carried'] = $approx($by['USD']['rate_to_myr'], 4.5);
 $assertions['breakdown: USD bank charge carried'] = $approx($by['USD']['bank_charges_myr'], 10.0);
 $assertions['breakdown: THB total_foreign'] = $approx($by['THB']['total_foreign'], 1000.00);
@@ -305,11 +311,40 @@ $csr = costing_combination_summary([['name' => 'A', 'item_names' => [], 'cost_my
 $assertions['combo: cost rounds to 2dp'] = $approx($csr['combinations'][0]['cost_myr'], 33.34);
 
 /* ------------------------------------------------------------------ *
+ * 6c) GENERAL COMBINATION (common items folded into every combo)      *
+ * ------------------------------------------------------------------ */
+
+$gc_in = [
+    ['name' => 'General',  'cost_myr' => 500.0, 'is_general' => 1],
+    ['name' => 'Premium',  'cost_myr' => 4000.0, 'selling_price_per_pax' => 1234.0],
+    ['name' => 'Standard', 'cost_myr' => 2500.0],
+];
+$gc = costing_fold_general_combination($gc_in);
+$assertions['general: drops the general combo']   = (count($gc) === 2);
+$assertions['general: first is Premium']          = ($gc[0]['name'] === 'Premium');
+$assertions['general: folds into first']          = $approx($gc[0]['cost_myr'], 4500.0);
+$assertions['general: folds into second']         = $approx($gc[1]['cost_myr'], 3000.0);
+$assertions['general: preserves other keys']      = $approx($gc[0]['selling_price_per_pax'], 1234.0);
+// No general combo -> unchanged costs, same count.
+$gc_none = costing_fold_general_combination([['name' => 'A', 'cost_myr' => 100.0], ['name' => 'B', 'cost_myr' => 200.0]]);
+$assertions['general: none -> unchanged count']   = (count($gc_none) === 2);
+$assertions['general: none -> unchanged cost']    = $approx($gc_none[0]['cost_myr'], 100.0);
+// Only a general combo -> nothing left to sell.
+$assertions['general: only general -> empty']     = (costing_fold_general_combination([['name' => 'G', 'cost_myr' => 900.0, 'is_general' => 1]]) === []);
+// Multiple general combos sum.
+$gc_multi = costing_fold_general_combination([
+    ['cost_myr' => 100.0, 'is_general' => 1],
+    ['cost_myr' => 50.0, 'is_general' => 1],
+    ['name' => 'X', 'cost_myr' => 1000.0],
+]);
+$assertions['general: multiple general sum']      = $approx($gc_multi[0]['cost_myr'], 1150.0);
+
+/* ------------------------------------------------------------------ *
  * 7) SOURCE CONTRACT                                                  *
  * ------------------------------------------------------------------ */
 
 $helper = @file_get_contents(__DIR__ . '/../../application/helpers/costing_calc_helper.php');
-foreach (['costing_categories', 'costing_line_to_myr', 'costing_sum_by_category', 'costing_apply_markup', 'costing_cost_after_markup', 'costing_build_snapshot_rows', 'costing_normalize_rate', 'costing_multiplier_types', 'costing_multiplier_count', 'costing_row_myr', 'costing_row_totals', 'costing_currency_breakdown', 'costing_combination_summary'] as $fn) {
+foreach (['costing_categories', 'costing_line_to_myr', 'costing_sum_by_category', 'costing_apply_markup', 'costing_cost_after_markup', 'costing_build_snapshot_rows', 'costing_normalize_rate', 'costing_multiplier_types', 'costing_multiplier_count', 'costing_row_myr', 'costing_row_totals', 'costing_currency_breakdown', 'costing_combination_summary', 'costing_fold_general_combination'] as $fn) {
     $assertions["helper: defines {$fn}()"] = (bool) preg_match('/function\s+' . preg_quote($fn, '/') . '\s*\(/', (string) $helper);
 }
 

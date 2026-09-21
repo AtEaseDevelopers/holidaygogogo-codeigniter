@@ -485,7 +485,7 @@ $is_dev_env = ($app_env !== 'prod');
 									<div class="menu-submenu">
 										<i class="menu-arrow"></i>
 										<ul class="menu-subnav">
-											<?php if(false && (int)$this->session->level === 10) { // UI hidden for now; feature retained for future use ?>
+											<?php if((int)$this->session->level === 10) { ?>
 											<li class="menu-item <?php if($this->router->class == 'Hot_Cold_Customers') { echo 'menu-item-active'; } ?>">
 												<a href="<?php echo base_url('Hot_Cold_Customers'); ?>" class="menu-link">
 													<i class="menu-bullet menu-bullet-dot"><span></span></i>

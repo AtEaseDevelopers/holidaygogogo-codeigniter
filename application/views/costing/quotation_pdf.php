@@ -22,6 +22,7 @@ $combinations = isset($combinations) ? $combinations : array();
 $financials   = isset($financials) ? $financials : array();
 $quote_hotels  = isset($quote_hotels) && is_array($quote_hotels) ? $quote_hotels : array();
 $quote_flights = isset($quote_flights) && is_array($quote_flights) ? $quote_flights : array();
+$quote_flight_options = isset($quote_flight_options) && is_array($quote_flight_options) ? $quote_flight_options : array();
 $quote_meta    = isset($quote_meta) && is_array($quote_meta) ? $quote_meta : array();
 $public_ref   = isset($public_ref) ? $public_ref : '';
 
@@ -78,38 +79,88 @@ $CustomerName   = isset($package['customer_name']) && $package['customer_name'] 
 $PricingBasis   = $qv('quote_pricing_basis');
 $TravelDateNote = $qv('quote_travel_date_note');
 $HotelNote      = $qv('quote_hotel_note');
-$FlightTitle    = $qv('quote_flight_title') !== '' ? $qv('quote_flight_title') : 'FLIGHT SCHEDULE';
-$FlightFareNote = $qv('quote_flight_fare_note');
-$FlightExpiry   = $qv('quote_flight_expiry');
-$FlightPrice    = (isset($qm['quote_flight_price']) && $qm['quote_flight_price'] !== null && $qm['quote_flight_price'] !== '')
-    ? (float) $qm['quote_flight_price'] : null;
 $money2 = function ($value) {
     return 'RM ' . number_format((float) $value, 2, '.', ',');
 };
-// Non-empty hotel rows.
+
+// 4.3 Flight mode: none hides the flight section, include shows schedule only,
+// FIT/GIT show schedule + pricing.
+$FlightMode    = costing_quote_normalize_flight_mode($qv('quote_flight_mode'));
+$ShowFlight    = costing_quote_flight_mode_shows_section($FlightMode);
+$FlightPricing = costing_quote_flight_mode_shows_pricing($FlightMode);
+
+// 4.2 Hotel pricing columns + per-column prices per hotel row (fallback to the
+// legacy single twin/triple column for pre-rework data).
+$HotelColumns = costing_quote_hotel_columns_normalize($qv('quote_hotel_columns'));
+$HotelColCount = count($HotelColumns);
 $HotelRows = array();
 foreach ($quote_hotels as $h) {
     $hname = trim((string) (isset($h['hotel_name']) ? $h['hotel_name'] : ''));
-    $twin  = isset($h['twin_triple_price']) && $h['twin_triple_price'] !== null && $h['twin_triple_price'] !== '' ? $h['twin_triple_price'] : null;
-    $single = isset($h['single_supp_price']) && $h['single_supp_price'] !== null && $h['single_supp_price'] !== '' ? $h['single_supp_price'] : null;
-    if ($hname === '' && $twin === null && $single === null) { continue; }
-    $HotelRows[] = array('name' => $hname, 'twin' => $twin, 'single' => $single);
-}
-// Non-empty flight rows.
-$FlightRows = array();
-foreach ($quote_flights as $f) {
-    $cells = array(
-        isset($f['travel_date']) ? $f['travel_date'] : '',
-        isset($f['sector']) ? $f['sector'] : '',
-        isset($f['flight_no']) ? $f['flight_no'] : '',
-        isset($f['timing']) ? $f['timing'] : '',
-        isset($f['duration']) ? $f['duration'] : '',
+    $prices = costing_quote_hotel_prices_normalize(
+        (isset($h['prices_json']) && $h['prices_json'] !== null && $h['prices_json'] !== '')
+            ? $h['prices_json']
+            : array(isset($h['twin_triple_price']) ? $h['twin_triple_price'] : null),
+        $HotelColCount
     );
-    $blank = true;
-    foreach ($cells as $c) { if (trim((string) $c) !== '') { $blank = false; break; } }
-    if ($blank) { continue; }
-    $FlightRows[] = $cells;
+    $single = isset($h['single_supp_price']) && $h['single_supp_price'] !== null && $h['single_supp_price'] !== '' ? $h['single_supp_price'] : null;
+    $all_null = ($single === null);
+    foreach ($prices as $p) { if ($p !== null) { $all_null = false; break; } }
+    if ($hname === '' && $all_null) { continue; }
+    $HotelRows[] = array('name' => $hname, 'prices' => $prices, 'single' => $single);
 }
+
+// 4.4 Flight OPTIONS (each: title/airline + own schedule + pricing). Legacy data
+// without options falls back to a single option built from the package-level
+// flight fields + the flat flight rows.
+$FlightOptions = array();
+foreach ($quote_flight_options as $opt) {
+    $rows = array();
+    foreach ((array) (isset($opt['flights']) ? $opt['flights'] : array()) as $f) {
+        $cells = array(
+            isset($f['travel_date']) ? $f['travel_date'] : '',
+            isset($f['sector']) ? $f['sector'] : '',
+            isset($f['flight_no']) ? $f['flight_no'] : '',
+            isset($f['timing']) ? $f['timing'] : '',
+            isset($f['duration']) ? $f['duration'] : '',
+        );
+        $blank = true;
+        foreach ($cells as $c) { if (trim((string) $c) !== '') { $blank = false; break; } }
+        if (!$blank) { $rows[] = $cells; }
+    }
+    $FlightOptions[] = array(
+        'title'         => trim((string) (isset($opt['title']) ? $opt['title'] : '')),
+        'airline'       => trim((string) (isset($opt['airline']) ? $opt['airline'] : '')),
+        'price'         => (isset($opt['price']) && $opt['price'] !== null && $opt['price'] !== '') ? (float) $opt['price'] : null,
+        'fare_includes' => trim((string) (isset($opt['fare_includes']) ? $opt['fare_includes'] : '')),
+        'fare_expiry'   => trim((string) (isset($opt['fare_expiry']) ? $opt['fare_expiry'] : '')),
+        'rows'          => $rows,
+    );
+}
+if (empty($FlightOptions)) {
+    // Legacy fallback: one option from the old package-level flight fields.
+    $legacy_rows = array();
+    foreach ($quote_flights as $f) {
+        $cells = array(
+            isset($f['travel_date']) ? $f['travel_date'] : '',
+            isset($f['sector']) ? $f['sector'] : '',
+            isset($f['flight_no']) ? $f['flight_no'] : '',
+            isset($f['timing']) ? $f['timing'] : '',
+            isset($f['duration']) ? $f['duration'] : '',
+        );
+        $blank = true;
+        foreach ($cells as $c) { if (trim((string) $c) !== '') { $blank = false; break; } }
+        if (!$blank) { $legacy_rows[] = $cells; }
+    }
+    $FlightOptions[] = array(
+        'title'         => $qv('quote_flight_title'),
+        'airline'       => '',
+        'price'         => (isset($qm['quote_flight_price']) && $qm['quote_flight_price'] !== null && $qm['quote_flight_price'] !== '') ? (float) $qm['quote_flight_price'] : null,
+        'fare_includes' => $qv('quote_flight_fare_note'),
+        'fare_expiry'   => $qv('quote_flight_expiry'),
+        'rows'          => $legacy_rows,
+    );
+}
+
 // The hotel/flight page is always appended to the quotation. Empty tables show a
 // "to be confirmed" placeholder row and the footer falls back to the default
 // boilerplate, so the section is a consistent part of every quotation.
@@ -206,92 +257,15 @@ $FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
         </tr>
     </table>
 
-    <?php if ($HasCombinations) { ?>
-        <!-- Customer combinations: each is an ALTERNATIVE package option, priced on
-             its own. The customer picks ONE, so prices are NOT summed. -->
-        <hr style="margin-bottom:0px;">
-        <table style="width:100%; font-size:13px;">
-            <tr style="font-weight:700;">
-                <td style="width:70%;">Package Options <span style="font-weight:400; font-size:11px;">(choose one)</span></td>
-                <td style="width:30%; text-align:right;">Price (RM)</td>
-            </tr>
-        </table>
-        <hr style="margin-top:0px; margin-bottom:5px;">
-        <?php foreach ($combinations as $combo) { ?>
-            <?php
-            // Per-pax price is the headline (manual Selling Price if set, else the
-            // suggested Cost after Markup — both already resolved by the model).
-            $combo_price_pax = (float) (isset($combo['selling_price_per_pax']) ? $combo['selling_price_per_pax'] : 0);
-            $combo_selling   = (float) (isset($combo['selling']) ? $combo['selling'] : 0);
-            ?>
-            <table style="width:100%; font-size:12px; border-spacing:0; margin-bottom:8px;">
-                <tr style="vertical-align:baseline; font-weight:700;">
-                    <td style="width:58%; padding:3px 0;"><?php echo strtoupper(html_escape($combo['name'])); ?></td>
-                    <td style="width:24%; text-align:right; padding:3px 0; font-size:11px; color:#555; font-weight:400;">Price / Pax (RM)</td>
-                    <td style="width:18%; text-align:right; padding:3px 0;"><?php echo number_format($combo_price_pax, 2, '.', ','); ?></td>
-                </tr>
-                <?php if ($TotalPax > 0) { ?>
-                    <tr style="vertical-align:baseline;">
-                        <td style="width:58%;">&nbsp;</td>
-                        <td style="width:24%; text-align:right; padding:0 0 1px 0; font-size:11px; color:#555;">Total (<?php echo $TotalPax; ?> pax)</td>
-                        <td style="width:18%; text-align:right; padding:0 0 1px 0; font-size:11px; color:#555;"><?php echo number_format($combo_selling, 2, '.', ','); ?></td>
-                    </tr>
-                <?php } ?>
-                <?php foreach ($combo['item_names'] as $combo_item_name) { ?>
-                    <?php if (trim((string) $combo_item_name) === '') { continue; } ?>
-                    <tr style="vertical-align:baseline;">
-                        <td style="width:58%; padding:1px 0 1px 14px;">&bull; <?php echo html_escape($combo_item_name); ?></td>
-                        <td colspan="2">&nbsp;</td>
-                    </tr>
-                <?php } ?>
-            </table>
-        <?php } ?>
-    <?php } elseif (!empty($items)) { ?>
-        <hr style="margin-bottom:0px;">
-        <table style="width:100%; font-size:13px;">
-            <tr style="font-weight:700;">
-                <td style="width:8%;">No.</td>
-                <td style="width:62%;">Package Includes</td>
-                <td style="width:30%; text-align:right;">Price (RM)</td>
-            </tr>
-        </table>
-        <hr style="margin-top:0px; margin-bottom:5px;">
-        <table style="width:100%; font-size:12px; border-spacing:0;">
-            <?php $item_no = 0; ?>
-            <?php foreach ($items as $line) { ?>
-                <?php if (trim((string) $line['name']) === '') { continue; } ?>
-                <?php $item_no++; ?>
-                <tr style="vertical-align:baseline;">
-                    <td style="width:8%; padding:3px 0;"><?php echo $item_no; ?></td>
-                    <td style="width:62%; padding:3px 0;"><?php echo html_escape($line['name']); ?></td>
-                    <td style="width:30%; text-align:right; padding:3px 0;"><?php echo number_format((float) $line['selling'], 2, '.', ','); ?></td>
-                </tr>
-            <?php } ?>
-        </table>
-    <?php } ?>
-
-    <!-- Totals pinned to the bottom of page 1 (mirrors the Booking Confirmation footer).
-         Only for the legacy flat item list — combination options are each priced on
-         their own above (the customer picks one), so there is no single total. -->
-    <?php if (!$HasCombinations) { ?>
-    <div style="position: absolute; bottom: 0; left: 0; right: 0;">
-        <hr style="margin-bottom:5px; margin-top:10px;">
-        <table style="width:100%; margin-bottom:10px;">
-            <tr style="font-weight:bold;">
-                <td style="width:60%;">&nbsp;</td>
-                <td style="width:28%;">Total Package Price (RM):</td>
-                <td style="width:12%; text-align:right; float:left;"><label><?php echo number_format($TotalSelling, 2, '.', ','); ?></label></td>
-            </tr>
-            <?php if ($TotalPax > 0) { ?>
-            <tr>
-                <td>&nbsp;</td>
-                <td style="border-bottom: 1px solid black;">Price / Pax (RM):</td>
-                <td style="text-align:right; float:left; border-bottom: 1px solid black;"><label><?php echo number_format($TotalSelling / max(1, $TotalPax), 2, '.', ','); ?></label></td>
-            </tr>
-            <?php } ?>
-        </table>
-    </div>
-    <?php } ?>
+    <?php
+    // Feedback 18 Sep 2026 (item 5): the per-item PRICING BREAKDOWN (the "Package
+    // Options" list with each combination's per-pax/total price and its cost-item
+    // names, and the legacy flat "Package Includes" price list) is intentionally
+    // NOT rendered on the customer quotation. The detailed pricing stays internal
+    // in the Costing Template; the customer sees prices only on the Hotel & Flight
+    // table below, alongside the Itinerary, Inclusions, Exclusions and T&C.
+    // $combinations / $items / $TotalSelling remain available for internal callers.
+    ?>
 
     <!-- EXTRA PAGE: Hotel pricing + flight schedule (screenshot layout). Appended
          only when the package carries this data — augments, never replaces. -->
@@ -326,36 +300,45 @@ $FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
             </tr>
         </table>
 
-        <!-- Hotel pricing -->
+        <!-- Hotel pricing (dynamic columns — 4.2) -->
         <div class="section-title">
             Pricing per person<?php if ($PricingBasis !== '') { ?> (Quoted based on <span class="red"><?php echo html_escape($PricingBasis); ?></span>)<?php } ?>
         </div>
+        <?php $hotel_colspan = 1 + $HotelColCount + 1; ?>
         <table class="data">
             <thead>
                 <tr>
                     <th style="text-align:left;">Hotel</th>
-                    <th style="width:22%;">Twin / Triple</th>
-                    <th style="width:22%;">Single Supp</th>
+                    <?php foreach ($HotelColumns as $col_label) { ?>
+                        <th><?php echo html_escape($col_label); ?> (RM)</th>
+                    <?php } ?>
+                    <th>Single Supp (RM)</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (empty($HotelRows)) { ?>
-                    <tr><td colspan="3" class="text-center">Hotel pricing to be confirmed.</td></tr>
+                    <tr><td colspan="<?php echo $hotel_colspan; ?>" class="text-center">Hotel pricing to be confirmed.</td></tr>
                 <?php } else { foreach ($HotelRows as $h) { ?>
                     <tr>
                         <td><?php echo html_escape($h['name'] !== '' ? $h['name'] : '-'); ?></td>
-                        <td class="text-center"><?php echo $h['twin'] !== null ? $money2($h['twin']) : '-'; ?></td>
+                        <?php foreach ($h['prices'] as $price) { ?>
+                            <td class="text-center"><?php echo $price !== null ? $money2($price) : '-'; ?></td>
+                        <?php } ?>
                         <td class="text-center"><?php echo $h['single'] !== null ? $money2($h['single']) : '-'; ?></td>
                     </tr>
                 <?php } } ?>
                 <?php if ($HotelNote !== '') { ?>
-                    <tr class="note-row"><td colspan="3" class="text-center"><?php echo html_escape($HotelNote); ?></td></tr>
+                    <tr class="note-row"><td colspan="<?php echo $hotel_colspan; ?>" class="text-center"><?php echo html_escape($HotelNote); ?></td></tr>
                 <?php } ?>
             </tbody>
         </table>
 
-        <!-- Flight schedule -->
-        <div class="section-title"><?php echo html_escape($FlightTitle); ?></div>
+        <!-- Flight (mode-driven; multiple airline options — 4.3 / 4.4) -->
+        <?php if ($ShowFlight) { $opt_no = 0; foreach ($FlightOptions as $opt) { $opt_no++;
+            $opt_heading = $opt['title'] !== '' ? $opt['title'] : ('Flight Option ' . $opt_no);
+            if ($opt['airline'] !== '') { $opt_heading .= ' — ' . $opt['airline']; }
+        ?>
+        <div class="section-title"><?php echo html_escape(strtoupper($opt_heading)); ?></div>
         <table class="data">
             <thead>
                 <tr>
@@ -367,29 +350,32 @@ $FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
                 </tr>
             </thead>
             <tbody>
-                <?php if (empty($FlightRows)) { ?>
+                <?php if (empty($opt['rows'])) { ?>
                     <tr><td colspan="5" class="text-center">Flight schedule to be confirmed.</td></tr>
-                <?php } else { foreach ($FlightRows as $cells) { ?>
+                <?php } else { foreach ($opt['rows'] as $cells) { ?>
                     <tr>
                         <?php foreach ($cells as $c) { ?>
                             <td class="text-center"><?php echo html_escape(trim((string) $c) !== '' ? $c : '-'); ?></td>
                         <?php } ?>
                     </tr>
                 <?php } } ?>
-                <?php if ($FlightPrice !== null) { ?>
-                    <tr>
-                        <td colspan="4" style="font-weight:bold; text-align:right;">Price per person (Adult / Child)</td>
-                        <td class="text-center" style="font-weight:bold;"><?php echo $money2($FlightPrice); ?></td>
-                    </tr>
-                <?php } ?>
-                <?php if ($FlightFareNote !== '') { ?>
-                    <tr class="note-row"><td colspan="5" class="text-center">Fare quote includes <?php echo html_escape($FlightFareNote); ?></td></tr>
-                <?php } ?>
-                <?php if ($FlightExpiry !== '') { ?>
-                    <tr class="note-row"><td colspan="5" class="text-center" style="font-weight:bold; font-style:normal;"><?php echo html_escape($FlightExpiry); ?></td></tr>
+                <?php if ($FlightPricing) { ?>
+                    <?php if ($opt['price'] !== null) { ?>
+                        <tr>
+                            <td colspan="4" style="font-weight:bold; text-align:right;">Price per person (Adult / Child)</td>
+                            <td class="text-center" style="font-weight:bold;"><?php echo $money2($opt['price']); ?></td>
+                        </tr>
+                    <?php } ?>
+                    <?php if ($opt['fare_includes'] !== '') { ?>
+                        <tr class="note-row"><td colspan="5" class="text-center">Fare quote includes <?php echo html_escape($opt['fare_includes']); ?></td></tr>
+                    <?php } ?>
+                    <?php if ($opt['fare_expiry'] !== '') { ?>
+                        <tr class="note-row"><td colspan="5" class="text-center" style="font-weight:bold; font-style:normal;"><?php echo html_escape($opt['fare_expiry']); ?></td></tr>
+                    <?php } ?>
                 <?php } ?>
             </tbody>
         </table>
+        <?php } } ?>
 
         <!-- Boilerplate footer notes (highlighted) -->
         <?php if (!empty($FooterLines)) { ?>
