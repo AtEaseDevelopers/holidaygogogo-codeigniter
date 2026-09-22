@@ -193,7 +193,7 @@ if ( ! function_exists('customer_analysis_json_shape'))
 		}
 		$lines[] = '  "temperature": "hot or cold — classify the customer\'s intention to make a booking",';
 		$lines[] = '  "temperature_reason": "one short sentence justifying the hot/cold call",';
-		$lines[] = '  "approach_suggestion": "practical guidance for OUR agent on how to approach this customer next — a warm, ready-to-send WhatsApp-style message written in the customer\'s own chat language, tailored to their interest, preferences and hot/cold state"';
+		$lines[] = '  "approach_suggestion": "practical guidance for OUR agent on how to approach this customer next — a warm, ready-to-send WhatsApp-style message written in English, tailored to their interest, preferences and hot/cold state"';
 		$lines[] = '}';
 		return implode("\n", $lines);
 	}
@@ -207,11 +207,11 @@ if ( ! function_exists('customer_analysis_field_guidance'))
 		return
 			"Classification: 'hot' = the customer shows clear intention to make a booking (asking to book, confirming dates/pax, requesting a quote or payment to proceed, actively engaged and close to converting). " .
 			"'cold' = little or no booking intention (just browsing, price-shopping without commitment, unresponsive, or went quiet). temperature MUST be exactly \"hot\" or \"cold\".\n" .
-			"Approach: write approach_suggestion as concrete, actionable guidance our travel agent can use right now to move THIS customer forward — ideally a warm, human, ready-to-send message in the CUSTOMER'S chat language (not English unless they chat in English). " .
+			"Approach: write approach_suggestion as concrete, actionable guidance our travel agent can use right now to move THIS customer forward — a warm, human, ready-to-send message written in English (regardless of the customer's chat language). " .
 			"Tailor it to their stated interest, preferences and current hot/cold state, suggest the natural next step (e.g. share a tailored comparison, ask for pax/dates/budget, gently nudge to book), and use light structure and emojis where it helps them decide. " .
-			"When comparing options, lay them out clearly like a friendly recommendation. NEVER over-promise or state things that vary by date/season as guaranteed (e.g. write \"晚上有 Live Music / Live Band\", not \"每天一定有 Live Band\").\n" .
+			"When comparing options, lay them out clearly like a friendly recommendation. NEVER over-promise or state things that vary by date/season as guaranteed (e.g. write \"there's often Live Music / a Live Band in the evening\", not \"there is guaranteed to be a Live Band every night\").\n" .
 			"Rules: use an empty string (or empty array for lists) when the transcript gives nothing for a field — do NOT guess. " .
-			"Write concrete, specific detail grounded in the chat over generic statements. Write every profile field in English, EXCEPT approach_suggestion which must be in the customer's own chat language.";
+			"Write concrete, specific detail grounded in the chat over generic statements. Write every profile field in English, including approach_suggestion.";
 	}
 }
 

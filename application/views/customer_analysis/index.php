@@ -75,22 +75,6 @@ function ca_render_analysis($a, $expanded = true)
                     </div>
                 <?php } ?>
 
-                <?php $approach = isset($a->approach_suggestion) ? trim((string) $a->approach_suggestion) : '';
-                if ($approach !== '') { ?>
-                    <div class="alert alert-custom alert-light-primary fade show mb-5" role="alert">
-                        <div class="alert-icon"><i class="la la-comments-o"></i></div>
-                        <div class="alert-text" style="width:100%;">
-                            <div class="d-flex align-items-center justify-content-between mb-2">
-                                <span class="font-weight-bolder text-dark">How to Approach This Customer</span>
-                                <button type="button" class="btn btn-icon btn-xs btn-light-primary js-ca-copy-approach" data-toggle="tooltip" title="Copy message">
-                                    <i class="la la-copy"></i>
-                                </button>
-                            </div>
-                            <div class="js-ca-approach-text text-dark-75" style="font-size:13px; line-height:1.7; white-space:pre-wrap;"><?php echo htmlspecialchars($approach); ?></div>
-                        </div>
-                    </div>
-                <?php } ?>
-
                 <?php
                 // Structured character profile (details_json). Only show fields the AI filled.
                 $ca_text_rows = array();
@@ -153,6 +137,23 @@ function ca_render_analysis($a, $expanded = true)
                 echo $chip('Budget Signals', $si['budget_signals']);
                 echo $chip('Objections / Concerns', $si['objections']);
                 } ?>
+
+                <?php $approach = isset($a->approach_suggestion) ? trim((string) $a->approach_suggestion) : '';
+                if ($approach !== '') { ?>
+                    <div class="separator separator-dashed my-4"></div>
+                    <div class="alert alert-custom alert-light-primary fade show mb-0" role="alert">
+                        <div class="alert-icon"><i class="la la-comments-o"></i></div>
+                        <div class="alert-text" style="width:100%;">
+                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                <span class="font-weight-bolder text-dark">How to Approach This Customer</span>
+                                <button type="button" class="btn btn-icon btn-xs btn-light-primary js-ca-copy-approach" data-toggle="tooltip" title="Copy message">
+                                    <i class="la la-copy"></i>
+                                </button>
+                            </div>
+                            <div class="js-ca-approach-text text-dark-75" style="font-size:13px; line-height:1.7; white-space:pre-wrap;"><?php echo htmlspecialchars($approach); ?></div>
+                        </div>
+                    </div>
+                <?php } ?>
             <?php } ?>
         </div>
     </div>

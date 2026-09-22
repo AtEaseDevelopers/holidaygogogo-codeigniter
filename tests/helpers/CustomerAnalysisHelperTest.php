@@ -92,7 +92,7 @@ foreach (array_keys(customer_analysis_profile_list_fields()) as $__f) {
 }
 check_true('request instructions ask for hot/cold temperature', strpos($req['instructions'], 'temperature') !== false && stripos($req['instructions'], 'hot') !== false && stripos($req['instructions'], 'cold') !== false);
 check_true('request instructions ask for approach_suggestion', strpos($req['instructions'], '"approach_suggestion"') !== false);
-check_true('approach guidance says use the customer chat language', stripos($req['instructions'], "customer's chat language") !== false || stripos($req['instructions'], "customer's own chat language") !== false);
+check_true('approach guidance says write in English', stripos($req['instructions'], 'in English') !== false);
 
 // The incremental-update request refreshes the character profile (no next steps),
 // and carries the prior profile fields so the model can keep what still holds.
