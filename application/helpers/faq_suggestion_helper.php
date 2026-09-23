@@ -315,21 +315,19 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 		$dest_line = empty($dest) ? '(none configured)' : implode(', ', $dest);
 
 		$instructions =
-			"You are a customer-support knowledge analyst for a Malaysian tour agency. " .
+			"You are a knowledge analyst for a Malaysian tour agency. " .
 			"You read recent WhatsApp / CRM conversations between customers and sales agents " .
-			"and distil the questions customers ask into reusable internal FAQ entries. " .
-			"PRIORITISE from the customer's point of view: surface the questions that help the MOST customers — " .
-			"the most frequently asked and the ones that most affect a booking decision " .
-			"(e.g. pricing & deposits, payment, booking / cancellation / refund process, what's included, " .
-			"visa & documents, flights & logistics, itinerary specifics). " .
-			"Group similar questions together and write a clear, generic answer based on how the agents actually replied. " .
-			"For EACH FAQ also give a short 'reason' (one sentence) explaining why it is valuable to customers — " .
-			"how often it came up in the chats and why it matters to a booking. " .
-			"ORDER the suggestions from most to least helpful — highest customer impact and frequency FIRST. " .
+			"and distil them into reusable FAQ entries. " .
+			"Be EXHAUSTIVE: list every distinct question or reusable piece of knowledge you can extract from the chats — " .
+			"any topic a FAQ could capture (e.g. pricing & deposits, payment, booking / cancellation / refund process, " .
+			"what's included, visa & documents, flights & logistics, itinerary specifics, and any niche or one-off point). " .
+			"Do NOT limit yourself to the most common questions; include the less frequent and edge-case ones too. " .
+			"Group near-identical questions together and write a clear, generic answer based on how the agents actually replied. " .
+			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came up or why it is useful. " .
+			"Roughly ORDER the suggestions with the more broadly useful ones first, but still list everything. " .
 			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
 			"skip it even if you would word the question differently; only return genuinely NEW questions. " .
 			"Never include a specific customer's name, phone number, a price quoted to one person, or any other private data. " .
-			"Prefer 5 to 12 high-value FAQs; skip one-off or purely transactional chatter. " .
 			"Answer ONLY with a JSON object.";
 
 		$existing_block = faq_suggestion_existing_block($existing_faqs);
@@ -339,14 +337,14 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			$existing_block . "\n\n";
 
 		$input =
-			"Return json with this exact shape, with the most helpful FAQ first:\n" .
+			"Return json with this exact shape:\n" .
 			"{\"suggestions\":[{" .
 			"\"title\":\"short FAQ title\"," .
-			"\"reason\":\"one sentence: why this FAQ helps customers (how often asked / booking impact)\"," .
+			"\"reason\":\"one sentence: where this came up or why it is useful\"," .
 			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
-			"\"items\":[{\"q\":\"the customer question\",\"a\":\"a clear reusable answer\"}]" .
+			"\"items\":[{\"q\":\"the question\",\"a\":\"a clear reusable answer\"}]" .
 			"}]}\n\n" .
-			"List the suggestions in order of how much they help customers — most impactful and most frequently asked first.\n\n" .
+			"List every FAQ you can extract; put the more broadly useful ones first.\n\n" .
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .
 			$existing_line .
@@ -380,20 +378,20 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 		$dest_line = empty($dest) ? '(none configured)' : implode(', ', $dest);
 
 		$instructions =
-			"You are a customer-support knowledge analyst for a Malaysian tour agency. " .
+			"You are a knowledge analyst for a Malaysian tour agency. " .
 			"You read an uploaded document (a tour brochure, itinerary, price sheet, or a screenshot of one) " .
-			"and distil the information a customer would ask about into reusable internal FAQ entries. " .
-			"PRIORITISE from the customer's point of view: surface the questions that help the MOST customers — " .
-			"the ones that most affect a booking decision " .
-			"(e.g. pricing & deposits, payment, booking / cancellation / refund process, what's included, " .
-			"visa & documents, flights & logistics, itinerary specifics). " .
+			"and distil it into reusable FAQ entries. " .
+			"Be EXHAUSTIVE: list every distinct question or reusable piece of knowledge the document supports — " .
+			"any topic a FAQ could capture (e.g. pricing & deposits, payment, booking / cancellation / refund process, " .
+			"what's included, visa & documents, flights & logistics, itinerary specifics, and any niche or one-off detail). " .
+			"Do NOT limit yourself to the most common questions; include the less frequent and edge-case ones too. " .
 			"Write a clear, generic answer grounded in the document's contents. " .
-			"For EACH FAQ also give a short 'reason' (one sentence) explaining why it is valuable to customers. " .
-			"ORDER the suggestions from most to least helpful — highest customer impact FIRST. " .
+			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came from or why it is useful. " .
+			"Roughly ORDER the suggestions with the more broadly useful ones first, but still list everything. " .
 			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
 			"skip it even if worded differently; only return genuinely NEW questions. " .
 			"Never invent facts not supported by the document, and never include a specific customer's private data. " .
-			"Prefer 5 to 12 high-value FAQs. Answer ONLY with a JSON object.";
+			"Answer ONLY with a JSON object.";
 
 		$existing_block = faq_suggestion_existing_block($existing_faqs);
 		$existing_line  = $existing_block === '' ? '' :
@@ -402,12 +400,12 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			$existing_block . "\n\n";
 
 		$input =
-			"Return json with this exact shape, with the most helpful FAQ first:\n" .
+			"Return json with this exact shape:\n" .
 			"{\"suggestions\":[{" .
 			"\"title\":\"short FAQ title\"," .
-			"\"reason\":\"one sentence: why this FAQ helps customers\"," .
+			"\"reason\":\"one sentence: where this came from or why it is useful\"," .
 			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
-			"\"items\":[{\"q\":\"the customer question\",\"a\":\"a clear reusable answer\"}]" .
+			"\"items\":[{\"q\":\"the question\",\"a\":\"a clear reusable answer\"}]" .
 			"}]}\n\n" .
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .
@@ -657,5 +655,125 @@ if (!function_exists('faq_suggestion_filter_new')) {
 			$out[] = $s;
 		}
 		return $out;
+	}
+}
+
+if (!function_exists('faq_suggestion_embed_text')) {
+	/**
+	 * Build the canonical text used to EMBED one FAQ / candidate for semantic
+	 * dedupe. It folds the title AND every question + answer into a single
+	 * whitespace-normalised string, so two entries that ask the SAME thing in
+	 * different words but share the same answer body still embed close together
+	 * (which is exactly the reworded-question duplicate the normalised-title
+	 * filter misses). $qas is a list of ['q'=>, 'a'=>] pairs. Pure.
+	 */
+	function faq_suggestion_embed_text($title, $qas)
+	{
+		$parts = array();
+		$title = trim((string) $title);
+		if ($title !== '') {
+			$parts[] = $title;
+		}
+		foreach ((array) $qas as $qa) {
+			$q = trim((string) (isset($qa['q']) ? $qa['q'] : ''));
+			$a = trim((string) (isset($qa['a']) ? $qa['a'] : ''));
+			$line = trim($q . ' ' . $a);
+			if ($line !== '') {
+				$parts[] = $line;
+			}
+		}
+		$text = preg_replace('/\s+/', ' ', implode(' ', $parts));
+		return trim((string) $text);
+	}
+}
+
+if (!function_exists('faq_suggestion_cosine')) {
+	/**
+	 * Cosine similarity of two equal-length numeric vectors, in [-1, 1] (in
+	 * practice [0, 1] for embedding vectors). Returns 0.0 for empty, mismatched
+	 * length, non-array, or zero-magnitude inputs so a bad vector never counts
+	 * as a match. Pure.
+	 */
+	function faq_suggestion_cosine($a, $b)
+	{
+		if (!is_array($a) || !is_array($b)) {
+			return 0.0;
+		}
+		$a = array_values($a);
+		$b = array_values($b);
+		$n = count($a);
+		if ($n === 0 || $n !== count($b)) {
+			return 0.0;
+		}
+		$dot = 0.0;
+		$na  = 0.0;
+		$nb  = 0.0;
+		for ($i = 0; $i < $n; $i++) {
+			$x = (float) $a[$i];
+			$y = (float) $b[$i];
+			$dot += $x * $y;
+			$na  += $x * $x;
+			$nb  += $y * $y;
+		}
+		if ($na <= 0 || $nb <= 0) {
+			return 0.0;
+		}
+		return $dot / (sqrt($na) * sqrt($nb));
+	}
+}
+
+if (!function_exists('faq_suggestion_filter_semantic')) {
+	/**
+	 * Semantic-dedupe safety net (the layer the normalised-title/question filter
+	 * can't do). Drop a candidate whose embedding vector is cosine-similar at or
+	 * above $threshold to ANY existing FAQ's vector, OR to a candidate kept
+	 * earlier in this same batch (in-batch dedupe). $sug_vectors is indexed
+	 * parallel to $suggestions; $existing_vectors is the vectors of the FAQs that
+	 * already exist. Order is preserved.
+	 *
+	 * Fail-open by design: a $threshold outside (0, 1) disables the pass (returns
+	 * everything), and a candidate with no usable vector is KEPT — a missing
+	 * embedding must never silently drop a real suggestion; the title/question
+	 * filter already ran before this. Pure.
+	 */
+	function faq_suggestion_filter_semantic($suggestions, $sug_vectors, $existing_vectors, $threshold)
+	{
+		$suggestions = array_values((array) $suggestions);
+		$threshold   = (float) $threshold;
+		if ($threshold <= 0 || $threshold >= 1) {
+			return $suggestions;
+		}
+		$existing_vectors = array_values((array) $existing_vectors);
+
+		$kept         = array();
+		$kept_vectors = array();
+		foreach ($suggestions as $i => $s) {
+			$vec = isset($sug_vectors[$i]) ? $sug_vectors[$i] : null;
+			if (!is_array($vec) || empty($vec)) {
+				$kept[] = $s; // can't judge -> keep
+				continue;
+			}
+			$dup = false;
+			foreach ($existing_vectors as $ev) {
+				if (is_array($ev) && faq_suggestion_cosine($vec, $ev) >= $threshold) {
+					$dup = true;
+					break;
+				}
+			}
+			if (!$dup) {
+				foreach ($kept_vectors as $kv) {
+					if (faq_suggestion_cosine($vec, $kv) >= $threshold) {
+						$dup = true;
+						break;
+					}
+				}
+			}
+			if ($dup) {
+				continue;
+			}
+			$kept[]         = $s;
+			$kept_vectors[] = $vec;
+		}
+		return $kept;
 	}
 }

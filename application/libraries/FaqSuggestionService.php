@@ -97,6 +97,87 @@ class FaqSuggestionService
 		return $this->pack_result($raw);
 	}
 
+	/** Embedding model id from .env (cheap; used only for semantic dedupe). */
+	protected function embed_model()
+	{
+		$m = get_env('OPENAI_EMBED_MODEL');
+		return $m ? $m : 'text-embedding-3-small';
+	}
+
+	/**
+	 * Embed a batch of texts for semantic dedupe. Returns a list of float
+	 * vectors, one per input text, in the same order (index-aligned). An empty
+	 * input returns []. Throws Exception on any API failure so the caller can
+	 * fail open (skip the semantic pass) rather than lose the whole run.
+	 */
+	public function embed(array $texts)
+	{
+		$texts = array_values($texts);
+		if (empty($texts)) {
+			return array();
+		}
+		$key = get_env('OPENAI_API_KEY');
+		if (empty($key)) {
+			throw new Exception('OpenAI is not configured. Add OPENAI_API_KEY to the .env file.');
+		}
+		$base = get_env('OPENAI_BASE_URL');
+		$base = $base ? rtrim($base, '/') : 'https://api.openai.com/v1';
+
+		$payload = array('model' => $this->embed_model(), 'input' => $texts);
+
+		$started = microtime(true);
+		$ch = curl_init();
+		curl_setopt_array($ch, array(
+			CURLOPT_URL            => $base . '/embeddings',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_POST           => true,
+			CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+			CURLOPT_CONNECTTIMEOUT => 15,
+			CURLOPT_TIMEOUT        => 120,
+			CURLOPT_HTTPHEADER     => array(
+				'Content-Type: application/json',
+				'Authorization: Bearer ' . $key,
+			),
+		));
+		$resp  = curl_exec($ch);
+		$errno = curl_errno($ch);
+		$error = curl_error($ch);
+		$code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+		$ms = (int) round((microtime(true) - $started) * 1000);
+
+		if ($errno) {
+			$this->log('embed_curl_error', array('errno' => $errno, 'error' => $error, 'ms' => $ms));
+			throw new Exception('Could not reach OpenAI (embeddings): ' . $error);
+		}
+		$json = json_decode($resp, true);
+		if ($code >= 400) {
+			$msg = isset($json['error']['message']) ? $json['error']['message'] : ('HTTP ' . $code);
+			$this->log('embed_http_error', array('code' => $code, 'message' => $msg, 'ms' => $ms));
+			throw new Exception('OpenAI embeddings error: ' . $msg);
+		}
+		if (empty($json['data']) || !is_array($json['data'])) {
+			$this->log('embed_empty', array('code' => $code, 'ms' => $ms));
+			throw new Exception('OpenAI returned no embeddings.');
+		}
+
+		// The API echoes each row's index; order by it so the vectors line up with
+		// $texts even if the response is reordered.
+		$vectors = array();
+		foreach ($json['data'] as $i => $row) {
+			$idx = isset($row['index']) ? (int) $row['index'] : $i;
+			$vectors[$idx] = isset($row['embedding']) && is_array($row['embedding']) ? $row['embedding'] : array();
+		}
+		ksort($vectors);
+		$out = array_values($vectors);
+		if (count($out) !== count($texts)) {
+			$this->log('embed_count_mismatch', array('want' => count($texts), 'got' => count($out), 'ms' => $ms));
+			throw new Exception('OpenAI returned a mismatched number of embeddings.');
+		}
+		$this->log('embed', array('model' => $this->embed_model(), 'count' => count($out), 'ms' => $ms));
+		return $out;
+	}
+
 	/** Wrap a raw JSON reply with the model + token usage / cost of the last call. */
 	protected function pack_result($raw)
 	{

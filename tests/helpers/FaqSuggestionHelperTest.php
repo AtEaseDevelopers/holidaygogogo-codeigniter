@@ -262,4 +262,50 @@ assert_eq('prune empty list', array(), faq_suggestion_logs_to_prune(array(), $no
 assert_eq('prune floors keep_days to 1', array('run_2.out', 'run_3.out', 'run_4.out'),
 	faq_suggestion_logs_to_prune($files, $now, 0));
 
+// ---- embed_text (semantic dedupe canonical text) ---------------------------
+assert_eq('embed_text folds title + q + a',
+	'Deposit How much deposit? RM500 per person',
+	faq_suggestion_embed_text('Deposit', array(array('q' => 'How much deposit?', 'a' => 'RM500 per person'))));
+assert_eq('embed_text collapses whitespace',
+	'A B C',
+	faq_suggestion_embed_text("  A  ", array(array('q' => "B\n\n", 'a' => "  C "))));
+assert_eq('embed_text skips empty pairs',
+	'Only title',
+	faq_suggestion_embed_text('Only title', array(array('q' => '', 'a' => ''))));
+
+// ---- cosine ----------------------------------------------------------------
+assert_eq('cosine identical = 1',      1.0, faq_suggestion_cosine(array(1, 2, 3), array(1, 2, 3)));
+assert_eq('cosine scaled = 1',         1.0, faq_suggestion_cosine(array(1, 0), array(5, 0)));
+assert_eq('cosine orthogonal = 0',     0.0, faq_suggestion_cosine(array(1, 0), array(0, 1)));
+assert_eq('cosine length mismatch = 0', 0.0, faq_suggestion_cosine(array(1, 2), array(1, 2, 3)));
+assert_eq('cosine empty = 0',          0.0, faq_suggestion_cosine(array(), array()));
+assert_eq('cosine zero vector = 0',    0.0, faq_suggestion_cosine(array(0, 0), array(1, 1)));
+
+// ---- filter_semantic -------------------------------------------------------
+// A candidate near an existing FAQ vector is dropped; a distinct one survives.
+$sugs = array(array('title' => 'near'), array('title' => 'far'));
+$sug_vecs = array(array(1.0, 0.0), array(0.0, 1.0));
+$existing_vecs = array(array(0.99, 0.01)); // ~cos 0.9999 to "near", ~0.01 to "far"
+assert_eq('semantic drops near-existing, keeps distinct',
+	array(array('title' => 'far')),
+	faq_suggestion_filter_semantic($sugs, $sug_vecs, $existing_vecs, 0.9));
+
+// In-batch dedupe: two candidates that embed nearly the same -> keep the first.
+$dupSugs = array(array('title' => 'first'), array('title' => 'reworded dup'));
+$dupVecs = array(array(1.0, 0.0), array(0.999, 0.001));
+assert_eq('semantic in-batch keeps first only',
+	array(array('title' => 'first')),
+	faq_suggestion_filter_semantic($dupSugs, $dupVecs, array(), 0.9));
+
+// Threshold outside (0,1) disables the pass -> everything survives.
+assert_eq('semantic disabled by threshold >= 1',
+	$sugs, faq_suggestion_filter_semantic($sugs, $sug_vecs, $existing_vecs, 1));
+assert_eq('semantic disabled by threshold <= 0',
+	$sugs, faq_suggestion_filter_semantic($sugs, $sug_vecs, $existing_vecs, 0));
+
+// A candidate with no usable vector is KEPT (fail-open, never silently dropped).
+assert_eq('semantic keeps candidate lacking a vector',
+	array(array('title' => 'novec')),
+	faq_suggestion_filter_semantic(array(array('title' => 'novec')), array(null), $existing_vecs, 0.9));
+
 echo "\nAll FaqSuggestionHelper tests passed.\n";

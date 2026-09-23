@@ -357,6 +357,11 @@ class Faq_Suggestion_Model extends CI_Model
 		}
 		$parsed = faq_suggestion_filter_new($parsed, $existing_titles, $existing_questions);
 
+		// Embedding semantic-dedupe: catch a reworded question the title/question
+		// filter can't (different words, same meaning/answer). Fail-open — any
+		// embedding hiccup leaves the already text-filtered $parsed untouched.
+		$parsed = $this->semantic_dedupe($parsed, $existing_faqs);
+
 		// Build every valid suggestion first, so the run's AI cost can be split
 		// evenly across the rows actually stored (one AI call produces them all).
 		$rows = array();
@@ -403,6 +408,73 @@ class Faq_Suggestion_Model extends CI_Model
 			'reason'   => $created === 0 ? 'no_suggestions' : '',
 			'model'    => $result['model'],
 		);
+	}
+
+	/**
+	 * Drop candidates that are semantically near an existing FAQ (or a candidate
+	 * kept earlier in this batch) by comparing OpenAI embeddings — the layer that
+	 * catches a reworded question the normalised title/question filter misses.
+	 *
+	 * One batched embeddings call covers every existing FAQ + every candidate;
+	 * the pure faq_suggestion_filter_semantic then keeps only the non-duplicates.
+	 * Disabled when the threshold is out of (0, 1); fail-open on any error — the
+	 * incoming $parsed (already text-filtered) is returned unchanged so a flaky
+	 * embeddings call never blocks a run.
+	 */
+	protected function semantic_dedupe($parsed, $existing_faqs)
+	{
+		$parsed = array_values((array) $parsed);
+		if (empty($parsed)) {
+			return $parsed;
+		}
+		$threshold = $this->semantic_threshold();
+		if ($threshold <= 0 || $threshold >= 1) {
+			return $parsed; // pass disabled via config
+		}
+
+		// Canonical embed text for each existing FAQ and each candidate.
+		$existing_texts = array();
+		foreach ((array) $existing_faqs as $f) {
+			$items = isset($f['items']) && is_array($f['items']) ? $f['items'] : array();
+			$text  = faq_suggestion_embed_text(isset($f['title']) ? $f['title'] : '', $items);
+			if ($text !== '') {
+				$existing_texts[] = $text;
+			}
+		}
+		$sug_texts = array();
+		foreach ($parsed as $s) {
+			$items = isset($s['items']) && is_array($s['items']) ? $s['items'] : array();
+			$sug_texts[] = faq_suggestion_embed_text(isset($s['title']) ? $s['title'] : '', $items);
+		}
+
+		try {
+			$this->load->library('FaqSuggestionService');
+			// One call for both sets, then split back out by count (order preserved).
+			$all     = array_merge($existing_texts, $sug_texts);
+			$vectors = $this->faqsuggestionservice->embed($all);
+			$existing_vectors = array_slice($vectors, 0, count($existing_texts));
+			$sug_vectors      = array_slice($vectors, count($existing_texts));
+		} catch (Exception $e) {
+			// Fail-open: keep the text-filtered candidates as-is.
+			log_message('error', 'FaqSuggestion semantic_dedupe skipped: ' . $e->getMessage());
+			return $parsed;
+		}
+
+		return faq_suggestion_filter_semantic($parsed, $sug_vectors, $existing_vectors, $threshold);
+	}
+
+	/**
+	 * Cosine-similarity cut-off for the embedding dedupe (default 0.86). At/above
+	 * it a candidate counts as a duplicate. Override with
+	 * FAQ_SUGGESTION_SEMANTIC_THRESHOLD; set it to 0 (or >= 1) to turn the pass off.
+	 */
+	protected function semantic_threshold()
+	{
+		$n = get_env('FAQ_SUGGESTION_SEMANTIC_THRESHOLD');
+		if ($n === null || $n === '' || !is_numeric($n)) {
+			return 0.86;
+		}
+		return (float) $n;
 	}
 
 	/**
@@ -498,11 +570,12 @@ class Faq_Suggestion_Model extends CI_Model
 
 	/**
 	 * The FAQs that already exist — active FAQs plus pending/accepted suggestions
-	 * (each ['title'=>string, 'questions'=>[string,...]]). Used two ways so a run
-	 * doesn't re-propose an FAQ that already exists or is awaiting review: fed into
-	 * the AI prompt (compare-first, semantic dedupe) and into the post-filter
-	 * safety net (faq_suggestion_filter_new matches titles AND questions). Question
-	 * text comes from decoding the stored Description JSON via Faq_Model.
+	 * (each ['title'=>, 'questions'=>[...], 'items'=>[['q'=>,'a'=>],...]]). Used
+	 * three ways so a run doesn't re-propose an FAQ that already exists or is
+	 * awaiting review: fed into the AI prompt (compare-first), into the post-filter
+	 * safety net (faq_suggestion_filter_new matches titles AND questions), and into
+	 * the embedding semantic-dedupe pass (uses 'items' so the ANSWER body counts).
+	 * Q&A text comes from decoding the stored Description JSON via Faq_Model.
 	 */
 	function Existing_Faqs()
 	{
@@ -510,29 +583,50 @@ class Faq_Suggestion_Model extends CI_Model
 
 		$out = array();
 		foreach ($this->db->select('Title, Description')->where('Status', 'Y')->get('faq')->result() as $r) {
-			$out[] = array('title' => (string) $r->Title, 'questions' => $this->decode_questions($r->Description));
+			$out[] = $this->existing_faq_entry($r->Title, $r->Description);
 		}
 
 		$this->db->select('Title, Description');
 		$this->db->where('Status', 'Y');
 		$this->db->where_in('State', array('pending', 'accepted'));
 		foreach ($this->db->get('faq_suggestions')->result() as $r) {
-			$out[] = array('title' => (string) $r->Title, 'questions' => $this->decode_questions($r->Description));
+			$out[] = $this->existing_faq_entry($r->Title, $r->Description);
 		}
 		return $out;
 	}
 
-	/** The non-empty question texts inside a stored FAQ Description JSON. */
-	protected function decode_questions($description)
+	/**
+	 * Shape one existing FAQ into the record the dedupe layers consume:
+	 *   'title'     — the FAQ title
+	 *   'questions' — its question texts (the title/question post-filter)
+	 *   'items'     — its full [['q'=>,'a'=>], ...] pairs (the semantic embed text,
+	 *                 which needs the ANSWER body to catch a reworded question that
+	 *                 shares the same answer).
+	 */
+	protected function existing_faq_entry($title, $description)
 	{
+		$items     = $this->decode_qa($description);
 		$questions = array();
-		foreach (Faq_Model::Decode_Items((string) $description) as $it) {
-			$q = trim((string) (isset($it['q']) ? $it['q'] : ''));
-			if ($q !== '') {
-				$questions[] = $q;
+		foreach ($items as $it) {
+			if ($it['q'] !== '') {
+				$questions[] = $it['q'];
 			}
 		}
-		return $questions;
+		return array('title' => (string) $title, 'questions' => $questions, 'items' => $items);
+	}
+
+	/** The [['q'=>,'a'=>], ...] pairs inside a stored FAQ Description JSON (q non-empty). */
+	protected function decode_qa($description)
+	{
+		$items = array();
+		foreach (Faq_Model::Decode_Items((string) $description) as $it) {
+			$q = trim((string) (isset($it['q']) ? $it['q'] : ''));
+			$a = trim((string) (isset($it['a']) ? $it['a'] : ''));
+			if ($q !== '') {
+				$items[] = array('q' => $q, 'a' => $a);
+			}
+		}
+		return $items;
 	}
 
 	/** Active destination categories as CategoryID => Name (IsDestination='YES'). */
