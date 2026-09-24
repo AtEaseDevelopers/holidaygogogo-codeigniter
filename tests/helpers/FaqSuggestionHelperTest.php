@@ -308,4 +308,16 @@ assert_eq('semantic keeps candidate lacking a vector',
 	array(array('title' => 'novec')),
 	faq_suggestion_filter_semantic(array(array('title' => 'novec')), array(null), $existing_vecs, 0.9));
 
+// ---- memory_limit (PDF processing headroom) --------------------------------
+assert_eq('mem default when blank',   '1024M', faq_suggestion_memory_limit(''));
+assert_eq('mem default when null',    '1024M', faq_suggestion_memory_limit(null));
+assert_eq('mem passes valid M',       '2048M', faq_suggestion_memory_limit('2048M'));
+assert_eq('mem uppercases suffix',    '512M',  faq_suggestion_memory_limit('512m'));
+assert_eq('mem allows G suffix',      '2G',    faq_suggestion_memory_limit('2g'));
+assert_eq('mem allows raw bytes',     '268435456', faq_suggestion_memory_limit('268435456'));
+assert_eq('mem allows -1 unlimited',  '-1',    faq_suggestion_memory_limit('-1'));
+assert_eq('mem rejects garbage',      '1024M', faq_suggestion_memory_limit('lots'));
+assert_eq('mem rejects bad suffix',   '1024M', faq_suggestion_memory_limit('512MB'));
+assert_eq('mem custom default',       '2048M', faq_suggestion_memory_limit('', '2048M'));
+
 echo "\nAll FaqSuggestionHelper tests passed.\n";

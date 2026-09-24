@@ -31,6 +31,14 @@ class CompetitorAnalysisService
 {
 	protected $CI;
 
+	/**
+	 * Feature label this instance logs its AI usage under (ai_usage_log.feature).
+	 * The same service powers several pages — Competitor Product, Our Product and
+	 * Product extraction — so callers set this via set_usage_feature() to attribute
+	 * cost correctly. Defaults to Competitor Analysis.
+	 */
+	protected $usage_feature = 'Competitor Analysis';
+
 	/** Token usage from the most recent request(), for costing to_record(). */
 	protected $last_usage = array('input_tokens' => 0, 'output_tokens' => 0);
 
@@ -2323,7 +2331,49 @@ class CompetitorAnalysisService
 		}
 
 		$this->log_ai('response', array('label' => $label, 'code' => $code, 'usage' => $this->last_usage, 'ms' => $ms, 'text_snippet' => mb_substr($text, 0, 800)));
+		$this->log_usage($this->usage_feature);
 		return $text;
+	}
+
+	/**
+	 * Set the ai_usage_log feature label for calls made through this instance, so
+	 * Our Product / Product Extraction spend isn't misattributed to Competitor
+	 * Analysis. Blank input is ignored (keeps the default). Public — called by the
+	 * controller right after loading the library.
+	 */
+	public function set_usage_feature($label)
+	{
+		$label = trim((string) $label);
+		if ($label !== '') {
+			$this->usage_feature = mb_substr($label, 0, 64);
+		}
+	}
+
+	/**
+	 * Record this call's tokens + cost to the central ai_usage_log so the owner's
+	 * "AI Cost & Usage" page can report it. Fires once per actual OpenAI call
+	 * (including web_search discovery). Best-effort: never throws so usage logging
+	 * can never break the paid AI flow.
+	 */
+	protected function log_usage($feature)
+	{
+		try {
+			$in   = (int) $this->last_usage['input_tokens'];
+			$out  = (int) $this->last_usage['output_tokens'];
+			$cost = competitor_estimate_cost($this->model(), $in, $out, $this->price_rates());
+			$by   = (isset($this->CI->session) && ! empty($this->CI->session->admin_id)) ? (int) $this->CI->session->admin_id : null;
+			$this->CI->load->model('Ai_Usage_Model');
+			$this->CI->Ai_Usage_Model->Log(array(
+				'feature'       => $feature,
+				'model'         => $this->model(),
+				'input_tokens'  => $in,
+				'output_tokens' => $out,
+				'cost_usd'      => $cost,
+				'created_by'    => $by,
+			));
+		} catch (Exception $e) {
+			// never break the AI flow because usage logging failed
+		}
 	}
 
 	/**

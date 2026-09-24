@@ -671,6 +671,25 @@ class Faq_Model extends CI_Model
 		return $this->db->get()->row();
 	}
 
+	// Find one active FAQ by its exact title (case-insensitive, trimmed) so a FAQ
+	// suggestion accepted under an existing title can be folded into that FAQ
+	// instead of creating a duplicate. Returns the row (FAQID, Title, Slug,
+	// Description, Type) or null on a blank title / no match. If two FAQs somehow
+	// share a title the lowest FAQID wins (stable).
+	function Read_By_Title($title)
+	{
+		$title = trim((string)$title);
+		if($title === '') {
+			return null;
+		}
+		$this->db->select('FAQID, Title, Slug, Description, Type');
+		$this->db->where('LOWER(Title)', strtolower($title));
+		$this->db->where('Status', 'Y');
+		$this->db->order_by('FAQID', 'ASC');
+		$this->db->limit(1);
+		return $this->db->get('faq')->row();
+	}
+
 	// One-time, idempotent backfill: stamp a unique slug onto any active FAQ that
 	// doesn't have one yet (rows created before the Slug column existed). Cheap on
 	// the happy path - a single SELECT that returns nothing once every row has a
@@ -777,6 +796,29 @@ class Faq_Model extends CI_Model
 		$this->db->where('Status', 'Y');
 		$this->db->order_by('Name', 'ASC');
 		return $this->db->get('category')->result();
+	}
+
+	// Distinct titles of active FAQs, for the create/edit form's title picker
+	// (a datalist so an editor can reuse an existing title to group a new sub
+	// Q&A under it, or type a brand-new one). Sorted A-Z, deduped case-sensitively.
+	function Read_Titles()
+	{
+		$this->db->distinct();
+		$this->db->select('Title');
+		$this->db->where('Status', 'Y');
+		$this->db->where('Type', 'internal');
+		$this->db->where('Title !=', '');
+		$this->db->order_by('Title', 'ASC');
+		$rows = $this->db->get('faq')->result();
+
+		$titles = array();
+		foreach($rows as $row) {
+			$title = trim((string)$row->Title);
+			if($title !== '') {
+				$titles[] = $title;
+			}
+		}
+		return $titles;
 	}
 
 	// CategoryIDs currently mapped to a FAQ (for pre-selecting the form).

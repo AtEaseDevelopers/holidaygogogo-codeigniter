@@ -240,6 +240,28 @@
 		var searchInput = document.getElementById('faq-item-search');
 		var filterNote  = document.getElementById('faq-item-filter-count');
 
+		// Grow a sub-answer textarea to fit its full content so the whole answer is
+		// always visible without an inner scrollbar (feedback: "enlarge the fields
+		// so it always shows all the text"). Capped so a very long answer doesn't
+		// take over the page — beyond the cap it scrolls.
+		function autoGrow(el) {
+			if (!el) { return; }
+			el.style.height = 'auto';
+			var max = 600;
+			el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
+			el.style.overflowY = (el.scrollHeight + 2 > max) ? 'auto' : 'hidden';
+		}
+		function autoGrowAll(scope) {
+			(scope || document).querySelectorAll('textarea.faq-item-a').forEach(autoGrow);
+		}
+		// Grow on typing, and re-grow rows revealed by the filter (a hidden textarea
+		// reports scrollHeight 0, so its height must be recomputed once shown).
+		if (list) {
+			list.addEventListener('input', function (e) {
+				if (e.target && e.target.classList.contains('faq-item-a')) { autoGrow(e.target); }
+			});
+		}
+
 		// Read selected values straight off the native <select>. selectedOptions is
 		// the source of truth bootstrap-select keeps in sync, so this works whether
 		// or not the picker widget has initialised — no dependence on $().val() state.
@@ -259,6 +281,7 @@
 			if (!selected.length && !query) {
 				items.forEach(function (item) { item.style.display = ''; });
 				if (filterNote) { filterNote.textContent = ''; }
+				autoGrowAll(list);
 				return;
 			}
 			var shown = 0;
@@ -279,7 +302,7 @@
 				}
 				var match = tagMatch && textMatch;
 				item.style.display = match ? '' : 'none';
-				if (match) { shown++; }
+				if (match) { shown++; autoGrow(item.querySelector('textarea.faq-item-a')); }
 			});
 			if (filterNote) {
 				filterNote.textContent = 'Showing ' + shown + ' of ' + items.length;
@@ -353,6 +376,7 @@
 			// The cloned <select> is inert until it's in the DOM, so init its
 			// searchable picker now (bootstrap-select guards against re-init).
 			$(node).find('.faq-item-tags').selectpicker();
+			autoGrow(node.querySelector('textarea.faq-item-a'));
 			// A new row has no tags yet, so an active filter would hide it. Clear
 			// the filter so the row the user just asked for is actually visible.
 			clearFilter();
@@ -425,6 +449,7 @@
 			addItem();
 		} else {
 			renumber();
+			autoGrowAll(list);
 		}
 	})();
 

@@ -171,6 +171,33 @@ class CustomerAnalysisService
 		if ($text === '') {
 			throw new Exception('OpenAI returned no readable analysis. Try again.');
 		}
+		$this->log_usage('Customer Analysis');
 		return $text;
+	}
+
+	/**
+	 * Record this call's tokens + cost to the central ai_usage_log so the owner's
+	 * "AI Cost & Usage" page can report it. Best-effort: any failure is swallowed
+	 * so logging never breaks the paid AI flow.
+	 */
+	protected function log_usage($feature)
+	{
+		try {
+			$in   = (int) $this->last_usage['input_tokens'];
+			$out  = (int) $this->last_usage['output_tokens'];
+			$cost = competitor_estimate_cost($this->model(), $in, $out, $this->price_rates());
+			$by   = (isset($this->CI->session) && ! empty($this->CI->session->admin_id)) ? (int) $this->CI->session->admin_id : null;
+			$this->CI->load->model('Ai_Usage_Model');
+			$this->CI->Ai_Usage_Model->Log(array(
+				'feature'       => $feature,
+				'model'         => $this->model(),
+				'input_tokens'  => $in,
+				'output_tokens' => $out,
+				'cost_usd'      => $cost,
+				'created_by'    => $by,
+			));
+		} catch (Exception $e) {
+			// never break the AI flow because usage logging failed
+		}
 	}
 }

@@ -452,6 +452,91 @@
 			flex-wrap: wrap;
 			gap: 8px;
 		}
+		/* ---- AI answer box ---- */
+		.ai-ask {
+			margin-top: clamp(22px, 4vw, 32px);
+			background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+			border-radius: 18px;
+			padding: clamp(16px, 3vw, 24px);
+			box-shadow: 0 18px 44px -26px rgba(29, 78, 128, 0.7);
+			color: #fff;
+		}
+		.ai-ask-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+		.ai-ask-head svg { width: 20px; height: 20px; stroke: #fff; }
+		.ai-ask-title { font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: 18px; }
+		.ai-ask-sub { font-size: 13px; font-weight: 300; opacity: 0.9; margin-bottom: 14px; }
+		.ai-ask-form { display: flex; gap: 10px; flex-wrap: wrap; }
+		.ai-ask-input {
+			flex: 1 1 260px;
+			border: none;
+			border-radius: 12px;
+			padding: 13px 16px;
+			font-family: inherit;
+			font-size: 15px;
+			color: var(--ink);
+			background: #fff;
+			outline: none;
+			box-shadow: 0 0 0 3px transparent;
+		}
+		.ai-ask-input:focus { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5); }
+		.ai-ask-btn {
+			border: none;
+			border-radius: 12px;
+			padding: 13px 22px;
+			font-family: inherit;
+			font-size: 14.5px;
+			font-weight: 600;
+			color: var(--accent-deep);
+			background: #fff;
+			cursor: pointer;
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			transition: transform 0.08s ease, opacity 0.2s ease;
+		}
+		.ai-ask-btn:hover { transform: translateY(-1px); }
+		.ai-ask-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+		.ai-ask-btn svg { width: 16px; height: 16px; stroke: currentColor; }
+		.ai-result {
+			display: none;
+			margin-top: 16px;
+			background: #fff;
+			border-radius: 14px;
+			padding: 16px 18px;
+			color: var(--ink);
+		}
+		.ai-result.show { display: block; }
+		.ai-result-head {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			margin-bottom: 10px;
+		}
+		.ai-result-label { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-deep); }
+		.ai-copy-btn {
+			border: 1px solid var(--line);
+			background: var(--accent-tint);
+			color: var(--accent-deep);
+			border-radius: 10px;
+			padding: 7px 14px;
+			font-family: inherit;
+			font-size: 13px;
+			font-weight: 600;
+			cursor: pointer;
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+		}
+		.ai-copy-btn svg { width: 14px; height: 14px; stroke: currentColor; }
+		.ai-answer { font-size: 15px; line-height: 1.6; white-space: pre-wrap; color: var(--ink); }
+		.ai-answer.is-muted { color: var(--muted); font-style: italic; }
+		.ai-sources { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--muted); }
+		.ai-sources strong { color: var(--ink); font-weight: 600; }
+		.ai-error { margin-top: 14px; background: #fff3f3; color: #b42318; border-radius: 12px; padding: 12px 16px; font-size: 14px; display: none; }
+		.ai-error.show { display: block; }
+		.ai-spinner { width: 15px; height: 15px; border: 2px solid rgba(29,78,128,0.25); border-top-color: var(--accent-deep); border-radius: 50%; animation: ai-spin 0.7s linear infinite; }
+		@keyframes ai-spin { to { transform: rotate(360deg); } }
 	</style>
 </head>
 <body>
@@ -466,6 +551,37 @@
 		</div>
 		<h1>FAQ Library</h1>
 		<p class="lede">Every internal FAQ in one place. Search across all of them, or filter by tag.</p>
+
+		<!-- AI answer: type a customer question, get a ready-to-send reply grounded
+		     in the FAQ library (Faq/Ai_Search). No data is stored.
+		     HIDDEN 2026-09-24 (UI only, bring back later): remove the inline
+		     style="display:none;" below to restore the Ask AI box. -->
+		<section class="ai-ask" style="display:none;">
+			<div class="ai-ask-head">
+				<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5 10.1 10.9 5.5 9l4.6-1.4L12 3z"></path><path d="M19 15l.7 1.8L21.5 17.5l-1.8.7L19 20l-.7-1.8L16.5 17.5l1.8-.7L19 15z"></path></svg>
+				<span class="ai-ask-title">Ask AI</span>
+			</div>
+			<p class="ai-ask-sub">Type a customer's question — AI reads every FAQ and drafts a reply you can copy and send.</p>
+			<form class="ai-ask-form" id="aiAskForm" autocomplete="off">
+				<input type="text" class="ai-ask-input" id="aiAskInput" placeholder="e.g. What time is check-in at Redang Bay Resort?" aria-label="Ask a question">
+				<button type="submit" class="ai-ask-btn" id="aiAskBtn">
+					<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+					<span id="aiAskBtnText">Ask</span>
+				</button>
+			</form>
+			<div class="ai-error" id="aiError"></div>
+			<div class="ai-result" id="aiResult">
+				<div class="ai-result-head">
+					<span class="ai-result-label">Suggested reply</span>
+					<button type="button" class="ai-copy-btn" id="aiCopyBtn">
+						<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+						<span id="aiCopyBtnText">Copy</span>
+					</button>
+				</div>
+				<div class="ai-answer" id="aiAnswer"></div>
+				<div class="ai-sources" id="aiSources" style="display:none;"></div>
+			</div>
+		</section>
 
 		<?php if(empty($decoded_faqs)) { ?>
 			<div class="no-results show">No FAQs yet.</div>
@@ -618,6 +734,111 @@
 	</main>
 
 	<script>
+		// ---- AI answer box: post the question to Faq/Ai_Search, render the reply ----
+		(function () {
+			var form   = document.getElementById('aiAskForm');
+			if (!form) return;
+			var input     = document.getElementById('aiAskInput');
+			var btn       = document.getElementById('aiAskBtn');
+			var btnText   = document.getElementById('aiAskBtnText');
+			var resultBox = document.getElementById('aiResult');
+			var answerEl  = document.getElementById('aiAnswer');
+			var sourcesEl = document.getElementById('aiSources');
+			var errorEl   = document.getElementById('aiError');
+			var copyBtn   = document.getElementById('aiCopyBtn');
+			var copyText  = document.getElementById('aiCopyBtnText');
+			var endpoint  = <?php echo json_encode(base_url('Faq/Ai_Search')); ?>;
+
+			function setLoading(on) {
+				btn.disabled = on;
+				btnText.textContent = on ? 'Thinking…' : 'Ask';
+			}
+			function showError(msg) {
+				errorEl.textContent = msg;
+				errorEl.classList.add('show');
+				resultBox.classList.remove('show');
+			}
+			function escapeHtml(s) {
+				return String(s).replace(/[&<>"']/g, function (c) {
+					return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+				});
+			}
+
+			form.addEventListener('submit', function (e) {
+				e.preventDefault();
+				var q = (input.value || '').trim();
+				errorEl.classList.remove('show');
+				if (q.length < 3) {
+					showError('Please type a question (at least 3 characters).');
+					return;
+				}
+				setLoading(true);
+				resultBox.classList.remove('show');
+
+				var body = new URLSearchParams();
+				body.append('question', q);
+
+				fetch(endpoint, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+					body: body.toString(),
+					credentials: 'same-origin'
+				}).then(function (r) {
+					return r.json().catch(function () { throw new Error('Unexpected server response.'); });
+				}).then(function (data) {
+					setLoading(false);
+					if (!data || !data.ok) {
+						showError((data && data.error) ? data.error : 'Something went wrong. Please try again.');
+						return;
+					}
+					if (!data.found || !data.answer) {
+						answerEl.classList.add('is-muted');
+						answerEl.textContent = (data.answer && data.answer.trim())
+							? data.answer
+							: 'No matching FAQ found. Please check with the team before replying.';
+						sourcesEl.style.display = 'none';
+						copyBtn.style.display = (data.answer && data.answer.trim()) ? '' : 'none';
+						resultBox.classList.add('show');
+						return;
+					}
+					answerEl.classList.remove('is-muted');
+					answerEl.textContent = data.answer;
+					copyBtn.style.display = '';
+					if (data.sources && data.sources.length) {
+						sourcesEl.innerHTML = '<strong>Based on:</strong> ' +
+							data.sources.map(function (s) { return escapeHtml(s); }).join(' · ');
+						sourcesEl.style.display = '';
+					} else {
+						sourcesEl.style.display = 'none';
+					}
+					resultBox.classList.add('show');
+				}).catch(function (err) {
+					setLoading(false);
+					showError(err && err.message ? err.message : 'Could not reach the server.');
+				});
+			});
+
+			copyBtn.addEventListener('click', function () {
+				var text = answerEl.textContent || '';
+				var done = function () {
+					copyText.textContent = 'Copied!';
+					setTimeout(function () { copyText.textContent = 'Copy'; }, 1400);
+				};
+				if (navigator.clipboard && navigator.clipboard.writeText) {
+					navigator.clipboard.writeText(text).then(done).catch(function () { fallback(text); done(); });
+				} else {
+					fallback(text); done();
+				}
+				function fallback(t) {
+					var ta = document.createElement('textarea');
+					ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+					document.body.appendChild(ta); ta.focus(); ta.select();
+					try { document.execCommand('copy'); } catch (e) {}
+					document.body.removeChild(ta);
+				}
+			});
+		})();
+
 		(function () {
 			var library = document.getElementById('faqLibrary');
 			if (!library) return;

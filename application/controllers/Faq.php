@@ -153,10 +153,12 @@ class Faq extends MY_Controller
 		echo $output;
 	}
 
-	// Round-trip Excel template of every internal FAQ - one row per sub-Q&A, in
-	// the exact columns Import() reads back (FAQ | DESTINATION | QUESTION |
-	// ANSWER | TAGS). The owner downloads this, edits/adds rows, and re-imports
-	// to replace the whole internal library. OWNER or FE.
+	// Round-trip Excel template of every internal FAQ - one row per sub-Q&A. The
+	// columns match the Excel download exactly (FAQ | DESTINATION | QUESTION |
+	// ANSWER | TAGS | LAST UPDATED) so both files carry one standardized format;
+	// Import() reads back only the first five columns (LAST UPDATED is display-
+	// only and ignored on re-import). The owner downloads this, edits/adds rows,
+	// and re-imports to replace the whole internal library. OWNER or FE.
 	function Export_Template()
 	{
 		if(!$this->Can_Edit()) {
@@ -170,27 +172,33 @@ class Faq extends MY_Controller
 		$sheet->setTitle('FAQ Template');
 		$spreadsheet->getProperties()->setCreator('HolidayGoGoGo');
 
-		$headers = array('A' => 'FAQ', 'B' => 'DESTINATION', 'C' => 'QUESTION', 'D' => 'ANSWER', 'E' => 'TAGS');
+		$headers = array('A' => 'FAQ', 'B' => 'DESTINATION', 'C' => 'QUESTION', 'D' => 'ANSWER', 'E' => 'TAGS', 'F' => 'LAST UPDATED');
 		foreach($headers as $col => $label) {
 			$sheet->setCellValue($col . '1', $label);
 		}
-		$sheet->getStyle('A1:E1')->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_BLACK);
-		$sheet->getStyle('A1:E1')->getFont()->getColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE);
-		$sheet->getStyle('A1:E1')->getFont()->setBold(true);
+		$sheet->getStyle('A1:F1')->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_BLACK);
+		$sheet->getStyle('A1:F1')->getFont()->getColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE);
+		$sheet->getStyle('A1:F1')->getFont()->setBold(true);
 
 		if(!empty($rows)) {
 			$r = 2;
 			foreach($rows as $row) {
+				$updated = '';
+				if($row['updated'] !== '') {
+					$ts = strtotime($row['updated']);
+					$updated = $ts ? date('j M Y', $ts) : $row['updated'];
+				}
 				$sheet->setCellValueExplicit('A' . $r, $row['title'], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$sheet->setCellValueExplicit('B' . $r, $row['destinations'], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$sheet->setCellValueExplicit('C' . $r, $row['question'], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$sheet->setCellValueExplicit('D' . $r, $row['answer'], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$sheet->setCellValueExplicit('E' . $r, $row['tags'], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+				$sheet->setCellValueExplicit('F' . $r, $updated, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$r++;
 			}
 			$last = $r - 1;
 			$sheet->getStyle('C2:D' . $last)->getAlignment()->setWrapText(true);
-			$sheet->getStyle('A2:E' . $last)->getAlignment()->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_TOP);
+			$sheet->getStyle('A2:F' . $last)->getAlignment()->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_TOP);
 		}
 
 		$sheet->getColumnDimension('A')->setWidth(28);
@@ -198,6 +206,7 @@ class Faq extends MY_Controller
 		$sheet->getColumnDimension('C')->setWidth(45);
 		$sheet->getColumnDimension('D')->setWidth(60);
 		$sheet->getColumnDimension('E')->setWidth(22);
+		$sheet->getColumnDimension('F')->setWidth(16);
 
 		$filename = 'FAQ_TEMPLATE_' . date('Ymd') . '.xlsx';
 		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -411,6 +420,73 @@ class Faq extends MY_Controller
 		$data['tag_names']       = $this->Faq_Model->Tag_Name_Map();
 		$data['default_tag_ids'] = $this->Faq_Model->Default_Tag_Ids();
 		$this->load->view('faq/all', $data);
+	}
+
+	// AI answer for the internal FAQ Library page: a staff member types a customer
+	// question and the model writes a ready-to-send reply grounded ONLY in the FAQ
+	// library. POST { question } -> JSON { ok, found, answer, sources[], error }.
+	// Same FV/owner gate and internal-only scope as Internal(). No data is stored;
+	// this is a read-only lookup, so the session lock is released to keep the page
+	// responsive while OpenAI is called.
+	function Ai_Search()
+	{
+		$this->output->set_content_type('application/json');
+		if(!$this->Can_View()) {
+			$this->output->set_status_header(403);
+			$this->output->set_output(json_encode(array('ok' => false, 'error' => 'Not allowed.')));
+			return;
+		}
+		if($this->input->server('REQUEST_METHOD') !== 'POST') {
+			$this->output->set_status_header(405);
+			$this->output->set_output(json_encode(array('ok' => false, 'error' => 'POST only.')));
+			return;
+		}
+		if(method_exists($this, 'release_session_lock')) {
+			$this->release_session_lock();
+		} elseif(function_exists('session_write_close')) {
+			@session_write_close();
+		}
+
+		$this->load->helper('faq_search');
+		$question = faq_search_valid_question($this->input->post('question'));
+		if($question === '') {
+			$this->output->set_output(json_encode(array('ok' => false, 'error' => 'Please type a question (at least 3 characters).')));
+			return;
+		}
+
+		// Assemble the internal FAQ library into the corpus the model reads.
+		$faqs = array_values(array_filter($this->Faq_Model->Read_Faqs(), function($faq) {
+			return $faq->Type === 'internal';
+		}));
+		$library = array();
+		foreach($faqs as $faq) {
+			$dest_raw = ($faq->Destinations === null || $faq->Destinations === '') ? '' : (string)$faq->Destinations;
+			$library[] = array(
+				'title'        => (string)$faq->Title,
+				'destinations' => ($dest_raw === '') ? array() : explode('||', $dest_raw),
+				'items'        => Faq_Model::Decode_Items($faq->Description),
+			);
+		}
+		$corpus = faq_search_build_corpus($library);
+		if($corpus === '') {
+			$this->output->set_output(json_encode(array('ok' => true, 'found' => false, 'answer' => '', 'sources' => array(), 'error' => 'There are no FAQs to search yet.')));
+			return;
+		}
+
+		try {
+			$this->load->library('FaqSearchService');
+			$result = $this->faqsearchservice->answer($question, $corpus);
+		} catch(Exception $e) {
+			$this->output->set_output(json_encode(array('ok' => false, 'error' => $e->getMessage())));
+			return;
+		}
+
+		$this->output->set_output(json_encode(array(
+			'ok'      => true,
+			'found'   => (bool)$result['found'],
+			'answer'  => (string)$result['answer'],
+			'sources' => array_values($result['sources']),
+		)));
 	}
 
 	// Returns true on success, or an error message string on failure.

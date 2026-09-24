@@ -114,15 +114,20 @@ class Faq_Suggestion extends MY_Controller
 		$data['items']      = Faq_Model::Decode_Items($suggestion->Description);
 		$data['tags']       = $this->Faq_Tag_Model->Read_Active();
 		$data['destinations'] = $this->Faq_Model->Read_Destinations();
+		// Existing FAQ titles for the Title picker: accepting under an existing title
+		// folds this suggestion into that FAQ instead of creating a duplicate.
+		$data['faq_titles'] = $this->Faq_Model->Read_Titles();
 		$data['selected_destination_ids'] = Faq_Suggestion_Model::Parse_Id_Csv($suggestion->DestinationIds);
 		$this->load->view('layout/header', $titles);
 		$this->load->view('faq_suggestion/form', $data);
 		$this->load->view('layout/footer');
 	}
 
-	// Promote a suggestion to a real internal FAQ. Creates the FAQ from the
-	// (possibly edited) suggestion fields, syncs its destinations, then flags the
-	// suggestion 'accepted' with a link to the FAQ (kept for audit).
+	// Promote a suggestion to a real FAQ. If its (possibly edited) Title matches an
+	// existing active FAQ, the suggestion's sub-Q&As are FOLDED INTO that FAQ (its
+	// items appended, destinations unioned) — this is what the Title picker's
+	// existing-title options are for. Otherwise a new FAQ is created. Either way the
+	// suggestion is flagged 'accepted' with a link to the target FAQ (kept for audit).
 	function Accept()
 	{
 		if (!$this->Can_Edit()) {
@@ -149,15 +154,45 @@ class Faq_Suggestion extends MY_Controller
 			return;
 		}
 
-		// The suggestion's Description is already stored in the FAQ JSON format.
-		// AI-suggested FAQs are published as 'external' type.
+		$sugg_dest_ids = Faq_Suggestion_Model::Parse_Id_Csv($suggestion->DestinationIds);
+
+		// If a FAQ already exists under this title, fold the suggestion's sub-Q&As
+		// into it rather than creating a duplicate (the Title picker's existing-title
+		// options exist for exactly this).
+		$existing = $this->Faq_Model->Read_By_Title($title);
+		if ($existing !== null) {
+			$merged_items = array_merge(
+				Faq_Model::Decode_Items((string) $existing->Description),
+				Faq_Model::Decode_Items((string) $suggestion->Description)
+			);
+			$this->Faq_Model->Update((int) $existing->FAQID, array(
+				'Title'       => (string) $existing->Title,
+				'Slug'        => (string) $existing->Slug,
+				'Description' => Faq_Model::Encode_Items($merged_items),
+				'Type'        => (string) $existing->Type,
+			));
+			// Union the destinations so the merged FAQ keeps both sets.
+			$union = array_values(array_unique(array_merge(
+				array_map('intval', $this->Faq_Model->Read_Destination_Ids((int) $existing->FAQID)),
+				array_map('intval', $sugg_dest_ids)
+			)));
+			$this->Faq_Model->Sync_Destinations((int) $existing->FAQID, $union);
+			$this->Faq_Suggestion_Model->Set_State($id, 'accepted', (int) $existing->FAQID);
+
+			$this->session->set_flashdata('faq_success', 'Suggestion added to the existing FAQ "' . $title . '".');
+			redirect($back);
+			return;
+		}
+
+		// No FAQ with this title yet — create a new one. The suggestion's Description
+		// is already stored in the FAQ JSON format; AI-suggested FAQs are 'external'.
 		$faq_id = $this->Faq_Model->Create(array(
 			'Title'       => $title,
 			'Slug'        => $this->Faq_Model->Generate_Slug($title, 0),
 			'Description' => (string) $suggestion->Description,
 			'Type'        => 'external',
 		));
-		$this->Faq_Model->Sync_Destinations($faq_id, Faq_Suggestion_Model::Parse_Id_Csv($suggestion->DestinationIds));
+		$this->Faq_Model->Sync_Destinations($faq_id, $sugg_dest_ids);
 		$this->Faq_Suggestion_Model->Set_State($id, 'accepted', $faq_id);
 
 		$this->session->set_flashdata('faq_success', 'FAQ created from suggestion.');
@@ -252,6 +287,11 @@ class Faq_Suggestion extends MY_Controller
 			redirect(base_url('Faq_Suggestion'));
 			return;
 		}
+		if ($this->Post_Exceeded_Limit()) {
+			$this->Flash_Upload_Too_Large();
+			redirect(base_url('Faq_Suggestion'));
+			return;
+		}
 		if (!isset($_FILES['file']) || $_FILES['file']['error'] === UPLOAD_ERR_NO_FILE) {
 			$this->session->set_flashdata('faq_error', 'Please choose a PDF file to upload.');
 			redirect(base_url('Faq_Suggestion'));
@@ -275,6 +315,76 @@ class Faq_Suggestion extends MY_Controller
 		redirect(base_url('Faq_Suggestion'));
 	}
 
+	// Manual "Generate from Chat File" — upload a WhatsApp .txt export (or a .zip
+	// bundling several) and mine FAQs from the conversation. Same background/inline
+	// dispatch as the other generators.
+	function Generate_Chat_File()
+	{
+		if (!$this->Can_Edit()) {
+			redirect(base_url('Faq_Suggestion'));
+			return;
+		}
+		if ($this->Post_Exceeded_Limit()) {
+			$this->Flash_Upload_Too_Large();
+			redirect(base_url('Faq_Suggestion'));
+			return;
+		}
+		if (!isset($_FILES['file']) || $_FILES['file']['error'] === UPLOAD_ERR_NO_FILE) {
+			$this->session->set_flashdata('faq_error', 'Please choose a .txt or .zip chat export to upload.');
+			redirect(base_url('Faq_Suggestion'));
+			return;
+		}
+
+		try {
+			$info = $this->Receive_Chat_File();
+		} catch (Exception $e) {
+			$this->session->set_flashdata('faq_error', $e->getMessage());
+			redirect(base_url('Faq_Suggestion'));
+			return;
+		}
+
+		$run_id = $this->Faq_Suggestion_Model->Queue_Run(array(
+			'Source'     => 'chatfile',
+			'FileName'   => $info['orig_name'],
+			'StoredName' => $info['file_name'],
+		));
+		$this->Dispatch_Run($run_id, 'chatfile', $info['orig_name']);
+		redirect(base_url('Faq_Suggestion'));
+	}
+
+	/**
+	 * Validate + store an uploaded chat export (.txt or .zip) under the same
+	 * faq_suggestion upload dir the worker reads. Validation reuses the shared
+	 * chat_history rules (.txt <=5MB, .zip <=30MB); the file is moved manually
+	 * (not via CI's upload lib, whose .txt MIME detection is unreliable) with a
+	 * unique name that KEEPS the real extension so the worker can tell txt from
+	 * zip. Returns ['orig_name'=>, 'file_name'=>]. Throws on any problem.
+	 */
+	private function Receive_Chat_File()
+	{
+		$this->load->helper('chat_history');
+		$file = $_FILES['file'];
+		$orig = (string) $file['name'];
+		$check = chat_history_validate_upload($orig, (int) $file['size']);
+		if (!$check['ok']) {
+			throw new Exception($check['error']);
+		}
+		if ($file['error'] !== UPLOAD_ERR_OK) {
+			throw new Exception('Upload failed. Please try again.');
+		}
+
+		$dir = FCPATH . 'assets/upload/faq_suggestion/';
+		if (!is_dir($dir)) {
+			@mkdir($dir, 0755, true);
+		}
+		$ext    = strtolower(pathinfo($orig, PATHINFO_EXTENSION)); // 'txt' or 'zip' (validated)
+		$stored = 'chat_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+		if (!move_uploaded_file($file['tmp_name'], $dir . $stored)) {
+			throw new Exception('Could not save the uploaded file.');
+		}
+		return array('orig_name' => $orig, 'file_name' => $stored);
+	}
+
 	// Soft-delete a whole run (and its suggestions), wired to Delete_Record().
 	function Delete_Run()
 	{
@@ -287,13 +397,44 @@ class Faq_Suggestion extends MY_Controller
 		}
 	}
 
+	/**
+	 * True when this POST was silently dropped for exceeding post_max_size: PHP
+	 * empties $_POST and $_FILES but the request still carried a body
+	 * (CONTENT_LENGTH > 0). Lets the upload endpoints show a clear "too large for
+	 * the server" message instead of a misleading "please choose a file".
+	 */
+	private function Post_Exceeded_Limit()
+	{
+		if (strtoupper((string) $this->input->server('REQUEST_METHOD')) !== 'POST') {
+			return false;
+		}
+		$len = (int) $this->input->server('CONTENT_LENGTH');
+		return $len > 0 && empty($_POST) && empty($_FILES);
+	}
+
+	/** Flash a "server upload limit exceeded" message with the current caps. */
+	private function Flash_Upload_Too_Large()
+	{
+		$this->session->set_flashdata('faq_error',
+			'The file is too large for the server to accept (current limits: upload ' . ini_get('upload_max_filesize')
+			. ', post ' . ini_get('post_max_size') . '). Ask the server admin to raise upload_max_filesize / post_max_size, or upload a smaller file.');
+	}
+
+	/** Human label for a run source, shared by the flash messages. */
+	private function Source_Label($source)
+	{
+		if ($source === 'pdf')      { return 'PDF'; }
+		if ($source === 'chatfile') { return 'chat file'; }
+		return 'chats';
+	}
+
 	/** Flash a success / failure message for a completed generation run. */
 	private function Flash_Summary($summary, $source, $scope)
 	{
 		if ((int) $summary['created'] > 0) {
-			$this->session->set_flashdata('faq_success', 'Generated ' . (int) $summary['created'] . ' new FAQ suggestion(s) from ' . ($source === 'pdf' ? 'PDF' : 'chats') . ' (' . $scope . ').');
+			$this->session->set_flashdata('faq_success', 'Generated ' . (int) $summary['created'] . ' new FAQ suggestion(s) from ' . $this->Source_Label($source) . ' (' . $scope . ').');
 		} elseif ($summary['reason'] === 'no_messages') {
-			$this->session->set_flashdata('faq_error', 'No WhatsApp / GHL messages found (' . $scope . ').');
+			$this->session->set_flashdata('faq_error', 'No usable messages found (' . $scope . ').');
 		} else {
 			$this->session->set_flashdata('faq_error', 'No new suggestions this time (the AI found nothing beyond what already exists).');
 		}
@@ -309,11 +450,15 @@ class Faq_Suggestion extends MY_Controller
 	{
 		$this->Prune_Logs();
 		if ($this->Spawn_Worker($run_id)) {
-			$this->session->set_flashdata('faq_success', 'Generation started in the background from ' . ($source === 'pdf' ? 'PDF' : 'chats') . ' (' . $scope . '). This page updates as it finishes.');
+			$this->session->set_flashdata('faq_success', 'Generation started in the background from ' . $this->Source_Label($source) . ' (' . $scope . '). This page updates as it finishes.');
 			return;
 		}
-		// No process spawn available — process inline as a fallback.
+		// No process spawn available — process inline as a fallback. This runs under
+		// the web SAPI's memory_limit, so a large PDF can OOM; raise it up front
+		// (Process_Run also raises it defensively for the PDF path).
 		@set_time_limit(600);
+		$this->load->helper('faq_suggestion');
+		@ini_set('memory_limit', faq_suggestion_memory_limit(get_env('FAQ_SUGGESTION_MEMORY_LIMIT')));
 		$summary = $this->Faq_Suggestion_Model->Process_Run($run_id);
 		$this->Flash_Summary($summary, $source, $scope);
 	}
@@ -334,10 +479,15 @@ class Faq_Suggestion extends MY_Controller
 		$php   = $this->Php_Cli_Bin();
 		$index = FCPATH . 'index.php';
 		$out   = $log_dir . 'run_' . (int) $run_id . '.out';
+		// Memory ceiling for the worker — a big PDF needs several full-size copies of
+		// the file in memory (raw + base64 + data URI + JSON), so default to 1024M
+		// and let .env FAQ_SUGGESTION_MEMORY_LIMIT override.
+		$this->load->helper('faq_suggestion');
+		$mem = faq_suggestion_memory_limit(get_env('FAQ_SUGGESTION_MEMORY_LIMIT'));
 		// pcre.jit=0 silences a PCRE-JIT warning in the sandboxed child; the
 		// controller name MUST match the file case (Linux is case-sensitive).
 		// `& echo $!` backgrounds the worker and prints its PID.
-		$cmd = escapeshellarg($php) . ' -d pcre.jit=0 -d memory_limit=512M '
+		$cmd = escapeshellarg($php) . ' -d pcre.jit=0 -d memory_limit=' . escapeshellarg($mem) . ' '
 			. escapeshellarg($index) . ' Faq_Suggestion_Job run ' . escapeshellarg((string) (int) $run_id)
 			. ' > ' . escapeshellarg($out) . ' 2>&1 & echo $!';
 		$pid = (int) @exec($cmd);

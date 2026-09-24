@@ -52,6 +52,7 @@ class Our_Product_Job extends CI_Controller
 		};
 
 		$this->load->library('CompetitorAnalysisService');
+		$this->competitoranalysisservice->set_usage_feature('Our Product Analysis');
 		$mode = isset($job['mode']) ? $job['mode'] : 'crawl';
 		if ($mode === 'analyse') {
 			$this->run_analyse($job, $write);

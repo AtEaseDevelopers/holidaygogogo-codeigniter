@@ -432,6 +432,7 @@ class Product extends MY_Controller
 		$this->load->helper('product_extract');
 		$this->load->helper('product_tour_fields');
 		$this->load->library('CompetitorAnalysisService');
+		$this->competitoranalysisservice->set_usage_feature('Product Extraction');
 		try {
 			$res    = $this->competitoranalysisservice->extract_for_product($url);
 			$mapped = product_extract_map($res['data']);

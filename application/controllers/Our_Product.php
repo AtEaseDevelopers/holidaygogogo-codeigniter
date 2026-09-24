@@ -244,6 +244,7 @@ class Our_Product extends MY_Controller
 			$this->load->helper('product_tour_fields');
 			$our_products = competitor_format_our_products($this->Product_Model->Read_For_Comparison());
 			$this->load->library('CompetitorAnalysisService');
+			$this->competitoranalysisservice->set_usage_feature('Our Product Analysis');
 			try {
 				$record = $this->competitoranalysisservice->analyze_paste($paste, $our_products);
 			} catch (Exception $e) {
@@ -324,6 +325,7 @@ class Our_Product extends MY_Controller
 		$this->load->helper('product_tour_fields');
 		$our_products = competitor_format_our_products($this->Product_Model->Read_For_Comparison());
 		$this->load->library('CompetitorAnalysisService');
+		$this->competitoranalysisservice->set_usage_feature('Our Product Analysis');
 		try {
 			$record = $this->competitoranalysisservice->analyze_file($upload['full_path'], $upload['file_ext'], $our_products);
 		} catch (Exception $e) {
@@ -680,6 +682,7 @@ class Our_Product extends MY_Controller
 
 		@set_time_limit(600);
 		$this->load->library('CompetitorAnalysisService');
+		$this->competitoranalysisservice->set_usage_feature('Our Product Analysis');
 		try {
 			$overlay = $this->competitoranalysisservice->translate_analysis(
 				competitor_display_products($analysis), $lang

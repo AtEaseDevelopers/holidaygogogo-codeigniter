@@ -97,6 +97,127 @@ class FaqSuggestionService
 		return $this->pack_result($raw);
 	}
 
+	/**
+	 * Memory-safe PDF path: stream the file straight from disk to OpenAI's Files
+	 * API (no base64, no in-memory copy, nothing embedded in the JSON body), then
+	 * reference it by file_id in the Responses call. $path is the stored file;
+	 * $orig_name is shown to the API. Falls back to the base64 method
+	 * (suggest_file) on ANY upload/reference failure, and for non-PDF types, so a
+	 * proxy /base_url without a /files endpoint still works. Set
+	 * FAQ_SUGGESTION_PDF_UPLOAD=0 in .env to force the base64 path.
+	 */
+	public function suggest_file_path($path, $ext, $orig_name = '', $destination_names = array(), $existing_faqs = array())
+	{
+		$ext = strtolower(ltrim((string) $ext, '.'));
+
+		$use_upload = get_env('FAQ_SUGGESTION_PDF_UPLOAD');
+		$use_upload = ($use_upload === '' || $use_upload === null) ? true : (bool) (int) $use_upload;
+
+		if ($ext === 'pdf' && $use_upload) {
+			try {
+				$file_id = $this->upload_file($path, (string) $orig_name);
+				$spec  = faq_suggestion_build_file_prompt($destination_names, $existing_faqs);
+				$input = array(array(
+					'role'    => 'user',
+					'content' => array(
+						array('type' => 'input_text', 'text' => $spec['input']),
+						array('type' => 'input_file', 'file_id' => $file_id),
+					),
+				));
+				$raw = $this->request($spec['instructions'], $input);
+				$this->delete_file($file_id); // best-effort cleanup
+				return $this->pack_result($raw);
+			} catch (Exception $e) {
+				// Fall through to the base64 method (worst case = prior behaviour).
+				$this->log('file_upload_fallback_base64', array('error' => $e->getMessage()));
+			}
+		}
+
+		// Fallback / images: read + base64 in memory (peaks well under 128M for the
+		// 20MB upload cap, but avoided above for the primary PDF path).
+		$data = @file_get_contents($path);
+		if ($data === false || $data === '') {
+			throw new Exception('Could not read the uploaded file.');
+		}
+		$b64 = base64_encode($data);
+		unset($data);
+		return $this->suggest_file($b64, $ext, $destination_names, $existing_faqs);
+	}
+
+	/**
+	 * Upload a file to OpenAI (POST /files, purpose=user_data) using a CURLFile so
+	 * cURL streams it from disk — the file is never loaded into PHP memory. Returns
+	 * the file id. Throws Exception on any failure.
+	 */
+	protected function upload_file($path, $orig_name = '')
+	{
+		$key = get_env('OPENAI_API_KEY');
+		if (empty($key)) {
+			throw new Exception('OpenAI is not configured. Add OPENAI_API_KEY to the .env file.');
+		}
+		if (!is_file($path) || !is_readable($path)) {
+			throw new Exception('Could not read the uploaded file.');
+		}
+		$base = get_env('OPENAI_BASE_URL');
+		$base = $base ? rtrim($base, '/') : 'https://api.openai.com/v1';
+
+		$name  = ($orig_name !== '') ? $orig_name : basename($path);
+		$cfile = new CURLFile($path, 'application/pdf', $name);
+
+		$started = microtime(true);
+		$ch = curl_init();
+		curl_setopt_array($ch, array(
+			CURLOPT_URL            => $base . '/files',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_POST           => true,
+			CURLOPT_POSTFIELDS     => array('purpose' => 'user_data', 'file' => $cfile),
+			CURLOPT_CONNECTTIMEOUT => 15,
+			CURLOPT_TIMEOUT        => 300,
+			CURLOPT_HTTPHEADER     => array('Authorization: Bearer ' . $key),
+		));
+		$resp  = curl_exec($ch);
+		$errno = curl_errno($ch);
+		$error = curl_error($ch);
+		$code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+		$ms = (int) round((microtime(true) - $started) * 1000);
+
+		if ($errno) {
+			$this->log('file_curl_error', array('errno' => $errno, 'error' => $error, 'ms' => $ms));
+			throw new Exception('Could not upload the file to OpenAI: ' . $error);
+		}
+		$json = json_decode($resp, true);
+		if ($code >= 400 || empty($json['id'])) {
+			$msg = isset($json['error']['message']) ? $json['error']['message'] : ('HTTP ' . $code);
+			$this->log('file_http_error', array('code' => $code, 'message' => $msg, 'ms' => $ms));
+			throw new Exception('OpenAI file upload error: ' . $msg);
+		}
+		$this->log('file_uploaded', array('id' => $json['id'], 'ms' => $ms));
+		return (string) $json['id'];
+	}
+
+	/** Best-effort delete of an uploaded file; never throws. */
+	protected function delete_file($file_id)
+	{
+		$key = get_env('OPENAI_API_KEY');
+		if (empty($key) || $file_id === '') {
+			return;
+		}
+		$base = get_env('OPENAI_BASE_URL');
+		$base = $base ? rtrim($base, '/') : 'https://api.openai.com/v1';
+		$ch = curl_init();
+		curl_setopt_array($ch, array(
+			CURLOPT_URL            => $base . '/files/' . rawurlencode($file_id),
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CUSTOMREQUEST  => 'DELETE',
+			CURLOPT_CONNECTTIMEOUT => 10,
+			CURLOPT_TIMEOUT        => 30,
+			CURLOPT_HTTPHEADER     => array('Authorization: Bearer ' . $key),
+		));
+		@curl_exec($ch);
+		curl_close($ch);
+	}
+
 	/** Embedding model id from .env (cheap; used only for semantic dedupe). */
 	protected function embed_model()
 	{
@@ -175,6 +296,14 @@ class FaqSuggestionService
 			throw new Exception('OpenAI returned a mismatched number of embeddings.');
 		}
 		$this->log('embed', array('model' => $this->embed_model(), 'count' => count($out), 'ms' => $ms));
+		// Log embedding spend too. Embeddings bill input tokens only; text-embedding-3-small
+		// is ~$0.02 / 1M tokens (override via OPENAI_EMBED_PRICE) — much cheaper than the
+		// chat models, so it gets its own price rather than the built-in table's default.
+		$eu    = competitor_extract_usage($json);
+		$rate  = get_env('OPENAI_EMBED_PRICE');
+		$rate  = is_numeric($rate) ? (float) $rate : 0.02;
+		$ecost = round(((int) $eu['input_tokens'] / 1000000) * $rate, 6);
+		$this->log_usage('FAQ Suggestions (Embedding)', $this->embed_model(), (int) $eu['input_tokens'], 0, $ecost);
 		return $out;
 	}
 
@@ -267,7 +396,34 @@ class FaqSuggestionService
 			throw new Exception('OpenAI returned no readable suggestions. Try again later.');
 		}
 		$this->log('response', array('code' => $code, 'usage' => $this->last_usage, 'ms' => $ms));
+		$cost = competitor_estimate_cost(
+			$this->model(), $this->last_usage['input_tokens'], $this->last_usage['output_tokens'], $this->price_rates()
+		);
+		$this->log_usage('FAQ Suggestions', $this->model(), (int) $this->last_usage['input_tokens'], (int) $this->last_usage['output_tokens'], $cost);
 		return $text;
+	}
+
+	/**
+	 * Record one call's tokens + cost to the central ai_usage_log so the owner's
+	 * "AI Cost & Usage" page can report it. Best-effort: never throws so usage
+	 * logging can never break the paid AI flow.
+	 */
+	protected function log_usage($feature, $model, $input_tokens, $output_tokens, $cost_usd)
+	{
+		try {
+			$by = (isset($this->CI->session) && ! empty($this->CI->session->admin_id)) ? (int) $this->CI->session->admin_id : null;
+			$this->CI->load->model('Ai_Usage_Model');
+			$this->CI->Ai_Usage_Model->Log(array(
+				'feature'       => $feature,
+				'model'         => $model,
+				'input_tokens'  => (int) $input_tokens,
+				'output_tokens' => (int) $output_tokens,
+				'cost_usd'      => $cost_usd,
+				'created_by'    => $by,
+			));
+		} catch (Exception $e) {
+			// never break the AI flow because usage logging failed
+		}
 	}
 
 	/** Append one JSON line per call to faq_suggestion_ai.log. Never throws. */

@@ -77,12 +77,15 @@
 						<button type="button" class="btn btn-info font-weight-bold ml-2" data-toggle="modal" data-target="#faq_sugg_pdf_modal" title="Upload a PDF brochure / itinerary and propose FAQs from it">
 							<i class="la la-file-pdf"></i>From PDF
 						</button>
+						<button type="button" class="btn btn-success font-weight-bold ml-2" data-toggle="modal" data-target="#faq_sugg_chatfile_modal" title="Upload a chat export (.txt or .zip) and propose FAQs from it">
+							<i class="la la-comments"></i>From Chat File
+						</button>
 					<?php } ?>
 				</div>
 			</div>
 			<div class="card-body">
 				<p class="text-muted" style="margin-top:-6px;">
-					Each row is a generation run. <strong>Generate</strong> mines chats over a date range you choose (optionally for one mobile number); <strong>From PDF</strong> mines an uploaded document. Open a run to review, edit, and accept the FAQs it produced.
+					Each row is a generation run. <strong>Generate</strong> mines chats over a date range you choose (optionally for one mobile number); <strong>From PDF</strong> mines an uploaded document; <strong>From Chat File</strong> mines an uploaded chat export (.txt or .zip). Open a run to review, edit, and accept the FAQs it produced.
 				</p>
 
 				<div class="dataTables_wrapper dt-bootstrap4 no-footer" <?php if(empty($runs)) { echo 'style="overflow-x:auto;"'; } ?>>
@@ -101,15 +104,17 @@
 						</thead>
 						<tbody>
 							<?php if(empty($runs)) { ?>
-								<tr><td colspan="8" style="text-align:center; padding-top:10px; padding-bottom:10px;">No generation runs yet. Click <strong>Generate</strong> or <strong>From PDF</strong> to create one.</td></tr>
+								<tr><td colspan="8" style="text-align:center; padding-top:10px; padding-bottom:10px;">No generation runs yet. Click <strong>Generate</strong>, <strong>From PDF</strong>, or <strong>From Chat File</strong> to create one.</td></tr>
 							<?php } else { $count = 1; foreach($runs as $r) {
-								$is_pdf = (strtolower((string)$r->Source) === 'pdf');
+								$src = strtolower((string)$r->Source);
+								$src_label = ($src === 'pdf') ? 'PDF' : (($src === 'chatfile') ? 'Chat File' : 'Chats');
+								$src_class = ($src === 'pdf') ? 'label-light-info' : (($src === 'chatfile') ? 'label-light-success' : 'label-light-primary');
 								$view_url = base_url('Faq_Suggestion/View?id=') . (int)$r->RunID;
 							?>
 								<tr data-run-id="<?php echo (int)$r->RunID; ?>">
 									<td style="text-align:center; padding-top:15px; padding-bottom:15px;"><?php echo $count; ?></td>
 									<td style="text-align:center;">
-										<span class="label label-inline label-pill <?php echo $is_pdf ? 'label-light-info' : 'label-light-primary'; ?> font-weight-bold"><?php echo $is_pdf ? 'PDF' : 'Chats'; ?></span>
+										<span class="label label-inline label-pill <?php echo $src_class; ?> font-weight-bold"><?php echo $src_label; ?></span>
 									</td>
 									<td style="text-align:left;">
 										<a href="<?php echo $view_url; ?>"><strong><?php echo htmlspecialchars($r->Scope); ?></strong></a>
@@ -212,6 +217,33 @@
 		</form>
 	</div>
 </div>
+
+<!-- Generate from Chat File -->
+<div class="modal fade" id="faq_sugg_chatfile_modal" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-dialog-centered" role="document">
+		<form method="post" action="<?php echo base_url('Faq_Suggestion/Generate_Chat_File'); ?>" id="faq_sugg_chatfile_form" enctype="multipart/form-data">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title"><i class="la la-comments"></i> Generate from Chat File</h5>
+					<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+				</div>
+				<div class="modal-body">
+					<p class="text-muted">Upload a chat export as <strong>.txt</strong> (text only, without media), or a <strong>.zip</strong> bundling several exports. The AI reads the conversation and proposes FAQs from it. Max 5 MB per .txt, 30 MB per .zip.</p>
+					<div class="form-group mb-0">
+						<label>Chat export file (.txt or .zip) <span class="text-danger">*</span></label>
+						<input type="file" name="file" class="form-control-file" accept=".txt,.zip,text/plain,application/zip" required>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-light font-weight-bold" data-dismiss="modal">Cancel</button>
+					<button type="submit" class="btn btn-success font-weight-bold" id="faq_sugg_chatfile_submit">
+						<i class="la la-comments"></i>Generate
+					</button>
+				</div>
+			</div>
+		</form>
+	</div>
+</div>
 <?php } ?>
 
 <script>
@@ -224,6 +256,9 @@
 	});
 	$('#faq_sugg_pdf_form').on('submit', function() {
 		$('#faq_sugg_pdf_submit').prop('disabled', true).html('<i class="la la-spinner la-spin"></i>Starting...');
+	});
+	$('#faq_sugg_chatfile_form').on('submit', function() {
+		$('#faq_sugg_chatfile_submit').prop('disabled', true).html('<i class="la la-spinner la-spin"></i>Starting...');
 	});
 
 	// --- Live status poll: update queued/running runs in place until all done ---

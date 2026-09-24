@@ -42,9 +42,17 @@
 									<span style="color:red;">*</span>
 								</label>
 								<div class="input-icon">
-									<input type="text" name="Title" value="<?php echo htmlspecialchars((string)$suggestion->Title, ENT_QUOTES); ?>" autocomplete="off" class="form-control" required>
+									<!-- Datalist: pick an existing FAQ title to fold this suggestion into
+									     that FAQ on Accept, or type a new title if none fits. -->
+									<input type="text" name="Title" list="faq_title_options" value="<?php echo htmlspecialchars((string)$suggestion->Title, ENT_QUOTES); ?>" autocomplete="off" class="form-control" placeholder="Choose an existing title or type a new one" required>
 									<span><i class="la la-clipboard-list"></i></span>
 								</div>
+								<datalist id="faq_title_options">
+									<?php foreach((isset($faq_titles) ? $faq_titles : array()) as $existing_title) { ?>
+										<option value="<?php echo htmlspecialchars((string)$existing_title, ENT_QUOTES); ?>"></option>
+									<?php } ?>
+								</datalist>
+								<small class="form-text text-muted">Select a relevant existing title, or type your own if none applies.</small>
 							</div>
 						</div>
 						<div class="col-md-4">
@@ -163,6 +171,23 @@
 		var addBtn   = document.getElementById('faq-add-item');
 		var linkTemplate = document.getElementById('faq-link-template');
 
+		// Grow a sub-answer textarea to fit its full content so the whole answer is
+		// always visible without an inner scrollbar. Capped so a very long answer
+		// doesn't take over the page — beyond the cap it scrolls.
+		function autoGrow(el) {
+			if (!el) { return; }
+			el.style.height = 'auto';
+			var max = 600;
+			el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
+			el.style.overflowY = (el.scrollHeight + 2 > max) ? 'auto' : 'hidden';
+		}
+		function autoGrowAll(scope) {
+			(scope || document).querySelectorAll('textarea.faq-item-a').forEach(autoGrow);
+		}
+		list.addEventListener('input', function (e) {
+			if (e.target && e.target.classList.contains('faq-item-a')) { autoGrow(e.target); }
+		});
+
 		function renumber() {
 			var items = list.querySelectorAll('.faq-item');
 			items.forEach(function (item, i) {
@@ -199,6 +224,7 @@
 			renumber();
 			bindTooltips(node);
 			$(node).find('.faq-item-tags').selectpicker();
+			autoGrow(node.querySelector('textarea.faq-item-a'));
 			node.querySelector('.faq-item-q').focus();
 		}
 
@@ -231,6 +257,7 @@
 			addItem();
 		} else {
 			renumber();
+			autoGrowAll(list);
 		}
 	})();
 

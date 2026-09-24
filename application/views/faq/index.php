@@ -61,31 +61,40 @@
 					</h3>
 				</div>
 				<div class="card-toolbar">
-					<a href="<?php echo base_url('Faq/Internal'); ?>" target="_blank" rel="noopener" class="btn btn-light-primary font-weight-bold" data-toggle="tooltip" title="Open every FAQ together on one page">
-						<i class="la la-book"></i>Internal FAQs
-					</a>
-					<a href="<?php echo base_url('Faq_Suggestion'); ?>" class="btn btn-light-info font-weight-bold ml-2" data-toggle="tooltip" title="Review AI-suggested FAQs mined from recent WhatsApp / GHL chats">
-						<i class="la la-magic"></i>AI Suggestions
-					</a>
-					<?php if($can_edit) { ?>
-						<a href="<?php echo base_url('Faq/Download'); ?>" class="btn btn-light-success font-weight-bold ml-2" data-toggle="tooltip" title="Download every FAQ as an Excel file">
-							<i class="la la-file-excel"></i>Excel
-						</a>
-						<a href="<?php echo base_url('Faq/Download_Pdf'); ?>" class="btn btn-light-danger font-weight-bold ml-2" data-toggle="tooltip" title="Download every FAQ as a PDF file">
-							<i class="la la-file-pdf"></i>PDF
-						</a>
-						<a href="<?php echo base_url('Faq/Export_Template'); ?>" class="btn btn-light-info font-weight-bold ml-2" data-toggle="tooltip" title="Download an editable Excel template of all FAQs to re-import">
-							<i class="la la-file-export"></i>Export
-						</a>
-						<button type="button" class="btn btn-light-warning font-weight-bold ml-2" data-toggle="modal" data-target="#faq_import_modal" title="Upload an edited template to rebuild all FAQs">
-							<i class="la la-file-import"></i>Import
-						</button>
-					<?php } ?>
-					<?php if($can_edit) { ?>
-						<a href="<?php echo base_url('Faq/Create'); ?>" class="btn btn-primary font-weight-bold ml-2" style="width:160px;">
-							<i class="la la-clipboard-list"></i>Create FAQ
-						</a>
-					<?php } ?>
+					<!-- Toolbar is split into two aligned rows:
+					     Row 1 = read/consume actions (Internal FAQs, Excel, PDF)
+					     Row 2 = author/AI actions (AI Suggestions, Export, Import, Create FAQ) -->
+					<div class="d-flex flex-column align-items-end">
+						<div class="d-flex flex-wrap justify-content-end mb-2">
+							<a href="<?php echo base_url('Faq/Internal'); ?>" target="_blank" rel="noopener" class="btn btn-light-primary font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Open every FAQ together on one page">
+								<i class="la la-book"></i>Internal FAQs
+							</a>
+							<?php if($can_edit) { ?>
+								<a href="<?php echo base_url('Faq/Download'); ?>" class="btn btn-light-success font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Download every FAQ as an Excel file">
+									<i class="la la-file-excel"></i>Excel
+								</a>
+								<a href="<?php echo base_url('Faq/Download_Pdf'); ?>" class="btn btn-light-danger font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Download every FAQ as a PDF file">
+									<i class="la la-file-pdf"></i>PDF
+								</a>
+							<?php } ?>
+						</div>
+						<div class="d-flex flex-wrap justify-content-end">
+							<a href="<?php echo base_url('Faq_Suggestion'); ?>" class="btn btn-light-info font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Review AI-suggested FAQs mined from recent WhatsApp / GHL chats">
+								<i class="la la-magic"></i>AI Suggestions
+							</a>
+							<?php if($can_edit) { ?>
+								<a href="<?php echo base_url('Faq/Export_Template'); ?>" class="btn btn-light-info font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Download an editable Excel template of all FAQs to re-import">
+									<i class="la la-file-export"></i>Export
+								</a>
+								<button type="button" class="btn btn-light-warning font-weight-bold ml-2 mb-1" data-toggle="modal" data-target="#faq_import_modal" title="Upload an edited template to rebuild all FAQs">
+									<i class="la la-file-import"></i>Import
+								</button>
+								<a href="<?php echo base_url('Faq/Create'); ?>" class="btn btn-primary font-weight-bold ml-2 mb-1" style="width:160px;">
+									<i class="la la-clipboard-list"></i>Create FAQ
+								</a>
+							<?php } ?>
+						</div>
+					</div>
 					<?php $current_url = base_url($_SERVER['REQUEST_URI']); ?>
 				</div>
 			</div>
@@ -239,7 +248,7 @@
 							<input type="file" name="import_file" class="custom-file-input" id="faq_import_file" accept=".xlsx,.xls" required>
 							<label class="custom-file-label" for="faq_import_file" id="faq_import_file_label">Choose .xlsx / .xls file</label>
 						</div>
-						<span class="form-text text-muted">Use the exported template (columns: FAQ, Destination, Question, Answer, Tags). Unknown tags are created; unknown destinations are skipped. The last 3 uploads are kept as backups.</span>
+						<span class="form-text text-muted">Use the exported template (columns: FAQ, Destination, Question, Answer, Tags, Last Updated). Last Updated is display-only and ignored on import. Unknown tags are created; unknown destinations are skipped. The last 3 uploads are kept as backups.</span>
 					</div>
 				</div>
 				<div class="modal-footer">

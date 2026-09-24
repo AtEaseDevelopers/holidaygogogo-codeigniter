@@ -14,6 +14,26 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  * service only do the IO around them.
  */
 
+if (!function_exists('faq_suggestion_memory_limit')) {
+	/**
+	 * Validate a PHP memory_limit value (from .env FAQ_SUGGESTION_MEMORY_LIMIT)
+	 * used while processing an uploaded PDF — reading it, base64-encoding it, and
+	 * embedding it in the JSON request multiplies the file size several times, so
+	 * a 20 MB PDF needs well over the default web limit. Accepts a plain byte
+	 * count, a number with a K/M/G suffix, or -1 (unlimited); anything blank or
+	 * malformed falls back to $default ('1024M'). Pure so it unit-tests without a
+	 * running PHP config.
+	 */
+	function faq_suggestion_memory_limit($raw, $default = '1024M')
+	{
+		$v = strtoupper(trim((string) $raw));
+		if ($v === '-1' || preg_match('/^\d+[KMG]?$/', $v)) {
+			return $v;
+		}
+		return $default;
+	}
+}
+
 if (!function_exists('faq_suggestion_cutoff')) {
 	/**
 	 * The 'Y-m-d H:i:s' datetime $days before $now_ts — the lower bound of the
@@ -462,6 +482,10 @@ if (!function_exists('faq_suggestion_run_scope')) {
 		if ($source === 'pdf') {
 			$file = trim((string) $get('FileName'));
 			return $file !== '' ? $file : 'Uploaded PDF';
+		}
+		if ($source === 'chatfile') {
+			$file = trim((string) $get('FileName'));
+			return $file !== '' ? $file : 'Uploaded chat file';
 		}
 
 		$start = faq_suggestion_fmt_date($get('StartDate'));

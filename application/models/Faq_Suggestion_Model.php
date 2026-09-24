@@ -294,14 +294,30 @@ class Faq_Suggestion_Model extends CI_Model
 
 		try {
 			if (strtolower((string) $run->Source) === 'pdf') {
+				// Stream the PDF straight to OpenAI's Files API from disk (no base64,
+				// nothing embedded in the JSON body) and reference it by id — this
+				// keeps memory flat regardless of file size. The service falls back to
+				// the base64 method on any Files-API failure; the memory_limit bump
+				// below covers that fallback path defensively.
+				@ini_set('memory_limit', faq_suggestion_memory_limit(get_env('FAQ_SUGGESTION_MEMORY_LIMIT')));
 				$path = FCPATH . self::UPLOAD_DIR . basename((string) $run->StoredName);
-				$data = @file_get_contents($path);
-				if ($data === false || $data === '') {
-					throw new Exception('Could not read the uploaded file.');
-				}
-				$ext = strtolower(pathinfo((string) $run->StoredName, PATHINFO_EXTENSION));
+				$ext  = strtolower(pathinfo((string) $run->StoredName, PATHINFO_EXTENSION));
 				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest_file(base64_encode($data), $ext, $dest_names, $existing_faqs);
+				$result = $this->faqsuggestionservice->suggest_file_path($path, $ext, (string) $run->FileName, $dest_names, $existing_faqs);
+			} elseif (strtolower((string) $run->Source) === 'chatfile') {
+				// Mine an uploaded WhatsApp export (.txt, or .zip of several) — parse
+				// it into messages and reuse the same text path as the chats generator.
+				@ini_set('memory_limit', faq_suggestion_memory_limit(get_env('FAQ_SUGGESTION_MEMORY_LIMIT')));
+				$path       = FCPATH . self::UPLOAD_DIR . basename((string) $run->StoredName);
+				$ext        = strtolower(pathinfo((string) $run->StoredName, PATHINFO_EXTENSION));
+				$wa_rows    = $this->Chat_File_Messages($path, $ext);
+				$transcript = faq_suggestion_transcript(array(), $wa_rows, $this->max_transcript_chars());
+				if (trim($transcript) === '') {
+					$this->Update_Run($run_id, array('RunState' => 'done', 'Proposed' => 0, 'Created' => 0));
+					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
+				}
+				$this->load->library('FaqSuggestionService');
+				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs);
 			} else {
 				$start     = substr((string) $run->StartDate, 0, 10) . ' 00:00:00';
 				$end       = substr((string) $run->EndDate, 0, 10) . ' 23:59:59';
@@ -563,6 +579,54 @@ class Faq_Suggestion_Model extends CI_Model
 			}
 			foreach (chat_history_parse($text) as $m) {
 				$messages[] = $m;
+			}
+		}
+		return $messages;
+	}
+
+	/**
+	 * Parse a single uploaded chat export at $path into the message shape
+	 * chat_history_parse() returns (the same rows Recent_Wa_Messages produces, so
+	 * faq_suggestion_transcript() consumes them). A .txt is parsed directly; a .zip
+	 * has every .txt entry parsed and concatenated (skipping macOS junk, oversized
+	 * entries and empties, mirroring the guest chat-history importer). Throws if the
+	 * file is unreadable or a zip can't be opened.
+	 */
+	protected function Chat_File_Messages($path, $ext)
+	{
+		$this->load->helper('chat_history');
+		if (!is_file($path) || !is_readable($path)) {
+			throw new Exception('Could not read the uploaded chat file.');
+		}
+
+		$messages = array();
+		if ($ext === 'zip') {
+			if (!class_exists('ZipArchive')) {
+				throw new Exception('ZIP uploads are not supported on this server.');
+			}
+			$zip = new ZipArchive();
+			if ($zip->open($path) !== true) {
+				throw new Exception('Could not open the ZIP file.');
+			}
+			$per_file_max = 5 * 1024 * 1024; // same cap as a single .txt, guards zip bombs
+			for ($i = 0; $i < $zip->numFiles; $i++) {
+				$entry = $zip->getNameIndex($i);
+				if (!chat_history_zip_entry_is_txt($entry)) { continue; }
+				$stat = $zip->statIndex($i);
+				if ($stat && (int) $stat['size'] > $per_file_max) { continue; }
+				$content = $zip->getFromIndex($i);
+				if ($content === false || trim($content) === '') { continue; }
+				foreach (chat_history_parse($content) as $m) {
+					$messages[] = $m;
+				}
+			}
+			$zip->close();
+		} else {
+			$text = (string) @file_get_contents($path);
+			if (trim($text) !== '') {
+				foreach (chat_history_parse($text) as $m) {
+					$messages[] = $m;
+				}
 			}
 		}
 		return $messages;
