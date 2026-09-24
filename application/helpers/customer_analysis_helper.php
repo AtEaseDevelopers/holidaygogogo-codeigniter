@@ -193,7 +193,8 @@ if ( ! function_exists('customer_analysis_json_shape'))
 		}
 		$lines[] = '  "temperature": "hot or cold — classify the customer\'s intention to make a booking",';
 		$lines[] = '  "temperature_reason": "one short sentence justifying the hot/cold call",';
-		$lines[] = '  "approach_suggestion": "practical guidance for OUR agent on how to approach this customer next — a warm, ready-to-send WhatsApp-style message written in English, tailored to their interest, preferences and hot/cold state"';
+		$lines[] = '  "recommended_tours": [{"name": "the EXACT tour/product name copied from OUR PRODUCTS below", "tour_code": "its tour_code from OUR PRODUCTS if given, else empty", "price_myr": 0, "justification": "why THIS specific tour fits this customer — cite their destination, pax/family, budget and preferences from the chat"}],';
+		$lines[] = '  "approach_suggestion": "ALWAYS filled (never empty, whatever the temperature) — practical guidance for OUR agent on how to approach this customer next: a warm, ready-to-send WhatsApp-style message written in English, tailored to their interest and preferences, that recommends the tour(s) in recommended_tours by name (with price) and a one-line reason"';
 		$lines[] = '}';
 		return implode("\n", $lines);
 	}
@@ -207,8 +208,13 @@ if ( ! function_exists('customer_analysis_field_guidance'))
 		return
 			"Classification: 'hot' = the customer shows clear intention to make a booking (asking to book, confirming dates/pax, requesting a quote or payment to proceed, actively engaged and close to converting). " .
 			"'cold' = little or no booking intention (just browsing, price-shopping without commitment, unresponsive, or went quiet). temperature MUST be exactly \"hot\" or \"cold\".\n" .
-			"Approach: write approach_suggestion as concrete, actionable guidance our travel agent can use right now to move THIS customer forward — a warm, human, ready-to-send message written in English (regardless of the customer's chat language). " .
-			"Tailor it to their stated interest, preferences and current hot/cold state, suggest the natural next step (e.g. share a tailored comparison, ask for pax/dates/budget, gently nudge to book), and use light structure and emojis where it helps them decide. " .
+			"Recommendations: from the OUR PRODUCTS list provided below, pick the 1-3 tours that best match THIS customer's destination, party/family size, budget and preferences, and list them in recommended_tours. " .
+			"Copy each tour's name (and tour_code) EXACTLY as given in OUR PRODUCTS — NEVER invent or rename a tour, and never recommend one that is not in the list. " .
+			"ALWAYS recommend at least one tour whenever OUR PRODUCTS contains anything even loosely relevant to the customer's region or interest; only return an empty recommended_tours array when OUR PRODUCTS is empty or genuinely has nothing to offer them — do NOT invent one to fill the gap. " .
+			"For each recommended tour write a justification grounded in the chat (what the customer asked for and how this tour meets it). Include price_myr only when OUR PRODUCTS gives a price; otherwise use 0.\n" .
+			"Approach: ALWAYS write approach_suggestion — never leave it empty, WHATEVER the temperature. It is concrete, actionable guidance our travel agent can use right now to move THIS customer forward — a warm, human, ready-to-send message written in English (regardless of the customer's chat language). " .
+			"Tailor it to their stated interest and preferences; when the customer is HOT, nudge toward booking, and when they are COLD or unclear, write a gentle re-engagement message that re-opens the conversation. " .
+			"RECOMMEND the tour(s) in recommended_tours by name (mention the price when known) with a short reason; if recommended_tours is empty, still write a helpful message and ask what destination/dates/pax they have in mind. Suggest the natural next step (e.g. ask for pax/dates/budget, gently nudge to book), and use light structure and emojis where it helps them decide. " .
 			"When comparing options, lay them out clearly like a friendly recommendation. NEVER over-promise or state things that vary by date/season as guaranteed (e.g. write \"there's often Live Music / a Live Band in the evening\", not \"there is guaranteed to be a Live Band every night\").\n" .
 			"Rules: use an empty string (or empty array for lists) when the transcript gives nothing for a field — do NOT guess. " .
 			"Write concrete, specific detail grounded in the chat over generic statements. Write every profile field in English, including approach_suggestion.";
@@ -234,20 +240,46 @@ if ( ! function_exists('customer_analysis_output_contract'))
 	}
 }
 
+if ( ! function_exists('customer_analysis_products_block'))
+{
+	/**
+	 * Build the "OUR PRODUCTS" prompt block from our own tours so the model can
+	 * recommend a real tour (with justification) instead of inventing one. Reuses
+	 * competitor_products_block() to strip empty fields when it's loaded; otherwise
+	 * encodes the list directly. Returns '' when we have no products to offer. Pure.
+	 *
+	 * @param array $our_products competitor_format_our_products() output.
+	 */
+	function customer_analysis_products_block($our_products)
+	{
+		$our_products = is_array($our_products) ? $our_products : array();
+		if (empty($our_products)) {
+			return '';
+		}
+		$json = function_exists('competitor_products_block')
+			? competitor_products_block($our_products)
+			: json_encode(array_values($our_products), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		return "\n\nOUR PRODUCTS (JSON, prices in MYR — recommend ONLY from this list, copy names/codes exactly):\n" . $json . "\n";
+	}
+}
+
 if ( ! function_exists('customer_analysis_build_request'))
 {
 	/**
-	 * Shape the Responses API instructions + input for one customer. Pure.
+	 * Shape the Responses API instructions + input for one customer. When
+	 * $our_products is given (competitor_format_our_products() output) it is appended
+	 * as an OUR PRODUCTS block so the model recommends a real tour. Pure.
 	 *
 	 * @return array{instructions:string,input:string}
 	 */
-	function customer_analysis_build_request($guest_name, $transcript)
+	function customer_analysis_build_request($guest_name, $transcript, $our_products = array())
 	{
 		$name = trim((string) $guest_name);
 		$input =
 			"CUSTOMER NAME: " . ($name !== '' ? $name : '(unknown)') . "\n\n" .
 			"CONVERSATION TRANSCRIPT (chronological; 'Agent' = our travel agency, 'Customer' = the client):\n" .
-			"-----\n" . (string) $transcript . "\n-----\n";
+			"-----\n" . (string) $transcript . "\n-----\n" .
+			customer_analysis_products_block($our_products);
 		return array(
 			'instructions' => customer_analysis_output_contract(),
 			'input'        => $input,
@@ -268,7 +300,7 @@ if ( ! function_exists('customer_analysis_build_update_request'))
 	 * @param string $new_transcript Rendered transcript of just the new messages.
 	 * @return array{instructions:string,input:string}
 	 */
-	function customer_analysis_build_update_request($guest_name, $prior, $new_transcript)
+	function customer_analysis_build_update_request($guest_name, $prior, $new_transcript, $our_products = array())
 	{
 		$p = (array) $prior;
 		$prior_profile = (isset($p['profile']) && is_array($p['profile'])) ? $p['profile'] : array();
@@ -296,7 +328,8 @@ if ( ! function_exists('customer_analysis_build_update_request'))
 			"CUSTOMER NAME: " . ($name !== '' ? $name : '(unknown)') . "\n\n" .
 			"EXISTING PROFILE (from the last analysis):\n" . $prior_json . "\n\n" .
 			"NEW MESSAGES since the last analysis (chronological; 'Agent' = our agency, 'Customer' = the client):\n" .
-			"-----\n" . (string) $new_transcript . "\n-----\n";
+			"-----\n" . (string) $new_transcript . "\n-----\n" .
+			customer_analysis_products_block($our_products);
 
 		return array('instructions' => $instructions, 'input' => $input);
 	}
@@ -359,6 +392,42 @@ if ( ! function_exists('customer_analysis_normalize_temperature'))
 	}
 }
 
+if ( ! function_exists('customer_analysis_normalize_recommended_tours'))
+{
+	/**
+	 * Coerce the model's tour recommendations into a clean list of
+	 * {name, tour_code, price_myr, justification} — the tours it picked from OUR
+	 * PRODUCTS for this customer, each with its reason. Rows without a name are
+	 * dropped; price_myr is a float only when a positive number was given, else null.
+	 * Pure. Used by both the fresh-response normaliser and the stored-row decoder.
+	 */
+	function customer_analysis_normalize_recommended_tours($v)
+	{
+		$out = array();
+		if ( ! is_array($v)) {
+			return $out;
+		}
+		foreach ($v as $t) {
+			$t    = (array) $t;
+			$name = customer_analysis_coerce_str(isset($t['name']) ? $t['name'] : '');
+			if ($name === '') {
+				continue;
+			}
+			$price = null;
+			if (isset($t['price_myr']) && is_numeric($t['price_myr']) && (float) $t['price_myr'] > 0) {
+				$price = (float) $t['price_myr'];
+			}
+			$out[] = array(
+				'name'          => $name,
+				'tour_code'     => customer_analysis_coerce_str(isset($t['tour_code']) ? $t['tour_code'] : ''),
+				'price_myr'     => $price,
+				'justification' => customer_analysis_coerce_str(isset($t['justification']) ? $t['justification'] : ''),
+			);
+		}
+		return $out;
+	}
+}
+
 if ( ! function_exists('customer_analysis_normalize_profile'))
 {
 	/**
@@ -394,6 +463,7 @@ if ( ! function_exists('customer_analysis_normalize_record'))
 			'temperature'         => customer_analysis_normalize_temperature(isset($data['temperature']) ? $data['temperature'] : ''),
 			'temperature_reason'  => customer_analysis_coerce_str(isset($data['temperature_reason']) ? $data['temperature_reason'] : ''),
 			'approach_suggestion' => customer_analysis_coerce_str(isset($data['approach_suggestion']) ? $data['approach_suggestion'] : ''),
+			'recommended_tours'   => customer_analysis_normalize_recommended_tours(isset($data['recommended_tours']) ? $data['recommended_tours'] : array()),
 			'summary'             => customer_analysis_coerce_str(isset($data['summary']) ? $data['summary'] : ''),
 			'profile'             => customer_analysis_normalize_profile($data),
 		);

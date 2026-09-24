@@ -93,6 +93,25 @@ foreach (array_keys(customer_analysis_profile_list_fields()) as $__f) {
 check_true('request instructions ask for hot/cold temperature', strpos($req['instructions'], 'temperature') !== false && stripos($req['instructions'], 'hot') !== false && stripos($req['instructions'], 'cold') !== false);
 check_true('request instructions ask for approach_suggestion', strpos($req['instructions'], '"approach_suggestion"') !== false);
 check_true('approach guidance says write in English', stripos($req['instructions'], 'in English') !== false);
+check_true('request instructions ask for recommended_tours', strpos($req['instructions'], '"recommended_tours"') !== false);
+check_true('recommend guidance says copy names exactly', stripos($req['instructions'], 'EXACTLY') !== false);
+// Approach must be produced for EVERY customer, not only hot/cold ones — otherwise
+// it appears "only for hot/cold leads" because those are the classified ones.
+check_true('approach guidance says ALWAYS write it', stripos($req['instructions'], 'ALWAYS write approach_suggestion') !== false);
+check_true('approach guidance covers cold/unclear re-engagement', stripos($req['instructions'], 're-engage') !== false || stripos($req['instructions'], 'reengage') !== false);
+
+// OUR PRODUCTS block: appended to the input only when we pass products, so the
+// model recommends a real tour instead of inventing one.
+$reqNoProd = customer_analysis_build_request('Ali', 'Customer: hi');
+check_true('no OUR PRODUCTS block when none given', strpos($reqNoProd['input'], 'OUR PRODUCTS') === false);
+$reqProd = customer_analysis_build_request('Ali', 'Customer: hi', array(
+    array('name' => 'Japan 6D5N Sakura', 'tour_code' => 'JP6D', 'price_myr' => 4999),
+));
+check_true('OUR PRODUCTS block present when products given', strpos($reqProd['input'], 'OUR PRODUCTS') !== false);
+check_true('OUR PRODUCTS block carries the tour name', strpos($reqProd['input'], 'Japan 6D5N Sakura') !== false);
+check_true('update request carries OUR PRODUCTS block', strpos(
+    customer_analysis_build_update_request('Ali', array('summary' => 'x'), 'Customer: keen', array(array('name' => 'Redang 3D2N')))['input'],
+    'Redang 3D2N') !== false);
 
 // The incremental-update request refreshes the character profile (no next steps),
 // and carries the prior profile fields so the model can keep what still holds.
@@ -100,6 +119,7 @@ $reqUpd = customer_analysis_build_update_request('Ali', array('summary' => 'old'
 check_true('update request carries prior summary', strpos($reqUpd['input'], 'old') !== false);
 check_true('update request carries prior approach_suggestion', strpos($reqUpd['input'], 'ping about dates') !== false);
 check_true('update request asks for approach_suggestion', strpos($reqUpd['instructions'], '"approach_suggestion"') !== false);
+check_true('update request also insists approach is always written', stripos($reqUpd['instructions'], 'ALWAYS write approach_suggestion') !== false);
 check_true('update request carries prior profile field', strpos($reqUpd['input'], 'cautious buyer') !== false);
 check_true('update request carries new transcript', strpos($reqUpd['input'], 'still keen') !== false);
 check_true('update request does NOT ask for next_actions (dropped)', strpos($reqUpd['instructions'], 'next_actions') === false);
@@ -146,9 +166,24 @@ check('parse profile.family_needs', '2 adults 2 young kids — needs an extra ro
 check('parse profile.preferences list', array('Sea view room', 'Direct flights'), $rec['profile']['preferences']);
 check('parse profile.complaints list', array('Felt earlier reply was slow'), $rec['profile']['complaints']);
 
+// recommended_tours: the real tours the model matched, each with a justification.
+$recJson = customer_analysis_parse_ai_response('{"summary":"ok","recommended_tours":[' .
+    '{"name":"Japan 6D5N Sakura","tour_code":"JP6D","price_myr":4999,"justification":"Wants a Japan trip for 2 adults + 2 kids"},' .
+    '{"name":"","justification":"dropped — no name"},' .
+    '{"name":"Redang 3D2N","price_myr":0,"justification":"Backup beach option"}' .
+    ']}');
+check('parse recommended_tours drops nameless rows', 2, count($recJson['recommended_tours']));
+check('parse recommended_tours name', 'Japan 6D5N Sakura', $recJson['recommended_tours'][0]['name']);
+check('parse recommended_tours tour_code', 'JP6D', $recJson['recommended_tours'][0]['tour_code']);
+check('parse recommended_tours price_myr', 4999.0, $recJson['recommended_tours'][0]['price_myr']);
+check('parse recommended_tours justification', 'Wants a Japan trip for 2 adults + 2 kids', $recJson['recommended_tours'][0]['justification']);
+check('parse recommended_tours zero price -> null', null, $recJson['recommended_tours'][1]['price_myr']);
+check('parse recommended_tours missing code -> empty', '', $recJson['recommended_tours'][1]['tour_code']);
+
 // Missing fields default cleanly; a string list is split into an array.
 $partial = customer_analysis_parse_ai_response('{"summary":"Just a lead","preferences":"sea view; halal food"}');
 check('parse defaults missing temperature to empty', '', $partial['temperature']);
+check('parse defaults missing recommended_tours to empty list', array(), $partial['recommended_tours']);
 check('parse defaults missing approach_suggestion to empty', '', $partial['approach_suggestion']);
 check('parse defaults missing profile.character to empty', '', $partial['profile']['character']);
 check('parse defaults missing profile.complaints to empty list', array(), $partial['profile']['complaints']);

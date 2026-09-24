@@ -13,6 +13,7 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  *   campaign       Campaign       Campaign
  *   lead_status    Lead_Status    Lead Status
  *   nature_of_business Nature_Of_Business  Nature of Business
+ *   customer_profile   Customer_Analysis   Customer Profile (Action ▸ Customer Profile)
  *
  * The OWNER (level 10) always has full view+edit and is never stored. Every other
  * admin sees/edits nothing by default — the owner grants rights per page on the
@@ -40,6 +41,7 @@ if ( ! function_exists('lc_modules'))
             'campaign'     => array('class' => 'Campaign',     'label' => 'Campaign'),
             'lead_status'  => array('class' => 'Lead_Status',  'label' => 'Lead Status'),
             'nature_of_business' => array('class' => 'Nature_Of_Business', 'label' => 'Nature of Business'),
+            'customer_profile'   => array('class' => 'Customer_Analysis', 'label' => 'Customer Profile'),
         );
     }
 }
@@ -207,14 +209,19 @@ if ( ! function_exists('lc_block_edit'))
 }
 
 /**
- * Whether the current admin can view AT LEAST ONE of the four pages — drives the
- * top-level "Leads/Customer" menu group visibility.
+ * Whether the current admin can view AT LEAST ONE of the menu pages — drives the
+ * top-level "Leads/Customer" menu group visibility. 'customer_profile' is skipped:
+ * it has no own menu entry (it is the Action ▸ Customer Profile button reached from
+ * within the listings), so it must not reveal an otherwise-empty menu group.
  */
 if ( ! function_exists('lc_any_view'))
 {
     function lc_any_view()
     {
         foreach (array_keys(lc_modules()) as $m) {
+            if ($m === 'customer_profile') {
+                continue;
+            }
             if (lc_can_view($m)) {
                 return true;
             }

@@ -43,7 +43,7 @@ class CustomerAnalysisService
 	 * customer_analysis_merge_timeline(). Returns the parsed record ready for
 	 * Customer_Analysis_Model::Create(). Throws on config / API / parse failure.
 	 */
-	public function analyze($guest_name, array $timeline)
+	public function analyze($guest_name, array $timeline, array $our_products = array())
 	{
 		// 0 = no truncation: always send the FULL chat, no matter how long.
 		$transcript = customer_analysis_render_transcript($timeline, 0);
@@ -51,7 +51,7 @@ class CustomerAnalysisService
 			throw new Exception('No chat messages to analyse for this customer.');
 		}
 
-		$req  = customer_analysis_build_request($guest_name, $transcript);
+		$req  = customer_analysis_build_request($guest_name, $transcript, $our_products);
 		$text = $this->request($req['instructions'], $req['input']);
 
 		$record = customer_analysis_parse_ai_response($text);
@@ -67,13 +67,13 @@ class CustomerAnalysisService
 	 * (the "memory" flow — the model doesn't re-read the whole chat). $prior is the
 	 * last done analysis row; $new_timeline is the merged NEW messages.
 	 */
-	public function analyze_update($guest_name, $prior, array $new_timeline)
+	public function analyze_update($guest_name, $prior, array $new_timeline, array $our_products = array())
 	{
 		$new_transcript = customer_analysis_render_transcript($new_timeline, 0);
 		if (trim($new_transcript) === '') {
 			throw new Exception('No new messages to update the analysis with.');
 		}
-		$req    = customer_analysis_build_update_request($guest_name, $prior, $new_transcript);
+		$req    = customer_analysis_build_update_request($guest_name, $prior, $new_transcript, $our_products);
 		$text   = $this->request($req['instructions'], $req['input']);
 		$record = customer_analysis_parse_ai_response($text);
 		if ( ! is_array($record)) {

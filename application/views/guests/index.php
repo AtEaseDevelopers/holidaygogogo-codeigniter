@@ -1072,8 +1072,9 @@ div.kt-datatable__pager-container {
 														<a href="javascript:;" class="dropdown-item js-remarks" style="font-size:11px;" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>" data-name="<?php echo htmlspecialchars($g->Name, ENT_QUOTES); ?>">Remarks<?php if($rc > 0) { echo ' (' . $rc . ')'; } ?></a>
 													<?php } ?>
 													<a href="javascript:;" class="dropdown-item js-chat-history" style="font-size:11px;" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>" data-name="<?php echo htmlspecialchars($g->Name, ENT_QUOTES); ?>">Chat History<?php if($chat_c > 0) { echo ' (' . $chat_c . ')'; } ?></a>
-														<?php if(!empty($g->dedup_key) && (int)$this->session->level === 10) {
-															// Owner-only Customer Profile page (chat sources + AI Analysis).
+														<?php if(!empty($g->dedup_key) && lc_can_view('customer_profile')) {
+															// Customer Profile page (chat sources + AI Analysis). Access granted per-admin
+																// on the Leads/Customer access grid (module customer_profile); owner implicit.
 															$ca_phone = ( ! empty($phones) && (string)$phones[0]['mobile'] !== '')
 																? guest_contact_wa_digits($phones[0]['calling_code'], $phones[0]['mobile']) : '';
 															// Record where the analysis was launched from (shown on Hot/Cold page).

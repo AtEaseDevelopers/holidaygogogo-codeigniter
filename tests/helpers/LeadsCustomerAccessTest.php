@@ -64,6 +64,21 @@ $assertions['campaign granted view']       = lc_resolve_access('campaign', 25, $
 $assertions['campaign granted no edit']    = lc_resolve_access('campaign', 25, $grantNew)['edit'] === false;
 $assertions['lead_status granted view+edit'] = lc_resolve_access('lead_status', 25, $grantNew)['edit'] === true;
 
+// 5c) Customer Profile is grid-controlled like the other modules -------------
+// (was owner-only; now a per-admin toggle). Owner keeps implicit full access;
+// a non-owner sees the Action ▸ Customer Profile button + page only on View,
+// and may run/delete the AI analysis only on Edit.
+$assertions['customer_profile is a module'] = in_array('customer_profile', $modules, true);
+$assertions['customer_profile owner view'] = lc_resolve_access('customer_profile', 10, array())['view'] === true;
+$assertions['customer_profile owner edit'] = lc_resolve_access('customer_profile', 10, array())['edit'] === true;
+$assertions['customer_profile no grant: view false'] = lc_resolve_access('customer_profile', 20, array())['view'] === false;
+$assertions['customer_profile no grant: edit false'] = lc_resolve_access('customer_profile', 20, array())['edit'] === false;
+$cpGrant = array('customer_profile' => array('CanView' => 1, 'CanEdit' => 0));
+$assertions['customer_profile view-only: view true']  = lc_resolve_access('customer_profile', 20, $cpGrant)['view'] === true;
+$assertions['customer_profile view-only: edit false'] = lc_resolve_access('customer_profile', 20, $cpGrant)['edit'] === false;
+$cpEdit = array('customer_profile' => array('CanView' => 0, 'CanEdit' => 1));
+$assertions['customer_profile edit implies view'] = lc_resolve_access('customer_profile', 20, $cpEdit)['view'] === true;
+
 // 6) Unknown module => both false (even for a granted non-owner) --------------
 $assertions['unknown: view false'] = lc_resolve_access('nope', 20, $viewEdit)['view'] === false;
 $assertions['unknown: edit false'] = lc_resolve_access('nope', 20, $viewEdit)['edit'] === false;

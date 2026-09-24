@@ -29,15 +29,19 @@ class Customer_Analysis extends MY_Controller
 	function __construct()
 	{
 		parent::__construct();
-		// Owner-only feature (paid OpenAI + customer intelligence).
-		if ((int) $this->session->level !== 10) {
-			redirect(base_url('Booking'));
+		// Access is granted per-admin on the Leads/Customer > Access Settings grid
+		// (module 'customer_profile'). Owner (level 10) keeps implicit full access.
+		// View gates opening the page; the paid/mutating endpoints below also
+		// require Edit. leads_customer_access helper is autoloaded.
+		if (lc_block_view('customer_profile')) {
 			return;
 		}
 		$this->load->model('Customer_Analysis_Model');
 		$this->load->model('Ghl_Messages_Model');
 		$this->load->model('Guests_Model');
+		$this->load->model('Product_Model');
 		$this->load->helper('customer_analysis');
+		$this->load->helper('competitor_analysis');
 		$this->load->helper('chat_history');
 	}
 
@@ -55,6 +59,10 @@ class Customer_Analysis extends MY_Controller
 		$phone       = trim((string) $this->input->get('phone'));
 		$name        = trim((string) $this->input->get('name'));
 		$source_type = $this->clean_source_type($this->input->get('source_type'));
+		// The "How to Approach" + "Recommended Tours" blocks are only for the sales
+		// follow-up flow off the Hot/Cold Customers page (which sets show_approach=1);
+		// the normal listing entry shows just the character profile.
+		$show_approach = ((string) $this->input->get('show_approach') === '1');
 
 		if ($dedup_key === '') {
 			redirect(base_url('Booking'));
@@ -85,6 +93,7 @@ class Customer_Analysis extends MY_Controller
 			'has_prior'        => (bool) $prior,
 			'last_analysed_at' => $prior ? $prior->created_at : '',
 			'run_mode'         => $mode,           // full | incremental | unchanged
+			'show_approach'    => $show_approach,  // reveal approach + tours (Hot/Cold entry only)
 			'analyses'         => $this->Customer_Analysis_Model->Read_By_Dedup($dedup_key),
 		);
 
@@ -207,6 +216,10 @@ class Customer_Analysis extends MY_Controller
 			redirect(base_url('Booking'));
 			return;
 		}
+		// Running the analysis is a paid, mutating action — requires Edit.
+		if (lc_block_edit('customer_profile')) {
+			return;
+		}
 		$this->output->set_content_type('application/json');
 
 		$dedup_key   = trim((string) $this->input->post('dedup_key'));
@@ -248,12 +261,16 @@ class Customer_Analysis extends MY_Controller
 
 		$source_counts = 'ghl:' . (int) $meta['ghl']['count'] . ',upload:' . (int) $meta['upload_count'];
 
+		// Our own tours, so the AI recommends a real product (with justification)
+		// instead of inventing one — same source the Competitor Analysis uses.
+		$our_products = competitor_format_our_products($this->Product_Model->Read_For_Comparison());
+
 		@set_time_limit(600);
 		$this->load->library('CustomerAnalysisService');
 		try {
 			$record = ($mode === 'incremental')
-				? $this->customeranalysisservice->analyze_update($name, $prior, $new_timeline)
-				: $this->customeranalysisservice->analyze($name, $full['timeline']);
+				? $this->customeranalysisservice->analyze_update($name, $prior, $new_timeline, $our_products)
+				: $this->customeranalysisservice->analyze($name, $full['timeline'], $our_products);
 		} catch (Exception $e) {
 			$this->Customer_Analysis_Model->Create(array(
 				'dedup_key'     => $dedup_key,
@@ -288,6 +305,10 @@ class Customer_Analysis extends MY_Controller
 	{
 		if ( ! $this->input->is_ajax_request()) {
 			redirect(base_url('Booking'));
+			return;
+		}
+		// Removing a saved analysis is a mutating action — requires Edit.
+		if (lc_block_edit('customer_profile')) {
 			return;
 		}
 		$this->output->set_content_type('application/json');

@@ -765,20 +765,39 @@ class CompetitorAnalysisService
 
 	/**
 	 * Whole-site sweep: spider EVERY same-host candidate page (competitor_is_
-	 * candidate_url) with a broad link-following crawl — NO sitemap (sites often lack
-	 * one or ship a stale one, so the crawl is the single source of truth). Strict
-	 * product-URL matches are ordered FIRST so the real tours are read (and rendered,
-	 * if JS) before the per-crawl render budget / page cap is spent on maybes; the
-	 * rest follow and the itinerary gate keeps only genuine tours. NO page cap by
-	 * default — it sweeps the WHOLE site (the visited-set guarantees it terminates);
-	 * an optional COMPETITOR_MAX_SITE_PAGES caps it only for a runaway/huge site.
-	 * Returns a URL list.
+	 * candidate_url) with a broad link-following crawl, UNIONed with the sitemap's
+	 * same-host <loc> URLs. The BFS is the primary source (works even with no/stale
+	 * sitemap), but a JS/SPA site (e.g. a Next.js listing that client-paginates its
+	 * tours) exposes only the first page of links in raw HTML — the BFS then reaches a
+	 * fraction of the catalogue while the sitemap lists them all. Merging both is safe:
+	 * every candidate is still fetched and passed through the itinerary gate, so a stale
+	 * sitemap URL just 404s / reads thin and is dropped. Strict product-URL matches are
+	 * ordered FIRST so the real tours are read (and rendered, if JS) before the per-crawl
+	 * render budget / page cap is spent on maybes; the rest follow and the itinerary gate
+	 * keeps only genuine tours. NO page cap by default — it sweeps the WHOLE site (the
+	 * visited-set guarantees it terminates); an optional COMPETITOR_MAX_SITE_PAGES caps
+	 * it only for a runaway/huge site. Returns a URL list.
 	 */
 	protected function discover_all_urls($base_url, $limit)
 	{
 		$page_cap = (int) get_env('COMPETITOR_MAX_SITE_PAGES');   // <= 0 = unlimited
 
-		$cands = $this->crawl_all_urls($base_url, $page_cap);
+		$crawled = $this->crawl_all_urls($base_url, $page_cap);
+
+		// Union in the sitemap's same-host URLs — reaches SPA tours the raw-HTML BFS
+		// can't (client-paginated listings). Guides/articles are filtered out; the gate
+		// drops any non-tour or stale entry during reading.
+		$sitemap = array();
+		foreach ($this->collect_sitemap_locs($base_url) as $u) {
+			if (competitor_is_guide_url($u)) { continue; }
+			$sitemap[] = $u;
+		}
+		$sitemap_new = array_values(array_diff($sitemap, $crawled));
+		$cands = array_values(array_unique(array_merge($crawled, $sitemap_new)));
+		if ( ! empty($sitemap_new)) {
+			$this->log_crawl('sweep_sitemap_union', array('sitemap_locs' => count($sitemap),
+				'added' => count($sitemap_new)));
+		}
 
 		// Order: strict product URLs first, then the rest (gate decides the maybes).
 		$products = array();

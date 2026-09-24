@@ -10,10 +10,14 @@
  */
 $total_msgs  = (int) $ghl_count + (int) $upload_count;
 $can_analyse = $total_msgs > 0;
+// Approach + Recommended Tours are shown only when the profile is opened from the
+// Hot/Cold Customers page (which passes show_approach=1); the normal listing entry
+// shows just the character profile.
+$show_approach = ! empty($show_approach);
 
 /** Render one saved analysis row (object from Customer_Analysis_Model). */
 if ( ! function_exists('ca_render_analysis')) {
-function ca_render_analysis($a, $expanded = true)
+function ca_render_analysis($a, $expanded = true, $show_approach = false)
 {
     $si = is_array($a->sales_intel) ? $a->sales_intel : array();
     $profile = isset($a->profile) && is_array($a->profile) ? $a->profile : array();
@@ -138,6 +142,8 @@ function ca_render_analysis($a, $expanded = true)
                 echo $chip('Objections / Concerns', $si['objections']);
                 } ?>
 
+                <?php // Approach + Recommended Tours: Hot/Cold-entry only (sales follow-up flow).
+                if ($show_approach) { ?>
                 <?php $approach = isset($a->approach_suggestion) ? trim((string) $a->approach_suggestion) : '';
                 if ($approach !== '') { ?>
                     <div class="separator separator-dashed my-4"></div>
@@ -154,6 +160,37 @@ function ca_render_analysis($a, $expanded = true)
                         </div>
                     </div>
                 <?php } ?>
+
+                <?php
+                // Recommended tours the AI matched from our own products, each justified.
+                $rec_tours = isset($a->recommended_tours) && is_array($a->recommended_tours) ? $a->recommended_tours : array();
+                if ( ! empty($rec_tours)) { ?>
+                    <div class="separator separator-dashed my-4"></div>
+                    <div class="font-weight-bolder text-dark mb-3"><i class="la la-map-marked-alt mr-1 text-primary"></i>Recommended Tours for This Customer</div>
+                    <?php foreach ($rec_tours as $t) {
+                        $t_name  = trim((string) (isset($t['name']) ? $t['name'] : ''));
+                        if ($t_name === '') { continue; }
+                        $t_code  = trim((string) (isset($t['tour_code']) ? $t['tour_code'] : ''));
+                        $t_price = (isset($t['price_myr']) && $t['price_myr'] !== null && $t['price_myr'] !== '') ? (float) $t['price_myr'] : null;
+                        $t_just  = trim((string) (isset($t['justification']) ? $t['justification'] : ''));
+                        ?>
+                        <div class="mb-3 p-4 rounded" style="background-color:#F3F6F9;">
+                            <div class="d-flex align-items-center flex-wrap mb-1">
+                                <span class="font-weight-bolder text-dark mr-2" style="font-size:13px;"><?php echo htmlspecialchars($t_name); ?></span>
+                                <?php if ($t_code !== '') { ?>
+                                    <span class="label label-light-primary label-inline font-weight-bold mr-2" style="font-size:11px;"><?php echo htmlspecialchars($t_code); ?></span>
+                                <?php } ?>
+                                <?php if ($t_price !== null && $t_price > 0) { ?>
+                                    <span class="label label-light-success label-inline font-weight-bold" style="font-size:11px;">RM <?php echo number_format($t_price, 0); ?></span>
+                                <?php } ?>
+                            </div>
+                            <?php if ($t_just !== '') { ?>
+                                <div class="text-dark-75" style="font-size:12px; line-height:1.6;"><?php echo nl2br(htmlspecialchars($t_just)); ?></div>
+                            <?php } ?>
+                        </div>
+                    <?php } ?>
+                <?php } ?>
+                <?php } // end show_approach ?>
             <?php } ?>
         </div>
     </div>
@@ -224,11 +261,11 @@ function ca_render_analysis($a, $expanded = true)
                 </div>
             </div>
         <?php } else { ?>
-            <?php ca_render_analysis($analyses[0], true); ?>
+            <?php ca_render_analysis($analyses[0], true, $show_approach); ?>
 
             <?php if (count($analyses) > 1) { ?>
                 <div class="font-weight-bolder text-dark-50 mb-3 ml-1" style="font-size:12px; text-transform:uppercase;">History</div>
-                <?php for ($i = 1; $i < count($analyses); $i++) { ca_render_analysis($analyses[$i], false); } ?>
+                <?php for ($i = 1; $i < count($analyses); $i++) { ca_render_analysis($analyses[$i], false, $show_approach); } ?>
             <?php } ?>
         <?php } ?>
 

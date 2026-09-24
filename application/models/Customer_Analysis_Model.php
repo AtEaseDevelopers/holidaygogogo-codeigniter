@@ -26,6 +26,7 @@ class Customer_Analysis_Model extends CI_Model
 		$key_facts    = isset($data['key_facts']) && is_array($data['key_facts']) ? $data['key_facts'] : array();
 		// The structured character profile lives in details_json.
 		$profile      = isset($data['profile']) && is_array($data['profile']) ? $data['profile'] : array();
+		$rec_tours    = isset($data['recommended_tours']) && is_array($data['recommended_tours']) ? $data['recommended_tours'] : array();
 
 		$row = array(
 			'dedup_key'     => (string) (isset($data['dedup_key']) ? $data['dedup_key'] : ''),
@@ -39,6 +40,7 @@ class Customer_Analysis_Model extends CI_Model
 			'temperature'   => ! empty($data['temperature']) ? $data['temperature'] : null,
 			'temperature_reason' => isset($data['temperature_reason']) ? $data['temperature_reason'] : null,
 			'approach_suggestion' => isset($data['approach_suggestion']) ? $data['approach_suggestion'] : null,
+			'recommended_tours' => $rec_tours ? json_encode($rec_tours, JSON_UNESCAPED_UNICODE) : null,
 			'summary'       => isset($data['summary']) ? $data['summary'] : null,
 			'sales_intel'   => json_encode($sales_intel, JSON_UNESCAPED_UNICODE),
 			'next_actions'  => json_encode($next_actions, JSON_UNESCAPED_UNICODE),
@@ -156,6 +158,10 @@ class Customer_Analysis_Model extends CI_Model
 		$this->load->helper('customer_analysis');
 		$prof = json_decode((string) $row->details_json, true);
 		$row->profile = customer_analysis_normalize_profile(is_array($prof) ? $prof : array());
+
+		// Recommended tours (real products the AI matched to this customer).
+		$rt = isset($row->recommended_tours) ? json_decode((string) $row->recommended_tours, true) : array();
+		$row->recommended_tours = customer_analysis_normalize_recommended_tours(is_array($rt) ? $rt : array());
 
 		$si = json_decode((string) $row->sales_intel, true);
 		if ( ! is_array($si)) {

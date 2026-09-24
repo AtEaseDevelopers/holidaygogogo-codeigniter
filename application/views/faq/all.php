@@ -479,6 +479,8 @@
 			box-shadow: 0 0 0 3px transparent;
 		}
 		.ai-ask-input:focus { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5); }
+		.ai-ask-count { margin-top: 6px; font-size: 12px; font-weight: 300; opacity: 0.85; text-align: right; }
+		.ai-ask-count.is-max { opacity: 1; font-weight: 500; }
 		.ai-ask-btn {
 			border: none;
 			border-radius: 12px;
@@ -554,21 +556,22 @@
 
 		<!-- AI answer: type a customer question, get a ready-to-send reply grounded
 		     in the FAQ library (Faq/Ai_Search). No data is stored.
-		     HIDDEN 2026-09-24 (UI only, bring back later): remove the inline
-		     style="display:none;" below to restore the Ask AI box. -->
-		<section class="ai-ask" style="display:none;">
+		     Hidden per request — flip this condition to true to bring "Ask AI" back. -->
+		<?php if(false) { ?>
+		<section class="ai-ask">
 			<div class="ai-ask-head">
 				<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5 10.1 10.9 5.5 9l4.6-1.4L12 3z"></path><path d="M19 15l.7 1.8L21.5 17.5l-1.8.7L19 20l-.7-1.8L16.5 17.5l1.8-.7L19 15z"></path></svg>
 				<span class="ai-ask-title">Ask AI</span>
 			</div>
 			<p class="ai-ask-sub">Type a customer's question — AI reads every FAQ and drafts a reply you can copy and send.</p>
 			<form class="ai-ask-form" id="aiAskForm" autocomplete="off">
-				<input type="text" class="ai-ask-input" id="aiAskInput" placeholder="e.g. What time is check-in at Redang Bay Resort?" aria-label="Ask a question">
+				<input type="text" class="ai-ask-input" id="aiAskInput" maxlength="250" placeholder="e.g. What time is check-in at Redang Bay Resort?" aria-label="Ask a question">
 				<button type="submit" class="ai-ask-btn" id="aiAskBtn">
 					<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
 					<span id="aiAskBtnText">Ask</span>
 				</button>
 			</form>
+			<div class="ai-ask-count" id="aiAskCount">0 / 250</div>
 			<div class="ai-error" id="aiError"></div>
 			<div class="ai-result" id="aiResult">
 				<div class="ai-result-head">
@@ -582,6 +585,7 @@
 				<div class="ai-sources" id="aiSources" style="display:none;"></div>
 			</div>
 		</section>
+		<?php } ?>
 
 		<?php if(empty($decoded_faqs)) { ?>
 			<div class="no-results show">No FAQs yet.</div>
@@ -747,7 +751,19 @@
 			var errorEl   = document.getElementById('aiError');
 			var copyBtn   = document.getElementById('aiCopyBtn');
 			var copyText  = document.getElementById('aiCopyBtnText');
+			var countEl   = document.getElementById('aiAskCount');
 			var endpoint  = <?php echo json_encode(base_url('Faq/Ai_Search')); ?>;
+			var MAX_LEN   = 250;
+
+			function updateCount() {
+				var n = (input.value || '').length;
+				if (countEl) {
+					countEl.textContent = n + ' / ' + MAX_LEN;
+					countEl.classList.toggle('is-max', n >= MAX_LEN);
+				}
+			}
+			input.addEventListener('input', updateCount);
+			updateCount();
 
 			function setLoading(on) {
 				btn.disabled = on;

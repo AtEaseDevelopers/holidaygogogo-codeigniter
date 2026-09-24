@@ -30,9 +30,13 @@ function hcc_render_list($rows, $kind, $filtered = false)
                 <?php foreach ($rows as $r) {
                     $name = trim((string) $r->guest_name) !== '' ? $r->guest_name : '(unnamed)';
                     $type = trim((string) $r->source_type);
+                    // show_approach=1 is what reveals the "How to Approach" + "Recommended
+                    // Tours" blocks on the profile — only the Hot/Cold page sets it, so the
+                    // normal listing entry stays a plain character profile.
                     $profile_url = base_url('Customer_Analysis?dedup_key=') . urlencode($r->dedup_key)
                         . '&name=' . urlencode((string) $r->guest_name)
-                        . ($type !== '' ? '&source_type=' . urlencode($type) : '');
+                        . ($type !== '' ? '&source_type=' . urlencode($type) : '')
+                        . '&show_approach=1';
                 ?>
                     <tr>
                         <td>

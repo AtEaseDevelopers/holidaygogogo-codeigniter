@@ -72,7 +72,7 @@ class Lc_Module_Access_Model extends CI_Model
         $posted   = $this->input->post('access');
         $admin_id = $this->session->userdata('admin_id');
         $now      = date('Y-m-d H:i:s');
-        $modules  = array('customer', 'guests', 'ghl_leads', 'manual_leads', 'campaign', 'lead_status', 'nature_of_business');
+        $modules  = array('customer', 'guests', 'ghl_leads', 'manual_leads', 'campaign', 'lead_status', 'nature_of_business', 'customer_profile');
 
         $this->db->trans_start();
 
