@@ -964,9 +964,11 @@ class CompetitorAnalysisService
 		// (e.g. a JS section hub /tour-package linking /tour-package/1077, …/1090, …
 		// exposed after render) — drill the children instead of keeping the hub.
 		$child_links = competitor_count_child_links($url, $this->last_page_links_raw);
-		if ($this->last_is_listing || competitor_is_category_url($url) || competitor_text_looks_like_listing($text) || $child_links >= 3) {
-			// A category / listing page (by JSON-LD, a plural "…-tours" URL, content, or
-			// a hub of its own sub-pages) — not a product itself; drop it and let
+		if ($this->last_is_listing || competitor_is_category_url($url) || competitor_text_looks_like_listing($text)
+			|| competitor_is_destination_listing($this->last_page_title, $text) || $child_links >= 3) {
+			// A category / listing page (by JSON-LD, a plural "…-tours" URL, content, a
+			// bare-destination catalogue of tour cards, or a hub of its own sub-pages) —
+			// not a product itself; drop it and let
 			// crawl_to_text drill its individual products (last_page_links). If it's a
 			// paginated SPA listing, walk its API for the products on page 2..N too (the
 			// render only exposes page 1 into the DOM).

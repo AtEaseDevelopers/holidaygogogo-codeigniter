@@ -216,6 +216,9 @@ if ( ! function_exists('customer_analysis_field_guidance'))
 			"Tailor it to their stated interest and preferences; when the customer is HOT, nudge toward booking, and when they are COLD or unclear, write a gentle re-engagement message that re-opens the conversation. " .
 			"RECOMMEND the tour(s) in recommended_tours by name (mention the price when known) with a short reason; if recommended_tours is empty, still write a helpful message and ask what destination/dates/pax they have in mind. Suggest the natural next step (e.g. ask for pax/dates/budget, gently nudge to book), and use light structure and emojis where it helps them decide. " .
 			"When comparing options, lay them out clearly like a friendly recommendation. NEVER over-promise or state things that vary by date/season as guaranteed (e.g. write \"there's often Live Music / a Live Band in the evening\", not \"there is guaranteed to be a Live Band every night\").\n" .
+			"References: below the transcript you may be given up to three reference blocks — OUR PRODUCTS (our real tours), COMPETITOR PRODUCTS (rival tours captured via AI) and a KNOWLEDGE BASE of our internal FAQ. Base the whole approach on them together with the customer's profile. " .
+			"Use the KNOWLEDGE BASE to answer or pre-empt the customer's open or likely questions (e.g. visa, baggage, deposit, refund, what's included) with OUR real policy — quote it, never invent one; if the FAQ does not cover a question, offer to check rather than guess. " .
+			"Use COMPETITOR PRODUCTS ONLY to position OUR PRODUCTS on value (what we include that they may not, or why our price is worth it) — NEVER recommend a competitor tour and never name or run them down.\n" .
 			"Rules: use an empty string (or empty array for lists) when the transcript gives nothing for a field — do NOT guess. " .
 			"Write concrete, specific detail grounded in the chat over generic statements. Write every profile field in English, including approach_suggestion.";
 	}
@@ -263,23 +266,220 @@ if ( ! function_exists('customer_analysis_products_block'))
 	}
 }
 
+if ( ! function_exists('customer_analysis_format_competitor_products'))
+{
+	/**
+	 * Flatten AI-captured competitor products (Competitor_Analysis_Model::Read_All()
+	 * headline rows) into the compact {name, tour_code, destination, duration, price,
+	 * currency} shape used for the COMPETITOR PRODUCTS reference block. Rows without a
+	 * product name are dropped; empty fields and non-positive prices are omitted so we
+	 * never pay to send dead weight. Pure — no DB.
+	 *
+	 * @param array $rows Rows/objects with product_name, tour_code, destination,
+	 *                    duration, price, currency (as returned by Read_All()).
+	 */
+	function customer_analysis_format_competitor_products($rows)
+	{
+		$out = array();
+		foreach ((array) $rows as $r) {
+			$r    = (array) $r;
+			$name = customer_analysis_coerce_str(isset($r['product_name']) ? $r['product_name'] : (isset($r['name']) ? $r['name'] : ''));
+			if ($name === '') {
+				continue;
+			}
+			$item = array('name' => $name);
+			$code = customer_analysis_coerce_str(isset($r['tour_code']) ? $r['tour_code'] : '');
+			if ($code !== '') {
+				$item['tour_code'] = $code;
+			}
+			$dest = customer_analysis_coerce_str(isset($r['destination']) ? $r['destination'] : '');
+			if ($dest !== '') {
+				$item['destination'] = $dest;
+			}
+			$dur = customer_analysis_coerce_str(isset($r['duration']) ? $r['duration'] : '');
+			if ($dur !== '') {
+				$item['duration'] = $dur;
+			}
+			if (isset($r['price']) && is_numeric($r['price']) && (float) $r['price'] > 0) {
+				$item['price'] = (float) $r['price'];
+				$cur = customer_analysis_coerce_str(isset($r['currency']) ? $r['currency'] : '');
+				if ($cur !== '') {
+					$item['currency'] = $cur;
+				}
+			}
+			$out[] = $item;
+		}
+		return $out;
+	}
+}
+
+if ( ! function_exists('customer_analysis_destination_tokens'))
+{
+	/**
+	 * Collect the destination-ish tokens of a product (its destination string plus
+	 * any countries/cities) as a flat list, splitting delimited strings. Used to
+	 * match a product against the destinations a customer mentions. Pure.
+	 */
+	function customer_analysis_destination_tokens($product)
+	{
+		$product = (array) $product;
+		$tokens  = array();
+		foreach (array('destination', 'countries', 'cities') as $k) {
+			if ( ! isset($product[$k])) {
+				continue;
+			}
+			$v = $product[$k];
+			if (is_array($v)) {
+				foreach ($v as $x) {
+					$tokens[] = (string) $x;
+				}
+			} else {
+				foreach (preg_split('/[,\/;|]+/', (string) $v) as $x) {
+					$tokens[] = $x;
+				}
+			}
+		}
+		return $tokens;
+	}
+}
+
+if ( ! function_exists('customer_analysis_filter_products_by_destination'))
+{
+	/**
+	 * Keep only the products whose destination (or a country/city) is mentioned in
+	 * $haystack (the chat / prior-profile text) — so the COMPETITOR PRODUCTS block
+	 * stays focused on where the customer is actually interested, not the whole
+	 * captured catalogue. Matching is case-insensitive and word-level: a token like
+	 * "South Korea" matches a customer who only wrote "korea". Words shorter than 4
+	 * chars are ignored to avoid noise. Capped to $limit. Returns [] when nothing
+	 * matches. Pure.
+	 */
+	function customer_analysis_filter_products_by_destination($products, $haystack, $limit = 20)
+	{
+		$out = array();
+		if ( ! is_array($products)) {
+			return $out;
+		}
+		$hay = ' ' . strtolower((string) $haystack) . ' ';
+		if (trim($hay) === '') {
+			return $out;
+		}
+		$limit = (int) $limit;
+		foreach ($products as $p) {
+			if (customer_analysis_destination_mentioned($p, $hay)) {
+				$out[] = $p;
+			}
+			if ($limit > 0 && count($out) >= $limit) {
+				break;
+			}
+		}
+		return $out;
+	}
+}
+
+if ( ! function_exists('customer_analysis_destination_mentioned'))
+{
+	/**
+	 * True when any word (>= 4 chars) of a product's destination tokens appears in
+	 * the already-lowercased $hay text. Word-level so "South Korea" still matches a
+	 * customer who wrote only "korea". Pure.
+	 */
+	function customer_analysis_destination_mentioned($product, $hay)
+	{
+		foreach (customer_analysis_destination_tokens($product) as $tok) {
+			foreach (preg_split('/\s+/', strtolower(trim((string) $tok))) as $word) {
+				if (strlen($word) >= 4 && strpos($hay, $word) !== false) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+}
+
+if ( ! function_exists('customer_analysis_competitor_block'))
+{
+	/**
+	 * Build the "COMPETITOR PRODUCTS" reference block from AI-captured competitor
+	 * tours so the model can position OUR PRODUCTS on value — WITHOUT ever
+	 * recommending a competitor. Reuses competitor_products_block() to strip empty
+	 * fields when it's loaded. Returns '' when there is nothing to show. Pure.
+	 *
+	 * @param array $competitor_products customer_analysis_format_competitor_products() output.
+	 */
+	function customer_analysis_competitor_block($competitor_products)
+	{
+		$rows = is_array($competitor_products) ? $competitor_products : array();
+		if (empty($rows)) {
+			return '';
+		}
+		$json = function_exists('competitor_products_block')
+			? competitor_products_block($rows)
+			: json_encode(array_values($rows), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		if ($json === '' || $json === '[]' || $json === false) {
+			return '';
+		}
+		return "\n\nCOMPETITOR PRODUCTS (captured via AI from rival sites — for competitive positioning ONLY; recommend our own tours, NEVER these, and never disparage them by name):\n" . $json . "\n";
+	}
+}
+
+if ( ! function_exists('customer_analysis_faq_block'))
+{
+	/**
+	 * Build the "KNOWLEDGE BASE (FAQ)" reference block from our internal FAQ corpus
+	 * so the model answers/pre-empts the customer's questions with our real policy
+	 * instead of inventing one. $faq_corpus is faq_search_build_corpus() output.
+	 * Returns '' when empty. Pure.
+	 */
+	function customer_analysis_faq_block($faq_corpus)
+	{
+		$corpus = trim((string) $faq_corpus);
+		if ($corpus === '') {
+			return '';
+		}
+		return "\n\nKNOWLEDGE BASE — our internal FAQ (ground any factual answer to the customer's questions in these; never invent a policy/price/detail beyond them):\n" . $corpus . "\n";
+	}
+}
+
+if ( ! function_exists('customer_analysis_references_block'))
+{
+	/**
+	 * Assemble the optional reference blocks appended after the transcript:
+	 * OUR PRODUCTS, COMPETITOR PRODUCTS and the FAQ KNOWLEDGE BASE. Each part omits
+	 * itself when it has nothing to add. $references may carry 'competitor_products'
+	 * (formatted list) and 'faq_corpus' (string). Pure.
+	 */
+	function customer_analysis_references_block($our_products, $references = array())
+	{
+		$references = is_array($references) ? $references : array();
+		$competitor = isset($references['competitor_products']) ? $references['competitor_products'] : array();
+		$faq_corpus = isset($references['faq_corpus']) ? $references['faq_corpus'] : '';
+		return customer_analysis_products_block($our_products)
+			. customer_analysis_competitor_block($competitor)
+			. customer_analysis_faq_block($faq_corpus);
+	}
+}
+
 if ( ! function_exists('customer_analysis_build_request'))
 {
 	/**
 	 * Shape the Responses API instructions + input for one customer. When
 	 * $our_products is given (competitor_format_our_products() output) it is appended
-	 * as an OUR PRODUCTS block so the model recommends a real tour. Pure.
+	 * as an OUR PRODUCTS block so the model recommends a real tour. $references may
+	 * add a COMPETITOR PRODUCTS block ('competitor_products') and an internal-FAQ
+	 * KNOWLEDGE BASE block ('faq_corpus') so the approach is grounded in our real
+	 * policies and positioned against rivals. Pure.
 	 *
 	 * @return array{instructions:string,input:string}
 	 */
-	function customer_analysis_build_request($guest_name, $transcript, $our_products = array())
+	function customer_analysis_build_request($guest_name, $transcript, $our_products = array(), $references = array())
 	{
 		$name = trim((string) $guest_name);
 		$input =
 			"CUSTOMER NAME: " . ($name !== '' ? $name : '(unknown)') . "\n\n" .
 			"CONVERSATION TRANSCRIPT (chronological; 'Agent' = our travel agency, 'Customer' = the client):\n" .
 			"-----\n" . (string) $transcript . "\n-----\n" .
-			customer_analysis_products_block($our_products);
+			customer_analysis_references_block($our_products, $references);
 		return array(
 			'instructions' => customer_analysis_output_contract(),
 			'input'        => $input,
@@ -300,7 +500,7 @@ if ( ! function_exists('customer_analysis_build_update_request'))
 	 * @param string $new_transcript Rendered transcript of just the new messages.
 	 * @return array{instructions:string,input:string}
 	 */
-	function customer_analysis_build_update_request($guest_name, $prior, $new_transcript, $our_products = array())
+	function customer_analysis_build_update_request($guest_name, $prior, $new_transcript, $our_products = array(), $references = array())
 	{
 		$p = (array) $prior;
 		$prior_profile = (isset($p['profile']) && is_array($p['profile'])) ? $p['profile'] : array();
@@ -329,7 +529,7 @@ if ( ! function_exists('customer_analysis_build_update_request'))
 			"EXISTING PROFILE (from the last analysis):\n" . $prior_json . "\n\n" .
 			"NEW MESSAGES since the last analysis (chronological; 'Agent' = our agency, 'Customer' = the client):\n" .
 			"-----\n" . (string) $new_transcript . "\n-----\n" .
-			customer_analysis_products_block($our_products);
+			customer_analysis_references_block($our_products, $references);
 
 		return array('instructions' => $instructions, 'input' => $input);
 	}

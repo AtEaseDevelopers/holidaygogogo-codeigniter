@@ -714,6 +714,71 @@ if ( ! function_exists('competitor_text_looks_like_listing'))
 	}
 }
 
+if ( ! function_exists('competitor_count_tour_cards'))
+{
+	/**
+	 * Count the DISTINCT tour cards a page advertises — a card is a trip-duration token
+	 * ("4D3N" / "9 D 7 N") followed by its name text. A single tour page repeats one
+	 * duration/name (title, header, breadcrumb) so it collapses to 1; a destination /
+	 * category listing shows many different ones. Used by competitor_is_destination_listing. Pure.
+	 */
+	function competitor_count_tour_cards($text)
+	{
+		if ( ! is_string($text) || $text === '') {
+			return 0;
+		}
+		// Duration token + the name that follows, stopping at the next digit so a card
+		// never swallows the following card's duration (which would merge two into one).
+		if ( ! preg_match_all('/\b\d{1,2}\s*d\s*\d{1,2}\s*n\b[^\d\r\n]{0,40}/iu', $text, $m)) {
+			return 0;
+		}
+		$seen = array();
+		foreach ($m[0] as $frag) {
+			// Normalise: lowercase, strip non-alphanumerics, keep duration + name head so
+			// the SAME tour repeated collapses while distinct tours stay separate.
+			$key = preg_replace('/[^a-z0-9]+/u', '', mb_strtolower($frag, 'UTF-8'));
+			if ($key !== '') {
+				$seen[$key] = true;
+			}
+		}
+		return count($seen);
+	}
+}
+
+if ( ! function_exists('competitor_is_destination_listing'))
+{
+	/**
+	 * True when a page is a DESTINATION / CATEGORY catalogue masquerading as a tour —
+	 * e.g. "/group-tour/hainan" whose <h1> is just "HAINAN" and whose body lists several
+	 * tour cards ("4D3N GO AROUND HAINAN … 5D3N MEET IN HAINAN …"). These slip past the
+	 * itinerary check (they have no "Day 1" of their own) yet pass the tour gate on
+	 * duration+price, so without this they'd be kept as one junk "tour" named after the
+	 * bare destination. Requires ALL of:
+	 *   - the page has NO day-by-day itinerary of its own (a real tour does), AND
+	 *   - it lists >= $min distinct tour cards, AND
+	 *   - its TITLE is not itself a tour name (a real tour title leads with a duration
+	 *     like "8D7N …"; a catalogue title is a place, e.g. "HAINAN").
+	 * The title guard is what keeps a real tour whose itinerary we failed to scrape (its
+	 * body may still mention a few related tours) from being dropped. Pure.
+	 */
+	function competitor_is_destination_listing($title, $text, $min = 3)
+	{
+		if ( ! is_string($text) || $text === '') {
+			return false;
+		}
+		if (competitor_has_tour_itinerary($text)) {
+			return false;   // has its own itinerary → a real tour, never a catalogue
+		}
+		// A tour name leads with a trip duration ("8D7N …", "9 D 7 N …") — a place-name
+		// title ("HAINAN", "CHENGDU") does not. Only titleless / place titles qualify.
+		$title = trim((string) $title);
+		if ($title !== '' && preg_match('/^\s*\d{1,2}\s*d\s*\d{1,2}\s*n\b/iu', $title)) {
+			return false;
+		}
+		return competitor_count_tour_cards($text) >= $min;
+	}
+}
+
 if ( ! function_exists('competitor_has_product_signal'))
 {
 	/**

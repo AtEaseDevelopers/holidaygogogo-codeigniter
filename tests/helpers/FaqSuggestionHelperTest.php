@@ -101,6 +101,11 @@ assert_true('input lists destination Japan', strpos($p['input'], 'Japan') !== fa
 assert_true('input lists destination Korea trimmed', strpos($p['input'], 'Korea') !== false);
 $p2 = faq_suggestion_build_prompt('x', array());
 assert_true('no destinations -> (none configured)', strpos($p2['input'], '(none configured)') !== false);
+// Answers must be customer-facing, ready to copy & paste straight to a customer.
+assert_true('prompt asks for ready-to-send answers', stripos($p['instructions'], 'ready-to-send') !== false);
+assert_true('prompt mentions copy and paste to customer', stripos($p['instructions'], 'copy') !== false);
+assert_true('json shape hint says ready-to-send reply', stripos($p['input'], 'ready-to-send reply') !== false);
+assert_true('prompt asks for step-by-step detail', stripos($p['instructions'], 'step-by-step') !== false);
 
 // build_prompt with existing FAQs injected so the model can skip duplicates.
 $existing_faqs = array(
@@ -152,6 +157,8 @@ assert_eq('parsed[1] dest ids ci', array(8), $parsed[1]['destination_ids']);
 // String input is decoded; cap is honoured.
 $raw = '{"suggestions":[{"title":"A","items":[{"q":"a","a":"b"}]},{"title":"B","items":[{"q":"a","a":"b"}]}]}';
 assert_eq('string input decoded + capped', 1, count(faq_suggestion_parse_response($raw, array(), 1)));
+// max = 0 disables the cap entirely (store every suggestion the AI returns).
+assert_eq('max 0 = uncapped', 2, count(faq_suggestion_parse_response($raw, array(), 0)));
 assert_eq('garbage -> empty', array(), faq_suggestion_parse_response('not json', array(), 30));
 
 // ---- norm_title / filter_new ----------------------------------------------
@@ -244,6 +251,9 @@ $fp = faq_suggestion_build_file_prompt(array('Japan', 'Korea'));
 assert_true('file prompt has instructions', strlen($fp['instructions']) > 0);
 assert_true('file prompt input mentions json', stripos($fp['input'], 'json') !== false);
 assert_true('file prompt lists destinations', strpos($fp['input'], 'Japan') !== false);
+assert_true('file prompt asks for ready-to-send answers', stripos($fp['instructions'], 'ready-to-send') !== false);
+assert_true('file prompt json hint says ready-to-send reply', stripos($fp['input'], 'ready-to-send reply') !== false);
+assert_true('file prompt asks for step-by-step detail', stripos($fp['instructions'], 'step-by-step') !== false);
 $fpe = faq_suggestion_build_file_prompt(array('Japan'), $existing_faqs);
 assert_true('file prompt lists existing FAQ', strpos($fpe['input'], 'Deposit amount') !== false);
 assert_true('file prompt instructs skip existing', stripos($fpe['input'] . $fpe['instructions'], 'already') !== false);

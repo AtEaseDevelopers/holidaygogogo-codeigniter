@@ -265,12 +265,21 @@ class Customer_Analysis extends MY_Controller
 		// instead of inventing one — same source the Competitor Analysis uses.
 		$our_products = competitor_format_our_products($this->Product_Model->Read_For_Comparison());
 
+		// Reference material the approach is grounded in: our internal FAQ (answer /
+		// pre-empt the customer's questions with our real policy) + competitor tours
+		// captured via AI for the destinations this customer is interested in
+		// (value positioning). Both are best-effort — never block the analysis.
+		$references = $this->build_references(
+			($mode === 'incremental') ? $new_timeline : $full['timeline'],
+			($mode === 'incremental') ? $prior : null
+		);
+
 		@set_time_limit(600);
 		$this->load->library('CustomerAnalysisService');
 		try {
 			$record = ($mode === 'incremental')
-				? $this->customeranalysisservice->analyze_update($name, $prior, $new_timeline, $our_products)
-				: $this->customeranalysisservice->analyze($name, $full['timeline'], $our_products);
+				? $this->customeranalysisservice->analyze_update($name, $prior, $new_timeline, $our_products, $references)
+				: $this->customeranalysisservice->analyze($name, $full['timeline'], $our_products, $references);
 		} catch (Exception $e) {
 			$this->Customer_Analysis_Model->Create(array(
 				'dedup_key'     => $dedup_key,
@@ -299,6 +308,69 @@ class Customer_Analysis extends MY_Controller
 
 		$id = $this->Customer_Analysis_Model->Create($record);
 		echo json_encode(array('success' => true, 'id' => $id, 'mode' => $mode));
+	}
+
+	/**
+	 * Gather the reference material the sales approach must be grounded in:
+	 *   faq_corpus          — our internal FAQ library, so the model answers the
+	 *                         customer's questions with our real policy, not a guess.
+	 *   competitor_products — competitor tours captured via AI, narrowed to the
+	 *                         destinations this customer talked about, for value
+	 *                         positioning of our own tours.
+	 * Both are best-effort context: any failure returns an empty block rather than
+	 * breaking the paid analysis. $timeline is the messages driving this run;
+	 * $prior (on incremental runs) widens the destination match to the whole history.
+	 */
+	private function build_references($timeline, $prior = null)
+	{
+		$refs = array('competitor_products' => array(), 'faq_corpus' => '');
+
+		// Internal FAQ corpus — same shape the FAQ AI search feeds the model.
+		try {
+			$this->load->model('Faq_Model');
+			$this->load->helper('faq_search');
+			$library = array();
+			foreach ((array) $this->Faq_Model->Read_Faqs() as $faq) {
+				if ( ! isset($faq->Type) || $faq->Type !== 'internal') {
+					continue;
+				}
+				$dest_raw = ($faq->Destinations === null) ? '' : (string) $faq->Destinations;
+				$library[] = array(
+					'title'        => (string) $faq->Title,
+					'destinations' => ($dest_raw === '') ? array() : explode('||', $dest_raw),
+					'items'        => Faq_Model::Decode_Items($faq->Description),
+				);
+			}
+			if ( ! empty($library) && function_exists('faq_search_build_corpus')) {
+				$refs['faq_corpus'] = faq_search_build_corpus($library);
+			}
+		} catch (Exception $e) {
+			// FAQ is best-effort context — never block the analysis on it.
+		}
+
+		// Destination haystack: what the customer talked about, plus the prior
+		// profile on incremental runs so an interest raised earlier still matches.
+		$haystack = customer_analysis_render_transcript((array) $timeline, 0);
+		if ($prior) {
+			$p = (array) $prior;
+			$haystack .= ' ' . (isset($p['summary']) ? (string) $p['summary'] : '');
+			if (isset($p['profile']) && is_array($p['profile'])) {
+				foreach ($p['profile'] as $v) {
+					$haystack .= ' ' . (is_array($v) ? implode(' ', $v) : (string) $v);
+				}
+			}
+		}
+
+		// Competitor tours captured via AI, narrowed to the customer's destinations.
+		try {
+			$this->load->model('Competitor_Analysis_Model');
+			$captured = customer_analysis_format_competitor_products($this->Competitor_Analysis_Model->Read_All());
+			$refs['competitor_products'] = customer_analysis_filter_products_by_destination($captured, $haystack, 20);
+		} catch (Exception $e) {
+			// Competitor context is best-effort too.
+		}
+
+		return $refs;
 	}
 
 	function Delete()

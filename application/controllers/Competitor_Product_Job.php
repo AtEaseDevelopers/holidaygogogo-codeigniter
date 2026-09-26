@@ -199,7 +199,11 @@ class Competitor_Product_Job extends CI_Controller
 			};
 			$keyword  = isset($job['keyword']) ? (string) $job['keyword'] : '';
 			$ai_crawl = ! empty($job['ai_crawl']);
-			$items = $this->competitoranalysisservice->crawl_to_text($url, 0, $progress, $keyword, $ai_crawl);
+			// Optional cap on how many products to read (0 = unbounded, the default). Lets
+			// a caller run a fast bounded crawl (e.g. batch verification) without reading
+			// an entire large catalogue.
+			$limit = isset($job['limit']) ? (int) $job['limit'] : 0;
+			$items = $this->competitoranalysisservice->crawl_to_text($url, $limit, $progress, $keyword, $ai_crawl);
 			$items_file = APPPATH . 'logs/competitor_crawl/jobs/' . $job['job'] . '.items.json';
 			@file_put_contents($items_file, json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 

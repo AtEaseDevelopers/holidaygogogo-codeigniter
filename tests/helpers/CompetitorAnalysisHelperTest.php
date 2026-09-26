@@ -748,6 +748,33 @@ check_true('text_listing true for 3+ itineraries (multiple Day 1)',
     competitor_text_looks_like_listing($manyItins));
 check('text_listing false on empty', false, competitor_text_looks_like_listing(''));
 
+// ---- competitor_count_tour_cards --------------------------------------------
+$hainanCat = "HAINAN 1 - 60 days 4D3N GO AROUND HAINAN FrRM 2,998 4D3N SANYA ATLANTIS GETAWAY FrRM 3,198 "
+    . "5D3N MEET IN HAINAN FrRM 2,798 5D4N FAVOURABLE HAINAN FrRM 3,099 6D4N BREEZY HAINAN FrRM 3,499";
+check('count_tour_cards counts distinct duration-titled cards', 5, competitor_count_tour_cards($hainanCat));
+// The SAME tour's duration repeated (title + header + breadcrumb) collapses to 1.
+check('count_tour_cards collapses one tour repeated', 1,
+    competitor_count_tour_cards("9D7N MAJESTIC YUNNAN\n9D7N MAJESTIC YUNNAN\nDeparture 9D7N MAJESTIC YUNNAN"));
+check('count_tour_cards 0 on empty', 0, competitor_count_tour_cards(''));
+
+// ---- competitor_is_destination_listing (title-aware catalogue catch) ---------
+// A bare-destination page ("HAINAN") listing many cards with NO itinerary of its own.
+check_true('destination_listing true for place title + many cards, no itinerary',
+    competitor_is_destination_listing('HAINAN', $hainanCat));
+// A REAL tour whose itinerary we failed to scrape but whose body mentions related tours
+// must NOT be dropped — its title leads with a duration, so the title guard protects it.
+$realTourNoItin = "8D7N CHARMING JIANGNAN + JIANGXI FrRM 3,799 You may also like: "
+    . "9D7N MAJESTIC YUNNAN FrRM 4,299 7D5N CLASSIC ZHANGJIAJIE FrRM 3,198";
+check('destination_listing false for real tour (duration-leading title)', false,
+    competitor_is_destination_listing('8D7N CHARMING JIANGNAN + TRENDING JIANGXI TOUR (B1F1)', $realTourNoItin));
+// A real tour WITH its own day-by-day itinerary is never a catalogue, even titleless.
+check('destination_listing false when page has own itinerary', false,
+    competitor_is_destination_listing('CHENGDU', "CHENGDU 9D7N TOUR\nDay 1 Arrive\nDay 2 Panda\nDay 3 Leshan\n5D4N OTHER FrRM 1"));
+// Below the card threshold → not a catalogue.
+check('destination_listing false below card threshold', false,
+    competitor_is_destination_listing('HAINAN', "HAINAN 4D3N GO AROUND FrRM 2,998 5D3N MEET IN HAINAN FrRM 2,798"));
+check('destination_listing false on empty', false, competitor_is_destination_listing('HAINAN', ''));
+
 // ---- competitor_has_product_signal + looks_like_article ---------------------
 check_true('product_signal on price', competitor_has_product_signal('Great trip, only RM 1899 per pax'));
 check_true('product_signal on duration code', competitor_has_product_signal('Bali 5D4N package'));

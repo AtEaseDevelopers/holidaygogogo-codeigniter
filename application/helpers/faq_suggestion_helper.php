@@ -342,7 +342,14 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"any topic a FAQ could capture (e.g. pricing & deposits, payment, booking / cancellation / refund process, " .
 			"what's included, visa & documents, flights & logistics, itinerary specifics, and any niche or one-off point). " .
 			"Do NOT limit yourself to the most common questions; include the less frequent and edge-case ones too. " .
-			"Group near-identical questions together and write a clear, generic answer based on how the agents actually replied. " .
+			"Group near-identical questions together. Write the answer as a complete, warm, READY-TO-SEND reply that a sales agent " .
+			"can COPY and PASTE straight to a customer with no editing — address the customer directly (\"you\"), keep the tone " .
+			"friendly and professional, and make it self-contained (a full reply, not internal notes or a terse definition). " .
+			"Be DETAILED and, whenever the answer involves a process or several points (e.g. how to book, pay, cancel, or apply " .
+			"for a visa), lay it out as clear STEP-BY-STEP instructions — use numbered steps (1., 2., 3. …) or short bullet " .
+			"lines so the customer can follow along easily; cover the whole flow end to end rather than a one-line summary. " .
+			"Base it on how the agents actually replied, but keep it generic so it works for any customer (no specific name, " .
+			"quoted price, or personal dates). " .
 			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came up or why it is useful. " .
 			"Roughly ORDER the suggestions with the more broadly useful ones first, but still list everything. " .
 			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
@@ -362,7 +369,7 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"\"title\":\"short FAQ title\"," .
 			"\"reason\":\"one sentence: where this came up or why it is useful\"," .
 			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
-			"\"items\":[{\"q\":\"the question\",\"a\":\"a clear reusable answer\"}]" .
+			"\"items\":[{\"q\":\"the question\",\"a\":\"a detailed, step-by-step, ready-to-send reply to the customer\"}]" .
 			"}]}\n\n" .
 			"List every FAQ you can extract; put the more broadly useful ones first.\n\n" .
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
@@ -405,7 +412,12 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			"any topic a FAQ could capture (e.g. pricing & deposits, payment, booking / cancellation / refund process, " .
 			"what's included, visa & documents, flights & logistics, itinerary specifics, and any niche or one-off detail). " .
 			"Do NOT limit yourself to the most common questions; include the less frequent and edge-case ones too. " .
-			"Write a clear, generic answer grounded in the document's contents. " .
+			"Write the answer as a complete, warm, READY-TO-SEND reply that a sales agent can COPY and PASTE straight to a " .
+			"customer with no editing — address the customer directly (\"you\"), keep the tone friendly and professional, and " .
+			"make it self-contained (a full reply, not internal notes or a terse definition), grounded in the document's contents. " .
+			"Be DETAILED and, whenever the answer involves a process or several points (e.g. how to book, pay, cancel, or apply " .
+			"for a visa), lay it out as clear STEP-BY-STEP instructions — use numbered steps (1., 2., 3. …) or short bullet " .
+			"lines so the customer can follow along easily; cover the whole flow end to end rather than a one-line summary. " .
 			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came from or why it is useful. " .
 			"Roughly ORDER the suggestions with the more broadly useful ones first, but still list everything. " .
 			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
@@ -425,7 +437,7 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			"\"title\":\"short FAQ title\"," .
 			"\"reason\":\"one sentence: where this came from or why it is useful\"," .
 			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
-			"\"items\":[{\"q\":\"the question\",\"a\":\"a clear reusable answer\"}]" .
+			"\"items\":[{\"q\":\"the question\",\"a\":\"a detailed, step-by-step, ready-to-send reply to the customer\"}]" .
 			"}]}\n\n" .
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .

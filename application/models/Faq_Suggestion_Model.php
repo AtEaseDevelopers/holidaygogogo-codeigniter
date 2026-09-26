@@ -355,7 +355,7 @@ class Faq_Suggestion_Model extends CI_Model
 		foreach ($dest_map as $id => $name) {
 			$name_to_id[$name] = $id;
 		}
-		$parsed = faq_suggestion_parse_response($result['raw'], $name_to_id, 20);
+		$parsed = faq_suggestion_parse_response($result['raw'], $name_to_id, $this->max_suggestions());
 
 		// Safety net: drop any candidate whose title OR question already matches an
 		// existing FAQ / prior suggestion (the prompt asked the model to skip these,
@@ -505,6 +505,22 @@ class Faq_Suggestion_Model extends CI_Model
 		$n = get_env('FAQ_SUGGESTION_MAX_CHARS');
 		if ($n === null || $n === '' || !is_numeric($n)) {
 			return 200000;
+		}
+		return (int) $n; // an explicit 0 disables the cap
+	}
+
+	/**
+	 * How many FAQ suggestions to keep from a single AI reply. The prompt asks
+	 * the model to be EXHAUSTIVE, so this is only a safety backstop against a
+	 * runaway reply — default 200 (well above the old hard 50 so genuine
+	 * long-tail suggestions are no longer silently dropped). Override with
+	 * FAQ_SUGGESTION_MAX_SUGGESTIONS; set 0 to store every suggestion uncapped.
+	 */
+	protected function max_suggestions()
+	{
+		$n = get_env('FAQ_SUGGESTION_MAX_SUGGESTIONS');
+		if ($n === null || $n === '' || !is_numeric($n)) {
+			return 200;
 		}
 		return (int) $n; // an explicit 0 disables the cap
 	}

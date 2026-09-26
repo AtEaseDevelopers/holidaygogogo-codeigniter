@@ -197,5 +197,73 @@ check('parse pulls object out of prose', 'ok', $withProse['summary']);
 check('parse returns null on non-json', null, customer_analysis_parse_ai_response('sorry, I cannot help'));
 check('parse returns null on empty', null, customer_analysis_parse_ai_response('   '));
 
+// ---- customer_analysis_format_competitor_products ---------------------------
+$capRows = array(
+    (object) array('product_name' => 'Rival Japan 6D', 'tour_code' => 'RJ6', 'destination' => 'Japan', 'duration' => '6D5N', 'price' => 5599, 'currency' => 'MYR'),
+    (object) array('product_name' => '', 'destination' => 'Korea'),                       // no name -> dropped
+    (object) array('product_name' => 'Rival Bali', 'destination' => 'Bali', 'price' => 0), // zero price -> omitted
+);
+$cap = customer_analysis_format_competitor_products($capRows);
+check('competitor format drops nameless rows', 2, count($cap));
+check('competitor format keeps name', 'Rival Japan 6D', $cap[0]['name']);
+check('competitor format keeps tour_code', 'RJ6', $cap[0]['tour_code']);
+check('competitor format keeps positive price', 5599.0, $cap[0]['price']);
+check('competitor format keeps currency with price', 'MYR', $cap[0]['currency']);
+check_true('competitor format omits zero price', ! isset($cap[1]['price']));
+check_true('competitor format omits empty currency (no price)', ! isset($cap[1]['currency']));
+
+// ---- customer_analysis_filter_products_by_destination -----------------------
+$pool = array(
+    array('name' => 'A', 'destination' => 'Japan'),
+    array('name' => 'B', 'destination' => 'Bali'),
+    array('name' => 'C', 'countries' => array('South Korea')),
+    array('name' => 'D', 'destination' => 'Vietnam'),
+);
+$hay = "Customer: looking for a japan trip\nAgent: sure\nCustomer: maybe korea too";
+$match = customer_analysis_filter_products_by_destination($pool, $hay);
+$matchNames = array_map(function ($p) { return $p['name']; }, $match);
+check_true('dest filter keeps mentioned destination (Japan)', in_array('A', $matchNames, true));
+check_true('dest filter keeps country match (Korea)', in_array('C', $matchNames, true));
+check_true('dest filter drops unmentioned (Bali)', ! in_array('B', $matchNames, true));
+check_true('dest filter drops unmentioned (Vietnam)', ! in_array('D', $matchNames, true));
+check('dest filter empty haystack -> none', array(), customer_analysis_filter_products_by_destination($pool, '   '));
+check('dest filter honours limit', 1, count(customer_analysis_filter_products_by_destination($pool, $hay, 1)));
+
+// ---- customer_analysis_competitor_block / faq_block -------------------------
+check('competitor block empty when no products', '', customer_analysis_competitor_block(array()));
+$cblk = customer_analysis_competitor_block(array(array('name' => 'Rival Japan 6D', 'destination' => 'Japan')));
+check_true('competitor block is labelled', strpos($cblk, 'COMPETITOR PRODUCTS') !== false);
+check_true('competitor block carries the rival name', strpos($cblk, 'Rival Japan 6D') !== false);
+check_true('competitor block warns never to recommend them', stripos($cblk, 'NEVER these') !== false);
+check('faq block empty when no corpus', '', customer_analysis_faq_block('   '));
+$fblk = customer_analysis_faq_block("[1] Deposit\nQ: How much deposit?\nA: 30% on booking.");
+check_true('faq block is labelled KNOWLEDGE BASE', strpos($fblk, 'KNOWLEDGE BASE') !== false);
+check_true('faq block carries the FAQ text', strpos($fblk, '30% on booking') !== false);
+
+// ---- references threaded into build_request ---------------------------------
+$refs = array(
+    'competitor_products' => array(array('name' => 'Rival Japan 6D', 'destination' => 'Japan', 'price' => 5599)),
+    'faq_corpus'          => "[1] Deposit\nQ: Deposit?\nA: 30% on booking.",
+);
+$reqRef = customer_analysis_build_request('Ali', 'Customer: japan please', array(array('name' => 'Our Japan 6D')), $refs);
+check_true('request includes OUR PRODUCTS block', strpos($reqRef['input'], 'OUR PRODUCTS') !== false);
+check_true('request includes COMPETITOR PRODUCTS block', strpos($reqRef['input'], 'COMPETITOR PRODUCTS') !== false);
+check_true('request includes KNOWLEDGE BASE block', strpos($reqRef['input'], 'KNOWLEDGE BASE') !== false);
+check_true('request carries rival name', strpos($reqRef['input'], 'Rival Japan 6D') !== false);
+check_true('request carries faq answer', strpos($reqRef['input'], '30% on booking') !== false);
+// No references given -> neither optional block appears.
+$reqBare = customer_analysis_build_request('Ali', 'Customer: hi', array(array('name' => 'Our Japan 6D')));
+check_true('no COMPETITOR block when none given', strpos($reqBare['input'], 'COMPETITOR PRODUCTS') === false);
+check_true('no KNOWLEDGE BASE block when none given', strpos($reqBare['input'], 'KNOWLEDGE BASE') === false);
+// Update request threads references too.
+$reqUpdRef = customer_analysis_build_update_request('Ali', array('summary' => 'x'), 'Customer: still keen', array(array('name' => 'Our Japan 6D')), $refs);
+check_true('update request includes COMPETITOR PRODUCTS block', strpos($reqUpdRef['input'], 'COMPETITOR PRODUCTS') !== false);
+check_true('update request includes KNOWLEDGE BASE block', strpos($reqUpdRef['input'], 'KNOWLEDGE BASE') !== false);
+
+// ---- field guidance grounds the approach in the references ------------------
+check_true('guidance tells model to use the KNOWLEDGE BASE', stripos($reqRef['instructions'], 'KNOWLEDGE BASE') !== false);
+check_true('guidance tells model to position vs COMPETITOR PRODUCTS', stripos($reqRef['instructions'], 'COMPETITOR PRODUCTS') !== false);
+check_true('guidance forbids recommending a competitor', stripos($reqRef['instructions'], 'NEVER recommend a competitor') !== false);
+
 echo "\n" . ($failures === 0 ? "ALL PASS\n" : "{$failures} FAILURE(S)\n");
 exit($failures === 0 ? 0 : 1);
