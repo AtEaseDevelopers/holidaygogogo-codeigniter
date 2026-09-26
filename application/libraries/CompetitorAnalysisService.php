@@ -72,6 +72,9 @@ class CompetitorAnalysisService
 	 *  — so a listing's numeric-id children (/tour-package/1077) are seen for the
 	 *  child-link listing test even though they fail competitor_is_product_url. */
 	protected $last_page_links_raw = array();
+	/** The last-read page's (possibly rendered) HTML — for classic ?page=N/rel=next
+	 *  pagination following in html_paginated_child_urls(). */
+	protected $last_page_html = '';
 
 	/** True when expand_source_items() dropped the last URL because it's a listing. */
 	protected $last_expand_was_listing = false;
@@ -301,7 +304,7 @@ class CompetitorAnalysisService
 			if ($rendered === '') {
 				continue;
 			}
-			foreach (competitor_filter_product_urls(competitor_extract_links($rendered, $hub), 0) as $p) {
+			foreach (competitor_filter_candidate_product_urls(competitor_extract_links($rendered, $hub), parse_url($hub, PHP_URL_HOST)) as $p) {
 				$found[$p] = true;
 			}
 		}
@@ -325,7 +328,7 @@ class CompetitorAnalysisService
 			return array();
 		}
 		$products = array();
-		foreach (competitor_filter_product_urls(competitor_extract_links($rendered, $base_url), 0) as $p) {
+		foreach (competitor_filter_candidate_product_urls(competitor_extract_links($rendered, $base_url), parse_url($base_url, PHP_URL_HOST)) as $p) {
 			$products[$p] = true;
 		}
 		// Opaque SPA: product links live only in the captured JSON APIs, not the DOM.
@@ -369,7 +372,7 @@ class CompetitorAnalysisService
 			if ($r === '') {
 				continue;
 			}
-			foreach (competitor_filter_product_urls(competitor_extract_links($r, $cat), 0) as $p) {
+			foreach (competitor_filter_candidate_product_urls(competitor_extract_links($r, $cat), parse_url($cat, PHP_URL_HOST)) as $p) {
 				$products[$p] = true;
 			}
 		}
@@ -979,6 +982,12 @@ class CompetitorAnalysisService
 					$this->last_page_links = array_values(array_unique(array_merge($this->last_page_links, $paged)));
 				}
 			}
+			// Classic HTML pagination (?page=2 / rel="next") — no JSON API needed. Cheap
+			// when the listing isn't paginated (next-page lookup returns '' at once).
+			$paged_html = $this->html_paginated_child_urls($url, $this->last_page_html);
+			if ( ! empty($paged_html)) {
+				$this->last_page_links = array_values(array_unique(array_merge($this->last_page_links, $paged_html)));
+			}
 			$this->log_crawl('dropped_listing', array('url' => $url,
 				'links' => count($this->last_page_links), 'child_links' => $child_links));
 			return array();
@@ -1192,9 +1201,51 @@ class CompetitorAnalysisService
 		return array();
 	}
 
+	/**
+	 * Enumerate product URLs behind a listing that paginates with CLASSIC HTML links
+	 * (?page=2, ?paged=2, /page/2/, or <link rel="next">) rather than a JSON API — the
+	 * companion to paginated_child_urls() (which needs a captured render XHR). Walks
+	 * next → next from the listing's HTML, fetching each page and collecting its
+	 * candidate product links, bounded by a page guard + a seen-set. Returns [] when
+	 * the listing isn't paginated (0 extra fetches — competitor_html_next_page returns
+	 * '' immediately). Never throws.
+	 */
+	protected function html_paginated_child_urls($listing_url, $html)
+	{
+		$host = parse_url($listing_url, PHP_URL_HOST);
+		$out  = array();
+		$seen = array($listing_url => true);
+		$cur_url  = $listing_url;
+		$cur_html = (string) $html;
+		$pages = 0;
+		$cap   = 30;   // page guard; the seen-set also stops loops
+		while ($cur_html !== '' && $pages < $cap) {
+			$next = competitor_html_next_page($cur_html, $cur_url);
+			if ($next === '' || isset($seen[$next]) || parse_url($next, PHP_URL_HOST) !== $host) {
+				break;
+			}
+			$seen[$next] = true;
+			$pages++;
+			$body = $this->fetch_url($next);
+			if ($body === '') {
+				break;
+			}
+			foreach (competitor_filter_candidate_product_urls(competitor_extract_links($body, $next), $host) as $p) {
+				$out[$p] = true;
+			}
+			$cur_url  = $next;
+			$cur_html = $body;
+		}
+		if ( ! empty($out)) {
+			$this->log_crawl('paginated_listing_html', array('listing' => $listing_url,
+				'pages' => $pages, 'urls' => count($out)));
+		}
+		return array_keys($out);
+	}
+
 	protected function page_links_from_html($html, $base)
 	{
-		$links = competitor_filter_product_urls(competitor_extract_links($html, $base), 0);
+		$links = competitor_filter_candidate_product_urls(competitor_extract_links($html, $base), parse_url($base, PHP_URL_HOST));
 		foreach (competitor_extract_file_links($html, $base) as $f) {
 			if (preg_match('#\.pdf(\?|$)#i', $f) && ! competitor_is_junk_file_url($f)) {
 				$links[] = $f;
@@ -1210,6 +1261,7 @@ class CompetitorAnalysisService
 		$this->last_page_title  = '';
 		$this->last_page_links  = array();
 		$this->last_page_links_raw = array();
+		$this->last_page_html   = '';   // don't carry a prior page's HTML into pagination
 		$this->last_render_apis = array();   // don't carry a prior page's captured APIs
 		$this->last_ice_web_url = '';
 		$html_thin = false;   // was the raw HTML a blank-shell SPA?
@@ -1303,6 +1355,38 @@ class CompetitorAnalysisService
 				}
 			}
 
+			// 1d1) A body PREFETCHED by the wide concurrent batch (curl_multi, HTTP/2
+			// multiplexed) can come back empty or TRUNCATED for a large SSR page — shared
+			// bandwidth + a per-request timeout — so it reads as thin here even though the
+			// page is fine when fetched on its own (verified: 300KB+ tour pages that failed
+			// the batch read in full sequentially). That thin body would otherwise trigger
+			// a slow, flaky headless render (or get dropped). Before paying for a render,
+			// retry ONE clean standalone fetch (fetch_url, with its own transient retry).
+			// Only for product-keyword pages that still need content — bounded and cheap,
+			// and typically FASTER than the render it replaces.
+			if ($prefetched !== null && competitor_needs_more_content($text)
+					&& competitor_path_has_product_keyword($url)
+					&& ! competitor_is_guide_url($url, $this->last_page_title)) {
+				$refetched = $this->fetch_url($url);
+				if ($refetched !== '') {
+					$rf_text = competitor_html_to_text($refetched, competitor_page_char_cap(get_env('COMPETITOR_MAX_PAGE_CHARS')));
+					$rf_ld   = competitor_jsonld_product_text($refetched);
+					if ($rf_ld !== '') {
+						$rf_text = "STRUCTURED PRODUCT DATA (schema.org):\n" . $rf_ld . "\n\n" . $rf_text;
+					}
+					if ( ! competitor_scrape_is_thin($rf_text) && mb_strlen($rf_text, 'UTF-8') > mb_strlen($text, 'UTF-8')) {
+						$this->log_crawl('clean_refetch_used', array('url' => $url, 'text_len' => strlen($rf_text)));
+						$text = $rf_text;
+						$html = $refetched;
+						$html_thin = false;
+						if ($this->last_page_title === '') {
+							$this->last_page_title = competitor_page_title($refetched);
+						}
+						$this->last_is_listing = competitor_looks_like_listing(competitor_jsonld_types($refetched));
+					}
+				}
+			}
+
 			// 1d2) We still don't have a full tour page — on a full JS SPA (e.g.
 			// chanbrothers) a product page is served as a shell whose itinerary loads via
 			// JS, so it MUST be browser-rendered to be kept. The render budget is precious
@@ -1359,6 +1443,9 @@ class CompetitorAnalysisService
 			// to reach the individual products of a category/listing page.
 			$this->last_page_links = $this->page_links_from_html($html, $url);
 			$this->last_page_links_raw = competitor_extract_links($html, $url);
+			// Keep the (possibly rendered) HTML so a listing can be walked for classic
+			// ?page=2 / rel="next" pagination in expand_source_items().
+			$this->last_page_html = $html;
 		}
 
 		// 2) Read any linked brochure/itinerary PDFs (the "View File" links) and
@@ -1839,6 +1926,17 @@ class CompetitorAnalysisService
 		$this->log_crawl('reading_config', array('source' => $this->last_discovery_source,
 			'allow_headless' => $this->reading_allow_headless, 'products' => count($urls)));
 
+		// Pace the read to the host's advertised robots.txt Crawl-delay. A throttling
+		// host (lovelyvacation.com.my sets Crawl-delay: 1) returns empty/429 bodies to a
+		// wide burst; those pages then read as thin, fall to a slow headless render that
+		// ALSO fails under the load, and the product is dropped. Pacing (a narrower batch
+		// + a delay between batches) keeps plain fetches succeeding. 0 = no hint → full speed.
+		$parts  = parse_url($base_url);
+		$origin = ( ! empty($parts['scheme']) && ! empty($parts['host']))
+			? $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '')
+			: $base_url;
+		$crawl_delay = competitor_robots_crawl_delay($this->fetch_url($origin . '/robots.txt'));
+
 		// Site-wide nav/menu links (from the homepage) — excluded when drilling a
 		// listing so its destination menu (e.g. wtstravel's 57 "…-tours" categories)
 		// isn't mistaken for the listing's own products.
@@ -1868,9 +1966,12 @@ class CompetitorAnalysisService
 		$visited = array();
 		foreach ($queue as $u) { $visited[$u] = true; }
 		$drill_cap = (int) get_env('COMPETITOR_DRILL_MAX');
-		$drill_cap = $drill_cap > 0 ? $drill_cap : 150;
+		$drill_cap = $drill_cap > 0 ? $drill_cap : 300;
 		$drilled = 0;
-		$batch_size = 8;
+		$drill_skipped = 0;   // fresh child products dropped because the cap was hit
+		// Narrow the batch on a self-throttling host so the burst doesn't trip its limit.
+		$batch_size = $crawl_delay > 0 ? 3 : 8;
+		$this->log_crawl('reading_pace', array('crawl_delay' => $crawl_delay, 'batch_size' => $batch_size));
 		while ( ! empty($queue)) {
 			$batch  = array_splice($queue, 0, $batch_size);
 			$tick('reading', $i, count($visited), $batch[0]);
@@ -1883,28 +1984,77 @@ class CompetitorAnalysisService
 					$out[] = $it;
 				}
 				// Listing drill-down: queue the page's individual products (minus nav).
-				if ($this->last_expand_was_listing && $drilled < $drill_cap) {
+				if ($this->last_expand_was_listing) {
 					$fresh = array_diff($this->last_page_links, $this->nav_links);
-					if (count($fresh) < 3) {
+					if (count($fresh) < 3 && $drilled < $drill_cap) {
 						// Products are JS-injected — render the listing to expose them.
+						// Skip the (costly) render once the cap is hit — we can't queue more.
 						$r = $this->fetch_rendered($purl);
 						if ($r !== '') {
 							$fresh = array_diff($this->page_links_from_html($r, $purl), $this->nav_links);
 						}
 					}
 					foreach ($fresh as $link) {
-						if ( ! isset($visited[$link]) && $drilled < $drill_cap) {
-							$visited[$link] = true;
-							$queue[] = $link;
-							$drilled++;
+						if (isset($visited[$link])) {
+							continue;
 						}
+						if ($drilled >= $drill_cap) {
+							$drill_skipped++;   // count what the cap dropped — no silent truncation
+							continue;
+						}
+						$visited[$link] = true;
+						$queue[] = $link;
+						$drilled++;
 					}
 				}
 				$tick('reading', ++$i, count($visited), $purl);
 			}
+			// Respect the host's Crawl-delay between batches so we don't get throttled.
+			if ($crawl_delay > 0 && ! empty($queue)) {
+				usleep((int) ($crawl_delay * 1000000));
+			}
 		}
-		if ($drilled > 0) {
-			$this->log_crawl('listing_drill', array('drilled' => $drilled, 'total_read' => count($visited)));
+		if ($drilled > 0 || $drill_skipped > 0) {
+			$entry = array('drilled' => $drilled, 'total_read' => count($visited));
+			if ($drill_skipped > 0) {
+				// Coverage was bounded — surface it (raise COMPETITOR_DRILL_MAX to go deeper).
+				$entry['cap'] = $drill_cap;
+				$entry['skipped_at_cap'] = $drill_skipped;
+			}
+			$this->log_crawl('listing_drill', $entry);
+		}
+
+		// RECOVERY PASS: a real product can be dropped by a purely transient blip during
+		// the wide read — an empty/throttled body that then reads as thin and fails the
+		// gate — even though the page is perfectly readable on its own. Re-read every
+		// DISCOVERED product-looking URL that's missing from the result ONE AT A TIME (no
+		// concurrency, paced to Crawl-delay, headless OFF so a catalogue/hub re-drops fast
+		// instead of paying for a render). Makes coverage robust to network noise.
+		$kept_urls = array();
+		foreach ($out as $it) { $kept_urls[$it['url']] = true; }
+		$recover = array();
+		foreach ($urls as $u) {
+			if (isset($kept_urls[$u])) { continue; }
+			if (competitor_path_has_product_keyword($u) && ! competitor_is_guide_url($u)) {
+				$recover[$u] = true;
+			}
+		}
+		if ( ! empty($recover)) {
+			$prev_allow_headless = $this->reading_allow_headless;
+			$this->reading_allow_headless = false;   // clean plain re-read only — no render load
+			$recovered = 0;
+			foreach (array_keys($recover) as $ru) {
+				if ($crawl_delay > 0) { usleep((int) ($crawl_delay * 1000000)); }
+				foreach ($this->expand_source_items($ru, null) as $it) {
+					if ( ! isset($kept_urls[$it['url']])) {
+						$out[] = $it;
+						$kept_urls[$it['url']] = true;
+						$recovered++;
+					}
+				}
+			}
+			$this->reading_allow_headless = $prev_allow_headless;
+			$this->log_crawl('recovery_pass', array('attempted' => count($recover), 'recovered' => $recovered));
 		}
 		// Strip site chrome (mega-menu / header / footer) that repeats verbatim across
 		// every product — our tag scraper misses it when it's plain <div>/<ul>. Fixes
@@ -2050,26 +2200,38 @@ class CompetitorAnalysisService
 	 */
 	protected function fetch_url($url)
 	{
-		// Retry once on a TRANSIENT failure (timeout / connection reset / 5xx / 429).
-		// A large SSR page on a rate-limited host (e.g. Crawl-delay:1) intermittently
-		// times out under concurrent load and returns ''; without a retry that empty
-		// body falls straight through to a full headless render that ALSO times out
-		// (~25s) and still yields nothing, so the product is silently dropped. A cheap
-		// re-fetch recovers it far faster than the render path. 4xx (except 429) is a
-		// hard "no page" and is NOT retried.
-		$attempts = 2;
+		// Retry on a TRANSIENT failure: timeout / connection reset / 5xx / 429, AND — the
+		// subtle one — a 200 with an EMPTY body. Across a crawl the shared, HTTP/2-
+		// multiplexed connection gets closed by the server (a GOAWAY after N streams) or
+		// otherwise poisoned, so a request on it comes back "200 + 0 bytes". Treating that
+		// as success (the old code did) means the page reads as thin → a slow headless
+		// render fires, also fails under the load, and a perfectly readable product is
+		// dropped. So an empty 200 is retried too — and the RETRY uses a FRESH, NON-
+		// multiplexed connection (CURLOPT_FRESH_CONNECT, no CURLOPT_SHARE, forced HTTP/1.1)
+		// so it can't reuse the poisoned pooled connection. Adds NO load to healthy
+		// fetches (only failures retry). 4xx (except 429) is a hard "no page", not retried.
+		$attempts = 3;
 		for ($i = 0; $i < $attempts; $i++) {
-			$ch = curl_init();
-			curl_setopt_array($ch, $this->curl_opts($url));
+			$ch   = curl_init();
+			$opts = $this->curl_opts($url);
+			if ($i > 0) {
+				$opts[CURLOPT_FRESH_CONNECT] = true;
+				$opts[CURLOPT_FORBID_REUSE]  = true;
+				unset($opts[CURLOPT_SHARE]);   // don't reuse the poisoned shared pool
+				$opts[CURLOPT_HTTP_VERSION]  = defined('CURL_HTTP_VERSION_1_1')
+					? CURL_HTTP_VERSION_1_1 : $opts[CURLOPT_HTTP_VERSION];   // avoid h2 multiplexing
+			}
+			curl_setopt_array($ch, $opts);
 			$body  = curl_exec($ch);
 			$errno = curl_errno($ch);
 			$code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 			curl_close($ch);
 
-			if ( ! $errno && $code < 400 && is_string($body)) {
-				return $body;
+			if ( ! $errno && $code >= 200 && $code < 400 && is_string($body) && $body !== '') {
+				return $body;   // real, non-empty success
 			}
-			$transient = ($errno || $code >= 500 || $code === 429);
+			// Retry transient failures + an empty-body 2xx/3xx; give up on a hard 4xx.
+			$transient = ($errno || $code >= 500 || $code === 429 || ($code >= 200 && $code < 400));
 			if ( ! $transient || $i === $attempts - 1) {
 				break;
 			}

@@ -1670,6 +1670,32 @@ if ( ! function_exists('competitor_robots_sitemaps'))
 	}
 }
 
+if ( ! function_exists('competitor_robots_crawl_delay'))
+{
+	/**
+	 * The Crawl-delay (seconds) a robots.txt requests for our crawler — the largest
+	 * value in a group applying to `*` or a generic bot line. A host that sets this
+	 * (e.g. Crawl-delay: 1) throttles bursts, so the reader paces itself to avoid the
+	 * empty/429 responses that would drop products. Returns 0.0 when none/invalid.
+	 * Simple + permissive: scans every `Crawl-delay:` line (any group) and takes the
+	 * max, so we never crawl FASTER than the strictest hint. Capped at 10s. Pure.
+	 */
+	function competitor_robots_crawl_delay($txt)
+	{
+		if ( ! is_string($txt) || $txt === '') {
+			return 0.0;
+		}
+		$max = 0.0;
+		if (preg_match_all('#^\s*crawl-delay\s*:\s*([0-9]+(?:\.[0-9]+)?)#im', $txt, $m)) {
+			foreach ($m[1] as $v) {
+				$f = (float) $v;
+				if ($f > $max) { $max = $f; }
+			}
+		}
+		return ($max > 10.0) ? 10.0 : $max;
+	}
+}
+
 if ( ! function_exists('competitor_parse_sitemap'))
 {
 	/**
@@ -1719,6 +1745,116 @@ if ( ! function_exists('competitor_filter_product_urls'))
 			}
 		}
 		return array_keys($out);
+	}
+}
+
+if ( ! function_exists('competitor_filter_candidate_product_urls'))
+{
+	/**
+	 * LENIENT counterpart to competitor_filter_product_urls, for the listing DRILL
+	 * and headless discovery: keep every same-host CANDIDATE page (competitor_is_
+	 * candidate_url) that isn't a travel guide — so numeric-ID (/group-tour/274) and
+	 * keyword-less product URLs survive, which the strict product-URL heuristic drops.
+	 * Safe because these links go to the READING phase, where the tour-page gate in
+	 * expand_source_items() drops any listing/article/non-tour. Deduped, order-kept.
+	 */
+	function competitor_filter_candidate_product_urls($urls, $base_host = '')
+	{
+		$out = array();
+		foreach ((array) $urls as $u) {
+			$u = trim((string) $u);
+			if ($u === '' || isset($out[$u])) {
+				continue;
+			}
+			if (competitor_is_candidate_url($u, $base_host) && ! competitor_is_guide_url($u)) {
+				$out[$u] = true;
+			}
+		}
+		return array_keys($out);
+	}
+}
+
+if ( ! function_exists('competitor_pagination_base_path'))
+{
+	/**
+	 * The page-agnostic path of a (possibly paginated) listing URL: lower-cased path
+	 * with any /page/<n>/ segment removed and trailing slash trimmed. Two URLs that
+	 * differ only by their page number share a base path — used to keep pagination
+	 * following on the SAME listing (not jump to another section's page 2). Pure.
+	 */
+	function competitor_pagination_base_path($url)
+	{
+		$path = strtolower((string) parse_url((string) $url, PHP_URL_PATH));
+		$path = preg_replace('#/page/\d+/?#i', '/', $path);
+		return rtrim($path, '/');
+	}
+}
+
+if ( ! function_exists('competitor_page_number'))
+{
+	/**
+	 * The current pagination page number of a listing URL — from ?page=N / ?paged=N
+	 * (WordPress) or a /page/N/ path segment. Returns 1 when none is present. Pure.
+	 */
+	function competitor_page_number($url)
+	{
+		$u = (string) $url;
+		$q = parse_url($u, PHP_URL_QUERY);
+		if (is_string($q) && $q !== '') {
+			parse_str($q, $qs);
+			foreach (array('page', 'paged') as $k) {
+				if (isset($qs[$k]) && ctype_digit((string) $qs[$k])) {
+					return max(1, (int) $qs[$k]);
+				}
+			}
+		}
+		$path = (string) parse_url($u, PHP_URL_PATH);
+		if (preg_match('#/page/(\d+)#i', $path, $m)) {
+			return max(1, (int) $m[1]);
+		}
+		return 1;
+	}
+}
+
+if ( ! function_exists('competitor_html_next_page'))
+{
+	/**
+	 * The absolute URL of the NEXT page of a paginated listing, or '' if there isn't
+	 * one. Reads an explicit <link rel="next"> / <a rel="next"> first; failing that,
+	 * scans the pagination bar for a same-listing link whose page number is exactly
+	 * current+1 (so a numbered 1|2|3 bar is walked one page at a time). Pure — the
+	 * fetch of the returned URL lives in the service. Never throws.
+	 */
+	function competitor_html_next_page($html, $url)
+	{
+		if ( ! is_string($html) || $html === '') {
+			return '';
+		}
+		// 1) Explicit rel="next" on a <link> or <a>.
+		if (preg_match_all('#<(?:link|a)\b[^>]*>#i', $html, $tags)) {
+			foreach ($tags[0] as $tag) {
+				if (preg_match('#\brel\s*=\s*(["\'])\s*(?:[^"\']*\s)?next(?:\s[^"\']*)?\s*\1#i', $tag)
+					&& preg_match('#\bhref\s*=\s*(["\'])(.*?)\1#i', $tag, $h)) {
+					$abs = competitor_resolve_url($url, html_entity_decode($h[2], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+					if ($abs !== '') {
+						return $abs;
+					}
+				}
+			}
+		}
+		// 2) Numbered pagination: a same-listing link to (current page + 1).
+		$want = competitor_page_number($url) + 1;
+		$host = parse_url($url, PHP_URL_HOST);
+		$base = competitor_pagination_base_path($url);
+		foreach (competitor_extract_links($html, $url) as $link) {
+			if (parse_url($link, PHP_URL_HOST) !== $host) {
+				continue;
+			}
+			if (competitor_page_number($link) === $want && competitor_pagination_base_path($link) === $base) {
+				return $link;
+			}
+		}
+		return '';
 	}
 }
 

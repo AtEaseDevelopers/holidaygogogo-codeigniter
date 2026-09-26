@@ -962,6 +962,49 @@ check_true('candidate: destination not caught by /book (Bookham)',
 // A real destination that merely contains "hel"/"support" letters is NOT excluded.
 check_true('candidate: Helsinki tour not caught by /help',
     competitor_is_candidate_url('https://comp.com/tours/helsinki-5d4n', 'comp.com'));
+
+// ---- competitor_filter_candidate_product_urls (lenient drill/headless filter) ----
+check('lenient filter: numeric-id + slug kept, guide/chrome/off-host dropped',
+    array('https://comp.com/group-tour/274', 'https://comp.com/group-tour/bali-5d4n'),
+    competitor_filter_candidate_product_urls(array(
+        'https://comp.com/group-tour/274',
+        'https://comp.com/group-tour/bali-5d4n',
+        'https://comp.com/travel-guide/how-to-plan-a-trip.htm',
+        'https://comp.com/about-us',
+        'https://other.com/group-tour/999',
+    ), 'comp.com'));
+check('lenient filter: dedups + preserves order', array('https://comp.com/tours/a'),
+    competitor_filter_candidate_product_urls(array('https://comp.com/tours/a', 'https://comp.com/tours/a'), 'comp.com'));
+
+// ---- competitor_page_number ----
+check('page_number: ?page=3', 3, competitor_page_number('https://c.com/tours?page=3'));
+check('page_number: ?paged=5 (WordPress)', 5, competitor_page_number('https://c.com/tours?paged=5'));
+check('page_number: /page/2/ segment', 2, competitor_page_number('https://c.com/tours/page/2/'));
+check('page_number: none defaults to 1', 1, competitor_page_number('https://c.com/tours'));
+check('page_number: query+other params', 4, competitor_page_number('https://c.com/tours?cat=asia&page=4'));
+
+// ---- competitor_html_next_page ----
+check('next_page: <link rel=next>', 'https://c.com/tours?page=2',
+    competitor_html_next_page('<link rel="next" href="/tours?page=2">', 'https://c.com/tours'));
+check('next_page: <a rel="next">', 'https://c.com/tours/page/3/',
+    competitor_html_next_page('<a rel="next" href="/tours/page/3/">Next</a>', 'https://c.com/tours/page/2/'));
+check('next_page: numbered bar picks current+1', 'https://c.com/tours?page=2',
+    competitor_html_next_page(
+        '<a href="/tours?page=1">1</a><a href="/tours?page=2">2</a><a href="/tours?page=3">3</a>',
+        'https://c.com/tours?page=1'));
+check('next_page: none present -> empty', '',
+    competitor_html_next_page('<a href="/tours/bali-5d4n">Bali</a>', 'https://c.com/tours'));
+check('next_page: different section page-2 not followed', '',
+    competitor_html_next_page('<a href="/cruises?page=2">Cruises 2</a>', 'https://c.com/tours'));
+
+// ---- competitor_robots_crawl_delay ----
+check('crawl_delay: reads Crawl-delay:1', 1.0,
+    competitor_robots_crawl_delay("User-agent: *\nAllow: /\nCrawl-delay: 1"));
+check('crawl_delay: takes the max across groups', 2.0,
+    competitor_robots_crawl_delay("User-agent: *\nCrawl-delay: 1\n\nUser-agent: Googlebot\nCrawl-delay: 2"));
+check('crawl_delay: none -> 0.0', 0.0, competitor_robots_crawl_delay("User-agent: *\nAllow: /"));
+check('crawl_delay: capped at 10', 10.0, competitor_robots_crawl_delay("Crawl-delay: 3600"));
+check('crawl_delay: empty -> 0.0', 0.0, competitor_robots_crawl_delay(''));
 check_true('candidate: no base_host given still accepts a content page',
     competitor_is_candidate_url('https://comp.com/x/y'));
 
