@@ -2050,17 +2050,32 @@ class CompetitorAnalysisService
 	 */
 	protected function fetch_url($url)
 	{
-		$ch = curl_init();
-		curl_setopt_array($ch, $this->curl_opts($url));
-		$body  = curl_exec($ch);
-		$errno = curl_errno($ch);
-		$code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
+		// Retry once on a TRANSIENT failure (timeout / connection reset / 5xx / 429).
+		// A large SSR page on a rate-limited host (e.g. Crawl-delay:1) intermittently
+		// times out under concurrent load and returns ''; without a retry that empty
+		// body falls straight through to a full headless render that ALSO times out
+		// (~25s) and still yields nothing, so the product is silently dropped. A cheap
+		// re-fetch recovers it far faster than the render path. 4xx (except 429) is a
+		// hard "no page" and is NOT retried.
+		$attempts = 2;
+		for ($i = 0; $i < $attempts; $i++) {
+			$ch = curl_init();
+			curl_setopt_array($ch, $this->curl_opts($url));
+			$body  = curl_exec($ch);
+			$errno = curl_errno($ch);
+			$code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			curl_close($ch);
 
-		if ($errno || $code >= 400 || ! is_string($body)) {
-			return '';
+			if ( ! $errno && $code < 400 && is_string($body)) {
+				return $body;
+			}
+			$transient = ($errno || $code >= 500 || $code === 429);
+			if ( ! $transient || $i === $attempts - 1) {
+				break;
+			}
+			usleep(500000);   // 0.5s back-off, also eases the host's crawl-delay
 		}
-		return $body;
+		return '';
 	}
 
 	/**

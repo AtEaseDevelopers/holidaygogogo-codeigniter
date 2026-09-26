@@ -1219,7 +1219,12 @@ if ( ! function_exists('competitor_is_candidate_url'))
 			'/jobs', '/sitemap', '/wishlist', '/terms', '/search', '/tag/', '/tags/',
 			'/author/', '/feed', '/wp-admin', '/wp-login', '/wp-json',
 			// customer-support chrome (help centre / customer service) — not tours
-			'/support', '/help', '/customer');
+			'/support', '/help', '/customer',
+			// enquiry / booking / quote CTA forms — one query-string permutation per
+			// departure date (?tourCode=…&departureDate=…), never a product page. Left
+			// in, the sweep drowns in 100+ near-identical thin form pages (each also
+			// risks a wasted headless render). Observed on lovelyvacation.com.my.
+			'/enquiry', '/enquire', '/booking', '/book-now', '/quote');
 		foreach ($chrome as $c) {
 			if (strpos($p, $c) !== false) {
 				return false;

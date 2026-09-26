@@ -945,6 +945,20 @@ check('candidate false: help centre', false,
     competitor_is_candidate_url('https://comp.com/help/booking', 'comp.com'));
 check('candidate false: customer service', false,
     competitor_is_candidate_url('https://comp.com/customer-service', 'comp.com'));
+// Enquiry / booking / quote CTA forms are per-departure permutations, never a
+// product page — exclude so the sweep doesn't drown in ?tourCode=…&departureDate=…
+// query-string variants (observed on lovelyvacation.com.my: 100+ enquiry URLs).
+check('candidate false: enquiry CTA form', false,
+    competitor_is_candidate_url('https://comp.com/enquiry?tourName=X&departureDate=2027', 'comp.com'));
+check('candidate false: enquire CTA form', false,
+    competitor_is_candidate_url('https://comp.com/enquire?tour=X', 'comp.com'));
+check('candidate false: booking form', false,
+    competitor_is_candidate_url('https://comp.com/booking?code=X', 'comp.com'));
+check('candidate false: book-now form', false,
+    competitor_is_candidate_url('https://comp.com/book-now?code=X', 'comp.com'));
+// A real destination whose slug merely contains "book"/"enquiry" letters stays in.
+check_true('candidate: destination not caught by /book (Bookham)',
+    competitor_is_candidate_url('https://comp.com/tours/great-bookham-5d4n', 'comp.com'));
 // A real destination that merely contains "hel"/"support" letters is NOT excluded.
 check_true('candidate: Helsinki tour not caught by /help',
     competitor_is_candidate_url('https://comp.com/tours/helsinki-5d4n', 'comp.com'));
