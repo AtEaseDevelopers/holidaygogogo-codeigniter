@@ -77,6 +77,31 @@ class Faq_Suggestion extends MY_Controller
 		$this->load->view('layout/footer');
 	}
 
+	// Ajax: return the exact text sent to the AI for one run (the transcript),
+	// loaded on demand by the "AI Input" modal on the runs listing so the grid
+	// query never has to carry the (large) transcript for every row.
+	function Input()
+	{
+		if (function_exists('session_write_close')) {
+			@session_write_close();
+		}
+		$this->output->set_content_type('application/json');
+		if (!$this->Can_View()) {
+			echo json_encode(array('ok' => false, 'input' => ''));
+			return;
+		}
+		$run = $this->Faq_Suggestion_Model->Read_Run((int) $this->input->get('id'));
+		if ($run === null) {
+			echo json_encode(array('ok' => false, 'input' => ''));
+			return;
+		}
+		echo json_encode(array(
+			'ok'    => true,
+			'scope' => (string) $run->Scope,
+			'input' => (string) $run->InputText,
+		));
+	}
+
 	function Update()
 	{
 		if (!$this->Can_Edit()) {
@@ -573,6 +598,8 @@ class Faq_Suggestion extends MY_Controller
 				'RunID'        => (int) $r->RunID,
 				'RunState'     => $state,
 				'Source'       => strtolower((string) $r->Source),
+				'FileName'     => (string) $r->FileName,
+				'HasInput'     => !empty($r->HasInput),
 				'Created'      => (int) $r->Created,
 				'Proposed'     => (int) $r->Proposed,
 				'PendingCount' => (int) $r->PendingCount,

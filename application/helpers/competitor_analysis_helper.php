@@ -432,7 +432,19 @@ if ( ! function_exists('competitor_scrape_is_thin'))
 	 */
 	function competitor_scrape_is_thin($text, $min_chars = 500)
 	{
-		return mb_strlen(trim((string) $text), 'UTF-8') < (int) $min_chars;
+		$text = trim((string) $text);
+		// CJK (Chinese / Japanese kana+kanji / Korean) is information-dense — one
+		// character carries roughly what two Latin characters do — so an English-
+		// calibrated 500-char floor wrongly drops a complete 中文 itinerary as "thin".
+		// Count each CJK character DOUBLE toward the effective length, so the floor
+		// means the same amount of CONTENT regardless of script; a blank SPA shell /
+		// "加载中" spinner is still far under it. Latin-only text is unaffected. Pure.
+		$len = mb_strlen($text, 'UTF-8');
+		if ($len >= (int) $min_chars) {
+			return false;   // already clears the floor — skip the CJK scan (the common Latin case)
+		}
+		$cjk = preg_match_all('/[\x{3040}-\x{30ff}\x{3400}-\x{4dbf}\x{4e00}-\x{9fff}\x{f900}-\x{faff}\x{ac00}-\x{d7af}]/u', $text);
+		return ($len + $cjk) < (int) $min_chars;
 	}
 }
 
@@ -669,6 +681,21 @@ if ( ! function_exists('competitor_jsonld_types'))
 	}
 }
 
+if ( ! function_exists('competitor_product_jsonld_types'))
+{
+	/**
+	 * The schema.org @types (lowercased) that mark a page as a single bookable tour
+	 * PRODUCT — the one shared whitelist used by both competitor_jsonld_is_product()
+	 * (the positive keep-signal) and competitor_looks_like_listing() (which treats any
+	 * of these as "not a listing"). Kept in one place so the two can't drift. Pure.
+	 */
+	function competitor_product_jsonld_types()
+	{
+		return array('product', 'trip', 'touristtrip', 'touristattraction',
+			'touristdestination', 'offer', 'aggregateoffer', 'tourpackage');
+	}
+}
+
 if ( ! function_exists('competitor_looks_like_listing'))
 {
 	/**
@@ -683,8 +710,9 @@ if ( ! function_exists('competitor_looks_like_listing'))
 			return false;   // no evidence → don't drop
 		}
 		$listing = array('itemlist', 'collectionpage', 'searchresultspage', 'offercatalog');
-		$product = array('product', 'trip', 'touristtrip', 'touristattraction',
-			'touristdestination', 'offer', 'aggregateoffer', 'event', 'tourpackage');
+		// 'event' counts as a product here (an Event page isn't a listing) but NOT as a
+		// bookable-tour signal in competitor_jsonld_is_product — hence the +event only here.
+		$product = array_merge(competitor_product_jsonld_types(), array('event'));
 		$has_listing = (bool) array_intersect($types, $listing);
 		$has_product = (bool) array_intersect($types, $product);
 		return $has_listing && ! $has_product;
@@ -709,8 +737,11 @@ if ( ! function_exists('competitor_text_looks_like_listing'))
 		if ( ! is_string($text) || $text === '') {
 			return false;
 		}
-		// Several separate itineraries on one page (each product restarts at "Day 1").
-		return preg_match_all('/\bday\s*0?1\b/iu', $text) >= $min_itineraries;
+		// Several separate itineraries on one page (each product restarts at day 1) —
+		// language-neutral: "Day 1" / "Hari 1" / 第1天.
+		$count = preg_match_all('/\b(?:day|hari)\s*0?1\b/iu', $text)
+			+ preg_match_all('/第\s*(?:1|一)\s*[天日]/u', $text);
+		return $count >= $min_itineraries;
 	}
 }
 
@@ -729,14 +760,15 @@ if ( ! function_exists('competitor_count_tour_cards'))
 		}
 		// Duration token + the name that follows, stopping at the next digit so a card
 		// never swallows the following card's duration (which would merge two into one).
-		if ( ! preg_match_all('/\b\d{1,2}\s*d\s*\d{1,2}\s*n\b[^\d\r\n]{0,40}/iu', $text, $m)) {
+		// Language-neutral: English "4D3N …" and Chinese "5天4夜…".
+		if ( ! preg_match_all('/(?:\b\d{1,2}\s*d\s*\d{1,2}\s*n\b|\d{1,2}\s*天\s*\d{1,2}\s*[夜晚])[^\d\r\n]{0,40}/iu', $text, $m)) {
 			return 0;
 		}
 		$seen = array();
 		foreach ($m[0] as $frag) {
-			// Normalise: lowercase, strip non-alphanumerics, keep duration + name head so
+			// Normalise: lowercase, strip separators (keep letters incl. CJK + digits) so
 			// the SAME tour repeated collapses while distinct tours stay separate.
-			$key = preg_replace('/[^a-z0-9]+/u', '', mb_strtolower($frag, 'UTF-8'));
+			$key = preg_replace('/[^\p{L}\p{N}]+/u', '', mb_strtolower($frag, 'UTF-8'));
 			if ($key !== '') {
 				$seen[$key] = true;
 			}
@@ -792,14 +824,15 @@ if ( ! function_exists('competitor_has_product_signal'))
 		if ( ! is_string($text) || $text === '') {
 			return false;
 		}
-		return (bool) (
-			preg_match('/(?:rm|myr|sgd|usd|eur|php|idr|thb|aud|\$|£|€)\s*[0-9][0-9,]{2,}/iu', $text)   // price
-			|| preg_match('/\b\d{1,2}\s*d\s*\d{1,2}\s*n\b/i', $text)                                    // 5D4N
-			|| preg_match('/\b\d{1,2}\s*(?:days?|nights?)\b/i', $text)                                  // "8 days"
-			|| preg_match('/\bday\s*0?1\b/i', $text)                                                     // itinerary
-			|| preg_match('/\b(?:inclusion|exclusion|itinerary|twin\s+share|half\s+board|full\s+board)\b/i', $text)
-			|| stripos($text, 'STRUCTURED PRODUCT DATA') !== false
-		);
+		// Language-neutral product signals via the shared primitives (EN / 中文 / Malay),
+		// so this agrees with the tour gate — a long CN/BM tour page isn't mistaken for a
+		// prose article just because its price/duration/itinerary aren't in English.
+		return competitor_has_price($text)
+			|| competitor_has_duration($text)
+			|| competitor_day_marker_count($text) >= 1
+			|| competitor_has_inclusions($text)
+			|| (bool) preg_match('/\b(?:exclusion|itinerary|twin\s+share|half\s+board|full\s+board)\b/i', $text)
+			|| stripos($text, 'STRUCTURED PRODUCT DATA') !== false;
 	}
 }
 
@@ -822,6 +855,119 @@ if ( ! function_exists('competitor_looks_like_article'))
 	}
 }
 
+if ( ! function_exists('competitor_day_marker_count'))
+{
+	/**
+	 * Count the DISTINCT day-by-day itinerary markers in $text, LANGUAGE-NEUTRAL —
+	 * the linchpin of the tour gate. Recognises English/Malay "Day 1" / "Hari 1"
+	 * (also padded "Day 01", "Hari ke-1"), and Chinese "第1天 / 第1日" with either
+	 * Arabic digits or Chinese numerals ("第一天"). A day repeated (header, breadcrumb)
+	 * collapses to one, so "Day 1 … Day 1 …" counts as 1, while "Day 1 … Day 2 …"
+	 * counts as 2. Pure — no network. Returns 0 when there are no markers.
+	 */
+	function competitor_day_marker_count($text)
+	{
+		if ( ! is_string($text) || $text === '') {
+			return 0;
+		}
+		$seen = array();
+		// English / Malay: "day 1", "day 01", "hari 1", "hari ke-1".
+		if (preg_match_all('/\b(?:day|hari)\s*(?:ke-?\s*)?0?([1-9][0-9]?)\b/iu', $text, $m)) {
+			foreach ($m[1] as $n) { $seen['n' . intval($n)] = true; }
+		}
+		// Chinese: 第1天 / 第1日 (Arabic) or 第一天 (Chinese numerals 一..十九).
+		if (preg_match_all('/第\s*([0-9]{1,2}|[一二三四五六七八九十]{1,3})\s*[天日]/u', $text, $m)) {
+			foreach ($m[1] as $tok) {
+				$key = preg_match('/^[0-9]+$/', $tok) ? 'n' . intval($tok) : 'c' . $tok;
+				$seen[$key] = true;
+			}
+		}
+		return count($seen);
+	}
+}
+
+if ( ! function_exists('competitor_has_duration'))
+{
+	/**
+	 * True when $text advertises a trip DURATION, language-neutral: "5D4N", "7 days",
+	 * "3 nights" (English), "5天4夜" / "6天5晚" / bare "5天" (Chinese), "5 Hari 4 Malam"
+	 * (Malay). A strong bookable-tour signal a travel article rarely carries. Pure.
+	 */
+	function competitor_has_duration($text)
+	{
+		if ( ! is_string($text) || $text === '') {
+			return false;
+		}
+		return (bool) preg_match('/\b\d{1,2}\s*d\s*\d{1,2}\s*n\b/i', $text)          // 5D4N
+			|| (bool) preg_match('/\b\d{1,2}\s*(?:days?|nights?)\b/i', $text)         // 7 days / 3 nights
+			|| (bool) preg_match('/\d{1,2}\s*(?:hari|malam)\b/iu', $text)             // 5 Hari 4 Malam
+			// 5天4夜 / 6天5晚 — require the nights half so a bare "第1天" day marker isn't
+			// misread as a duration (which would keep any lone-day-marker page).
+			|| (bool) preg_match('/\d{1,2}\s*天\s*\d{1,2}\s*[夜晚]/u', $text);
+	}
+}
+
+if ( ! function_exists('competitor_has_price'))
+{
+	/**
+	 * True when $text shows a real price, language-neutral: a currency prefix
+	 * (RM/MYR/SGD/USD/S$/$/£/€…) before a number, or a Chinese-market form —
+	 * "人民币3,999", "3999元", "¥3999". Requires 3+ digits so a stray "$5" or a year
+	 * isn't taken for a package price. Pure.
+	 */
+	function competitor_has_price($text)
+	{
+		if ( ! is_string($text) || $text === '') {
+			return false;
+		}
+		return (bool) preg_match('/(?:rm|myr|sgd|usd|php|thb|idr|aud|eur|s\$|\$|£|€|¥|人民币)\s*[0-9][0-9,]{2,}/iu', $text)
+			|| (bool) preg_match('/[0-9][0-9,]{2,}\s*元/u', $text);   // 3999元
+	}
+}
+
+if ( ! function_exists('competitor_has_inclusions'))
+{
+	/**
+	 * True when $text has an inclusions section ("what the price covers"),
+	 * language-neutral: English "inclusions" / "price includes" / "what's included",
+	 * Chinese "费用包含" / "包含" / "包括", Malay "termasuk" / "harga termasuk". Pure.
+	 */
+	function competitor_has_inclusions($text)
+	{
+		if ( ! is_string($text) || $text === '') {
+			return false;
+		}
+		return (bool) preg_match(
+			'/\binclusions?\b'
+			. '|\b(?:price|package|tour|trip|fare|cost|holiday)\s+includes?\b'
+			. '|\bwhat\'?s\s+included\b'
+			. '|\bincludes?\s*:'
+			. '|\bincluded\s+in\s+(?:the\s+)?(?:price|tour|package|fare|cost)\b/iu',
+			$text
+		)
+			|| (bool) preg_match('/费用\s*包[含括]|\b包[含括]\s*[:：]|报价\s*包[含括]/u', $text)   // 费用包含 / 包括：
+			|| (bool) preg_match('/\b(?:harga\s+)?termasuk\b/iu', $text);                       // Malay
+	}
+}
+
+if ( ! function_exists('competitor_jsonld_is_product'))
+{
+	/**
+	 * Positive structured keep-signal (mirror of competitor_looks_like_listing): true
+	 * when a page's JSON-LD @types include a single-product type (Product, Trip,
+	 * TouristTrip, TourPackage, Offer…). A language-neutral, layout-neutral "this IS a
+	 * tour" signal — a page that declares it stays even when the multilingual text
+	 * regex misses. Pure.
+	 */
+	function competitor_jsonld_is_product($types)
+	{
+		if ( ! is_array($types) || empty($types)) {
+			return false;
+		}
+		return (bool) array_intersect($types, competitor_product_jsonld_types());
+	}
+}
+
 if ( ! function_exists('competitor_has_basic_tour_sections'))
 {
 	/**
@@ -837,18 +983,8 @@ if ( ! function_exists('competitor_has_basic_tour_sections'))
 		if ( ! is_string($text) || $text === '') {
 			return false;
 		}
-		// Day-by-day itinerary — a real tour has a "Day 1" (also "Day 01" / "Day01").
-		$has_itinerary = (bool) preg_match('/\bday\s*0?1\b/iu', $text);
-		// An inclusions section / "price includes" wording (not a stray "include").
-		$has_inclusions = (bool) preg_match(
-			'/\binclusions?\b'
-			. '|\b(?:price|package|tour|trip|fare|cost|holiday)\s+includes?\b'
-			. '|\bwhat\'?s\s+included\b'
-			. '|\bincludes?\s*:'
-			. '|\bincluded\s+in\s+(?:the\s+)?(?:price|tour|package|fare|cost)\b/iu',
-			$text
-		);
-		return $has_itinerary && $has_inclusions;
+		// Day-by-day itinerary (language-neutral: Day/Hari/第N天) + an inclusions section.
+		return competitor_day_marker_count($text) >= 1 && competitor_has_inclusions($text);
 	}
 }
 
@@ -861,24 +997,20 @@ if ( ! function_exists('competitor_has_tour_itinerary'))
 	 * (5D4N / "3 days"). A lone stray "Day 1" does NOT qualify. Inclusions/exclusions
 	 * are treated as bonus, not required — many real tour pages never label them in
 	 * words, so requiring them dropped genuine tours. Multi-product LISTING pages
-	 * (many "Day 1"s) are filtered earlier by competitor_text_looks_like_listing. Pure.
+	 * (many "Day 1"s) are filtered earlier by competitor_text_looks_like_listing.
+	 * Day markers are language-neutral (Day / Hari / 第N天) via competitor_day_marker_count. Pure.
 	 */
 	function competitor_has_tour_itinerary($text)
 	{
 		if ( ! is_string($text) || $text === '') {
 			return false;
 		}
-		if (preg_match_all('/\bday\s*0?([1-9][0-9]?)\b/iu', $text, $m)) {
-			$nums = array_unique(array_map('intval', $m[1]));
-			if (count($nums) >= 2) {
-				return true;   // a real multi-day day-by-day itinerary
-			}
+		$days = competitor_day_marker_count($text);
+		if ($days >= 2) {
+			return true;   // a real multi-day day-by-day itinerary
 		}
 		// Single-day itinerary: a "Day 1" plus an explicit tour duration.
-		$has_day1 = (bool) preg_match('/\bday\s*0?1\b/iu', $text);
-		$has_dur  = (bool) preg_match('/\b\d{1,2}\s*d\s*\d{1,2}\s*n\b/i', $text)
-			|| (bool) preg_match('/\b\d{1,2}\s*(?:days?|nights?)\b/i', $text);
-		return $has_day1 && $has_dur;
+		return $days >= 1 && competitor_has_duration($text);
 	}
 }
 
@@ -889,22 +1021,35 @@ if ( ! function_exists('competitor_is_tour_page'))
 	 * real day-by-day itinerary (competitor_has_tour_itinerary), OR — for sites that
 	 * hide the itinerary behind a tab/accordion the scrape can't open (e.g.
 	 * chanbrothers) — when the page carries the unmistakable signals of a bookable
-	 * tour: a trip DURATION ("7 Days" / 5D4N) together with a PRICE. A travel guide or
-	 * listicle rarely has both a duration and a real price, and the guide-URL filter
-	 * backstops the rest. Pure.
+	 * tour: a trip DURATION ("7 Days" / 5D4N / 5天4夜) together with a PRICE. All signals
+	 * are language-neutral (EN / 中文 / Malay). $structured_product is the page's JSON-LD
+	 * verdict (competitor_jsonld_is_product) — when the site DECLARES the page a product/
+	 * Trip in schema.org, keep it even if the text signals are missing (SPA shells whose
+	 * itinerary loads later). It still requires SOME text, so an empty scrape stays out.
+	 * $product_url is true when discovery already vetted the URL as a product URL
+	 * (competitor_is_product_url) — such a page that rendered real content with a DURATION
+	 * is a bookable product even without an in-text price (cruises / free-&-easy show no
+	 * day-by-day and hide the price behind a booking widget). A travel guide/listicle
+	 * rarely has both duration and price, and the guide-URL filter backstops the rest. Pure.
 	 */
-	function competitor_is_tour_page($text)
+	function competitor_is_tour_page($text, $structured_product = false, $product_url = false)
 	{
 		if ( ! is_string($text) || $text === '') {
 			return false;
 		}
+		if ($structured_product) {
+			return true;   // schema.org says this IS a product/Trip — language-neutral keep
+		}
 		if (competitor_has_tour_itinerary($text)) {
 			return true;
 		}
-		$has_duration = (bool) preg_match('/\b\d{1,2}\s*d\s*\d{1,2}\s*n\b/i', $text)
-			|| (bool) preg_match('/\b\d{1,2}\s*(?:days?|nights?)\b/i', $text);
-		$has_price = (bool) preg_match('/(?:rm|myr|sgd|usd|php|thb|idr|aud|eur|s\$|\$|£|€)\s*[0-9][0-9,]{2,}/iu', $text);
-		return $has_duration && $has_price;
+		if (competitor_has_duration($text) && competitor_has_price($text)) {
+			return true;
+		}
+		// Vetted product URL that rendered a real (non-thin — the caller checks) page with a
+		// duration: keep even without a price. Recovers cruise / free-&-easy products whose
+		// price lives in a booking widget, not the page text.
+		return $product_url && competitor_has_duration($text);
 	}
 }
 
@@ -1029,12 +1174,126 @@ if ( ! function_exists('competitor_extract_embedded_json'))
 	}
 }
 
+if ( ! function_exists('competitor_urls_from_embedded_json'))
+{
+	/**
+	 * DISCOVERY companion to competitor_extract_embedded_json: mine same-host PRODUCT
+	 * URLs from the JSON a SPA ships inside its HTML — the Next.js __NEXT_DATA__ / Nuxt
+	 * __NUXT_DATA__ / window.__NUXT__ hydration blobs and any <script type="application/
+	 * json"> data islands. Many JS listings expose every tour's url/slug in that JSON
+	 * even though the DOM has no anchors, so this discovers them from the PLAIN HTML —
+	 * no slow per-page headless render. URLs are resolved against $base_url and kept only
+	 * when they're a product URL (competitor_is_product_url) on the SAME host. Pure — the
+	 * fetch lives in the service. Returns [] when nothing usable is embedded.
+	 */
+	function competitor_urls_from_embedded_json($html, $base_url)
+	{
+		if ( ! is_string($html) || $html === '') {
+			return array();
+		}
+		$blobs = array();
+		foreach (array('__NEXT_DATA__', '__NUXT_DATA__') as $id) {
+			if (preg_match('#<script[^>]*id\s*=\s*(["\'])' . $id . '\1[^>]*>(.*?)</script>#is', $html, $m)) {
+				$blobs[] = $m[2];
+			}
+		}
+		if (preg_match('#window\.__NUXT__\s*=\s*(.+?)</script>#is', $html, $m)) {
+			$blobs[] = $m[1];
+		}
+		if (preg_match_all('#<script[^>]*type\s*=\s*(["\'])application/json\1[^>]*>(.*?)</script>#is', $html, $m)) {
+			foreach ($m[2] as $b) { $blobs[] = $b; }
+		}
+		// Next.js App Router streams its data as self.__next_f.push([...]) chunks (no
+		// __NEXT_DATA__) — the product slugs live in those, double-escaped.
+		if (preg_match_all('#self\.__next_f\.push\((.*?)\)</script>#is', $html, $m)) {
+			foreach ($m[1] as $b) { $blobs[] = $b; }
+		}
+		if (empty($blobs)) {
+			return array();
+		}
+		$base_host = preg_replace('/^www\./i', '', strtolower((string) parse_url((string) $base_url, PHP_URL_HOST)));
+		$urls = array();
+		foreach ($blobs as $blob) {
+			if (strpos($blob, '/') === false) {
+				continue;
+			}
+			// Unescape JSON slashes AND escaped quotes (RSC strings are "\"/path\"").
+			$blob = str_replace(array('\\/', '\\"'), array('/', '"'), $blob);
+			if ( ! preg_match_all('#["\'](https?://[^"\'\\\\ ]+|/[A-Za-z0-9][A-Za-z0-9\-_/]{2,})["\']#', $blob, $mm)) {
+				continue;
+			}
+			foreach ($mm[1] as $u) {
+				$abs = competitor_resolve_url($base_url, html_entity_decode($u, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+				if ($abs === '' || ! competitor_is_product_url($abs)) {
+					continue;
+				}
+				// A media/asset path can carry a product-ish word (…/tour-package-banner.webp)
+				// and slip past the product-URL slug test — never a page, so drop it.
+				if (preg_match('#\.(jpe?g|png|gif|webp|svg|ico|css|js|pdf|zip|mp4|mp3|woff2?|ttf|eot)(\?|$)#i', (string) parse_url($abs, PHP_URL_PATH))) {
+					continue;
+				}
+				$h = preg_replace('/^www\./i', '', strtolower((string) parse_url($abs, PHP_URL_HOST)));
+				if ($base_host !== '' && $h !== $base_host) {
+					continue;   // same host only
+				}
+				$urls[$abs] = true;
+			}
+		}
+		return array_keys($urls);
+	}
+}
+
+if ( ! function_exists('competitor_normalize_url_dots'))
+{
+	/**
+	 * Collapse RFC 3986 dot-segments in a URL's path: "/a/b/../../x" -> "/x",
+	 * "/../../foo" -> "/foo" (over-popping clamps at root), "/a/./b" -> "/a/b".
+	 * WHY IT MATTERS: without this, a site with "../" relative links produces an
+	 * UNBOUNDED set of distinct-but-equivalent URLs (…/../../x, …/../../../x, …), the
+	 * crawler's visited-set can't dedup them, and the whole-site BFS never terminates
+	 * (ibctours.com hung at "discovering" on exactly this). Preserves scheme/host/port,
+	 * leading + trailing slash, and the query string. Pure.
+	 */
+	function competitor_normalize_url_dots($url)
+	{
+		$url = (string) $url;
+		if (strpos($url, '/.') === false) {
+			return $url;   // no dot-segment to collapse — fast path
+		}
+		$p = parse_url($url);
+		if (empty($p['scheme']) || empty($p['host'])) {
+			return $url;
+		}
+		$origin = $p['scheme'] . '://' . $p['host'] . (isset($p['port']) ? ':' . $p['port'] : '');
+		$path   = isset($p['path']) ? $p['path'] : '';
+		$lead   = ($path !== '' && $path[0] === '/');
+		$trail  = (strlen($path) > 1 && substr($path, -1) === '/');
+		$out    = array();
+		foreach (explode('/', $path) as $seg) {
+			if ($seg === '' || $seg === '.') {
+				continue;
+			}
+			if ($seg === '..') {
+				array_pop($out);   // clamps at root when $out is already empty
+				continue;
+			}
+			$out[] = $seg;
+		}
+		$norm = implode('/', $out);
+		if ($lead) { $norm = '/' . $norm; }
+		if ($trail && substr($norm, -1) !== '/') { $norm .= '/'; }
+		if ($norm === '') { $norm = '/'; }
+		return $origin . $norm . (isset($p['query']) ? '?' . $p['query'] : '');
+	}
+}
+
 if ( ! function_exists('competitor_resolve_url'))
 {
 	/**
 	 * Resolve an anchor href against the page it was found on into an absolute
 	 * URL. Handles absolute, protocol-relative (//host), root-relative (/path)
-	 * and directory-relative hrefs; drops the #fragment. Returns '' for empty or
+	 * and directory-relative hrefs; drops the #fragment; collapses ../ and ./
+	 * dot-segments (competitor_normalize_url_dots). Returns '' for empty or
 	 * unsupported schemes (mailto:, tel:, javascript:, data:). Pure.
 	 */
 	function competitor_resolve_url($base, $href)
@@ -1044,11 +1303,11 @@ if ( ! function_exists('competitor_resolve_url'))
 		if ($href === '') {
 			return '';
 		}
-		if (preg_match('#^(mailto:|tel:|javascript:|data:)#i', $href)) {
+		if (preg_match('#^(mailto:|tel:|javascript:|data:|whatsapp:|sms:|geo:|skype:|intent:)#i', $href)) {
 			return '';
 		}
 		if (preg_match('#^https?://#i', $href)) {
-			return $href;
+			return competitor_normalize_url_dots($href);
 		}
 		$parts = parse_url((string) $base);
 		if (empty($parts['scheme']) || empty($parts['host'])) {
@@ -1056,18 +1315,17 @@ if ( ! function_exists('competitor_resolve_url'))
 		}
 		$origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
 		if (strpos($href, '//') === 0) {
-			return $parts['scheme'] . ':' . $href;
+			return competitor_normalize_url_dots($parts['scheme'] . ':' . $href);
 		}
 		if (strpos($href, '/') === 0) {
-			return $origin . $href;
+			return competitor_normalize_url_dots($origin . $href);
 		}
 		$path = isset($parts['path']) ? $parts['path'] : '/';
 		$dir  = preg_replace('#/[^/]*$#', '/', $path);
 		if ($dir === '') {
 			$dir = '/';
 		}
-		$href = preg_replace('#^\./#', '', $href);
-		return $origin . $dir . $href;
+		return competitor_normalize_url_dots($origin . $dir . $href);
 	}
 }
 
@@ -1110,6 +1368,36 @@ if ( ! function_exists('competitor_extract_links'))
 	}
 }
 
+if ( ! function_exists('competitor_host_url_is_product'))
+{
+	/**
+	 * HOST-SCOPED product-URL override for sites whose URL structure inverts the general
+	 * keyword-in-slug heuristic. Returns true (is a product), false (is NOT — a hub/facet),
+	 * or NULL to defer to the general rule. Only known hosts are handled; every other host
+	 * returns NULL, so the general heuristic — and all other sites — are byte-for-byte
+	 * unaffected. Pure.
+	 *
+	 * TourRadar: real tours live at /t/<id-or-slug>; everything else (/o/ operators,
+	 * /d/ destinations, /f/ /i/ facets, /deals/, /mlp/ marketing, /r/ /a/ /b/ /c/ hubs) is a
+	 * listing/marketing page whose slug happens to contain "tour/holiday/cruise" and would
+	 * otherwise be mistaken for a product. Hubs still get FOLLOWED for links (they're valid
+	 * candidates) — they're just not kept as products.
+	 */
+	function competitor_host_url_is_product($url)
+	{
+		$host = strtolower((string) parse_url((string) $url, PHP_URL_HOST));
+		$host = preg_replace('/^www\./', '', $host);
+		$path = strtolower((string) parse_url((string) $url, PHP_URL_PATH));
+		if ($host === 'tourradar.com') {
+			if (preg_match('#^/t/[a-z0-9][a-z0-9-]*#', $path)) {
+				return true;    // /t/<id-or-slug> → a real tour
+			}
+			return false;       // homepage, operator/destination/facet/marketing hubs → not a product
+		}
+		return null;            // other hosts → defer to the general heuristic
+	}
+}
+
 if ( ! function_exists('competitor_is_product_url'))
 {
 	/**
@@ -1118,10 +1406,15 @@ if ( ! function_exists('competitor_is_product_url'))
 	 * path carries a product keyword (tour/package/holiday/trip/…), has at least
 	 * two path segments (so a bare "/tours" listing is skipped), the last segment
 	 * looks like a slug, and no excluded keyword appears. Rules are fixed — the
-	 * chosen trade-off is simplicity over per-site accuracy. Pure.
+	 * chosen trade-off is simplicity over per-site accuracy. A host-scoped override
+	 * (competitor_host_url_is_product) wins first for sites that invert the rule. Pure.
 	 */
 	function competitor_is_product_url($url)
 	{
+		$override = competitor_host_url_is_product($url);
+		if ($override !== null) {
+			return $override;
+		}
 		$path = parse_url((string) $url, PHP_URL_PATH);
 		if ( ! is_string($path) || $path === '') {
 			return false;
@@ -1326,6 +1619,158 @@ if ( ! function_exists('competitor_paginator_next'))
 			return $json['links']['next'];
 		}
 		return '';
+	}
+}
+
+if ( ! function_exists('competitor_paginator_total'))
+{
+	/**
+	 * The AUTHORITATIVE product total a JSON listing/API declares — meta.total_count,
+	 * meta.total, or a top-level total/total_count. Used to know when a crawl has the
+	 * whole catalogue (self-healing coverage). Accepts a JSON string or a decoded
+	 * array. Returns 0 when no total is present. Pure.
+	 */
+	function competitor_paginator_total($json)
+	{
+		$d = is_string($json) ? json_decode($json, true) : $json;
+		if ( ! is_array($d)) {
+			return 0;
+		}
+		$candidates = array();
+		if (isset($d['meta']) && is_array($d['meta'])) {
+			foreach (array('total_count', 'total') as $k) {
+				if (isset($d['meta'][$k]) && is_numeric($d['meta'][$k])) { $candidates[] = (int) $d['meta'][$k]; }
+			}
+		}
+		foreach (array('total_count', 'total') as $k) {
+			if (isset($d[$k]) && is_numeric($d[$k])) { $candidates[] = (int) $d[$k]; }
+		}
+		$candidates = array_filter($candidates, function ($n) { return $n > 0; });
+		return $candidates ? max($candidates) : 0;
+	}
+}
+
+if ( ! function_exists('competitor_result_count_hint'))
+{
+	/**
+	 * The product total a LISTING page declares in prose — the site's own "correct
+	 * count". Reads the common phrasings and returns the largest credible number:
+	 *   "Showing 1-20 of 234", "234 results", "88 tours found", "57 packages",
+	 *   "of 234 results" (thousands separators stripped). Returns 0 when there's no
+	 *   such signal (so callers treat the count as unknown). Pure.
+	 */
+	function competitor_result_count_hint($text)
+	{
+		$text = (string) $text;
+		if ($text === '') {
+			return 0;
+		}
+		$nouns = 'results?|tours?|packages?|trips?|holidays?|products?|deals?|itineraries|itinerary';
+		$nums  = array();
+		$grab  = function ($re) use ($text, &$nums) {
+			if (preg_match_all($re, $text, $m)) {
+				foreach ($m[1] as $v) { $nums[] = (int) str_replace(',', '', $v); }
+			}
+		};
+		// "1-20 of 234" / "1–20 of 234" (range … of TOTAL); Malay "… daripada 234"
+		$grab('/\d+\s*[-–—]\s*\d+\s+(?:of|daripada)\s+([\d,]+)/iu');
+		// "of 234 results"
+		$grab('/\bof\s+([\d,]+)\s+(?:' . $nouns . ')\b/iu');
+		// "234 results" / "88 tours found" / "57 packages"
+		$grab('/\b([\d,]+)\s+(?:' . $nouns . ')\b/iu');
+		// Malay: "681 hasil" / "88 pakej" / "57 percutian" / "produk"
+		$grab('/\b([\d,]+)\s+(?:hasil|keputusan|pakej|percutian|produk)\b/iu');
+		// Chinese: "共681个产品" / "找到 88 个行程" / "234 个结果" / "共 57 条线路" — the count
+		// sits beside a product noun (个/条/项 + 产品/结果/行程/线路/团/套餐/记录) or after 共/找到.
+		$grab('/([\d,]+)\s*(?:个|条|项)\s*(?:产品|结果|行程|线路|团|套餐|记录|旅游|目的地)/u');
+		$grab('/(?:共|共计|找到|合计)\s*([\d,]+)/u');
+		$nums = array_filter($nums, function ($n) { return $n > 0; });
+		return $nums ? max($nums) : 0;
+	}
+}
+
+if ( ! function_exists('competitor_coverage_short'))
+{
+	/**
+	 * The self-healing recrawl gate: TRUE when we know the site's authoritative total
+	 * ($target > 0) and discovery came up short of it beyond $tolerance (0.1 = 10%).
+	 * A zero/unknown target is never short (→ crawl behaves exactly as before). Pure.
+	 */
+	function competitor_coverage_short($discovered, $target, $tolerance = 0.1)
+	{
+		$target = (int) $target;
+		if ($target <= 0) {
+			return false;
+		}
+		$tolerance = (float) $tolerance;
+		if ($tolerance < 0) { $tolerance = 0.0; }
+		return (int) $discovered < $target * (1 - $tolerance);
+	}
+}
+
+if ( ! function_exists('competitor_url_path_template'))
+{
+	/**
+	 * The STRUCTURAL skeleton of a URL's path — the key that groups same-shaped URLs
+	 * (a site's product family) regardless of the specific id/slug. Each path segment
+	 * is generalised: a purely numeric segment → '#', a segment CONTAINING a digit
+	 * (id-ish / duration-coded slug like "3d2n-genting-tour" or "v1") → '*', and a
+	 * plain word (a fixed category like "tour", "series", "tour-package") is kept
+	 * literal (lowercased). So /tour-package/1077 and /tour-package/1090 share the
+	 * template "tour-package + numeric", while /api/v1/series/6618 collapses the "v1"
+	 * and the id. Language-neutral, no per-site tuning. Returns '' for the homepage.
+	 * Pure — no network.
+	 */
+	function competitor_url_path_template($url)
+	{
+		$path = (string) parse_url((string) $url, PHP_URL_PATH);
+		$segs = array_values(array_filter(explode('/', $path), 'strlen'));
+		if (empty($segs)) {
+			return '';
+		}
+		$kinds = array();
+		foreach ($segs as $s) {
+			if (preg_match('/^\d+$/', $s)) {
+				$kinds[] = '#';                       // numeric id
+			} elseif (preg_match('/\d/', $s)) {
+				$kinds[] = '*';                       // id-ish / duration-coded slug
+			} else {
+				$kinds[] = strtolower($s);            // fixed category word
+			}
+		}
+		return '/' . implode('/', $kinds);
+	}
+}
+
+if ( ! function_exists('competitor_dominant_path_cluster'))
+{
+	/**
+	 * Group $urls by competitor_url_path_template and return the URLs of the LARGEST
+	 * cluster (original order preserved), provided it has at least $min members —
+	 * otherwise []. The dominant same-shaped cluster is almost always a site's product
+	 * namespace, so its size is a language-free lower-bound on the product count and
+	 * its members are high-value read/recrawl targets. Homepage-level ('' template)
+	 * URLs are ignored. Pure — no network, no per-site tuning.
+	 */
+	function competitor_dominant_path_cluster($urls, $min = 3)
+	{
+		if ( ! is_array($urls) || empty($urls)) {
+			return array();
+		}
+		$groups = array();
+		foreach ($urls as $u) {
+			$tpl = competitor_url_path_template($u);
+			if ($tpl === '') { continue; }
+			$groups[$tpl][] = $u;
+		}
+		if (empty($groups)) {
+			return array();
+		}
+		$best = array();
+		foreach ($groups as $members) {
+			if (count($members) > count($best)) { $best = $members; }
+		}
+		return count($best) >= (int) $min ? array_values($best) : array();
 	}
 }
 
@@ -1670,6 +2115,35 @@ if ( ! function_exists('competitor_robots_sitemaps'))
 	}
 }
 
+if ( ! function_exists('competitor_sitemap_candidates'))
+{
+	/**
+	 * Well-known sitemap locations to PROBE when robots.txt declares none — so a site
+	 * that keeps its sitemap off the default path (WordPress /wp-sitemap.xml, Yoast /
+	 * sitemap_index.xml, etc.) still gets discovered instead of collapsing to the slow
+	 * headless fallback. Order = most common first. $origin is scheme://host[:port].
+	 * Pure — no network (the caller fetches them, cheaply, stopping at the first hit).
+	 */
+	function competitor_sitemap_candidates($origin)
+	{
+		$origin = rtrim((string) $origin, '/');
+		if ($origin === '') {
+			return array();
+		}
+		$paths = array(
+			'/sitemap.xml',          // the default
+			'/sitemap_index.xml',    // Yoast / RankMath (WordPress)
+			'/sitemap-index.xml',
+			'/wp-sitemap.xml',       // WordPress 5.5+ core
+			'/sitemap/sitemap.xml',
+			'/sitemap1.xml',
+		);
+		$out = array();
+		foreach ($paths as $p) { $out[] = $origin . $p; }
+		return $out;
+	}
+}
+
 if ( ! function_exists('competitor_robots_crawl_delay'))
 {
 	/**
@@ -1695,6 +2169,113 @@ if ( ! function_exists('competitor_robots_crawl_delay'))
 		return ($max > 10.0) ? 10.0 : $max;
 	}
 }
+
+if ( ! function_exists('competitor_retry_after_seconds'))
+{
+	/**
+	 * How long to wait per a 429/503 `Retry-After` header, in seconds. Accepts either
+	 * a delta-seconds integer ("120") or an HTTP-date ("Wed, 21 Oct 2015 07:28:00 GMT").
+	 * Returns 0 when absent/unparseable/past, so the caller can fall back to its own
+	 * backoff. Clamped to $cap (default 120s) so a hostile/huge value can't stall the
+	 * whole crawl. $now_ts (0 = time()) is injectable for deterministic tests. Pure.
+	 */
+	function competitor_retry_after_seconds($value, $now_ts = 0, $cap = 120)
+	{
+		$value = trim((string) $value);
+		$cap   = (int) $cap;
+		if ($value === '') {
+			return 0;
+		}
+		if (preg_match('/^\d+$/', $value)) {
+			$s = (int) $value;
+			return $s <= 0 ? 0 : min($s, $cap);
+		}
+		// Only an HTTP-date remains — it always carries a clock time, so require a ':'
+		// (rejects junk like "-3"/"soon" that strtotime would otherwise misread).
+		if (strpos($value, ':') === false) {
+			return 0;
+		}
+		$ts = strtotime($value);
+		if ($ts === false) {
+			return 0;
+		}
+		$now   = $now_ts > 0 ? (int) $now_ts : time();
+		$delta = $ts - $now;
+		return $delta <= 0 ? 0 : min($delta, $cap);
+	}
+}
+
+if ( ! function_exists('competitor_backoff_seconds'))
+{
+	/**
+	 * Exponential backoff for retry attempt N: base * 2^N, capped. The fallback wait
+	 * when a throttled response carries no usable Retry-After. attempt 0 → base, 1 →
+	 * 2×base, … clamped to $cap. Negative attempts treated as 0. Pure.
+	 */
+	function competitor_backoff_seconds($attempt, $base = 0.5, $cap = 30.0)
+	{
+		$attempt = (int) $attempt;
+		if ($attempt < 0) { $attempt = 0; }
+		$wait = (float) $base * pow(2, $attempt);
+		return $wait > (float) $cap ? (float) $cap : $wait;
+	}
+}
+
+if ( ! function_exists('competitor_http_cache_key'))
+{
+	/**
+	 * Stable cache key for a URL — sha1 of the dot-normalised URL, so equivalent forms
+	 * (…/a/b/../x and …/a/x) share one entry. Returns '' for a blank/hostless URL. Pure.
+	 */
+	function competitor_http_cache_key($url)
+	{
+		$u = competitor_normalize_url_dots(trim((string) $url));
+		$u = preg_replace('/#.*$/', '', (string) $u);
+		return $u === '' ? '' : sha1($u);
+	}
+}
+
+if ( ! function_exists('competitor_http_cache_is_fresh'))
+{
+	/**
+	 * True when a cache entry is still within the fresh window ($ttl seconds) — served
+	 * straight from disk with NO network request, which is what stops repeated crawls
+	 * from re-hitting (and rate-limiting) a host. $ttl <= 0 disables the fresh window
+	 * (every request then revalidates conditionally instead). Pure.
+	 */
+	function competitor_http_cache_is_fresh($meta, $now_ts, $ttl)
+	{
+		$ttl = (int) $ttl;
+		if ($ttl <= 0 || ! is_array($meta) || empty($meta['ts'])) {
+			return false;
+		}
+		return ((int) $now_ts - (int) $meta['ts']) < $ttl;
+	}
+}
+
+if ( ! function_exists('competitor_http_cache_conditional'))
+{
+	/**
+	 * Build the conditional-request headers for a stale cache entry so the server can
+	 * answer `304 Not Modified` (cheap) instead of resending the body: If-None-Match
+	 * from the stored ETag, If-Modified-Since from the stored Last-Modified. Returns []
+	 * when the entry carries neither validator. Pure.
+	 */
+	function competitor_http_cache_conditional($meta)
+	{
+		$h = array();
+		if (is_array($meta)) {
+			if ( ! empty($meta['etag'])) {
+				$h[] = 'If-None-Match: ' . $meta['etag'];
+			}
+			if ( ! empty($meta['last_modified'])) {
+				$h[] = 'If-Modified-Since: ' . $meta['last_modified'];
+			}
+		}
+		return $h;
+	}
+}
+
 
 if ( ! function_exists('competitor_parse_sitemap'))
 {
@@ -1955,13 +2536,92 @@ if ( ! function_exists('competitor_headless_cap'))
 	 * Unset/blank -> $default; explicit 0 -> 0 = UNLIMITED; negative -> $default;
 	 * otherwise the integer. Pure.
 	 */
-	function competitor_headless_cap($raw, $default = 60)
+	function competitor_headless_cap($raw, $default = 500)
 	{
 		if ($raw === false || $raw === null || trim((string) $raw) === '') {
 			return (int) $default;
 		}
 		$n = (int) $raw;
 		return $n < 0 ? (int) $default : $n;
+	}
+}
+
+if ( ! function_exists('competitor_next_chunk'))
+{
+	/**
+	 * Pick the next chunk of UNREAD URLs for a resumable crawl. $queue is the full discovered
+	 * URL list; $done is the URLs already attempted (accepts a flat list OR a set url=>true);
+	 * $chunk is the max URLs to read this run. Returns:
+	 *   ['chunk' => [next up-to-$chunk unread URLs], 'has_more' => bool, 'remaining' => int]
+	 * has_more = there are still unread URLs beyond this chunk (→ worker re-spawns to continue).
+	 * $chunk <= 0 disables chunking (returns ALL unread, has_more false). Duplicates and blanks
+	 * are ignored. Pure — the file I/O (reading .urls.txt / .done.txt) lives in the caller.
+	 */
+	function competitor_next_chunk($queue, $done, $chunk)
+	{
+		$doneset = array();
+		foreach ((is_array($done) ? $done : array()) as $k => $v) {
+			$u = is_int($k) ? $v : $k;           // flat list → value; set url=>true → key
+			$u = trim((string) $u);
+			if ($u !== '') { $doneset[$u] = true; }
+		}
+		$unread = array();
+		$seen   = array();
+		foreach ((is_array($queue) ? $queue : array()) as $u) {
+			$u = trim((string) $u);
+			if ($u === '' || isset($doneset[$u]) || isset($seen[$u])) { continue; }
+			$seen[$u] = true;
+			$unread[] = $u;
+		}
+		$chunk = (int) $chunk;
+		if ($chunk <= 0 || count($unread) <= $chunk) {
+			return array('chunk' => $unread, 'has_more' => false, 'remaining' => count($unread));
+		}
+		return array('chunk' => array_slice($unread, 0, $chunk), 'has_more' => true, 'remaining' => count($unread));
+	}
+}
+
+if ( ! function_exists('competitor_file_line_count'))
+{
+	/** Count non-empty lines in a file (used for crawl progress: .done vs .urls). 0 if missing.
+	 * Streams the file so a huge queue doesn't load into an array. Never throws. */
+	function competitor_file_line_count($path)
+	{
+		if ( ! is_string($path) || ! is_file($path)) {
+			return 0;
+		}
+		$n  = 0;
+		$fh = @fopen($path, 'r');
+		if ( ! $fh) {
+			return 0;
+		}
+		while (($line = fgets($fh)) !== false) {
+			if (trim($line) !== '') { $n++; }
+		}
+		fclose($fh);
+		return $n;
+	}
+}
+
+if ( ! function_exists('competitor_job_looks_crashed'))
+{
+	/**
+	 * Decide whether a background job has CRASHED — it still claims to be queued/running
+	 * but its worker process is gone. $pid_alive is whether the recorded worker PID is
+	 * still a live process; $age_secs is how long since the status file was last updated.
+	 * A grace window ($grace, default 60s) avoids flagging a just-spawned worker that
+	 * hasn't written its first heartbeat yet. Terminal states (done/error) never crash.
+	 * Pure — the PID check + file I/O live in the controller. Returns true when crashed.
+	 */
+	function competitor_job_looks_crashed($state, $pid_alive, $age_secs, $grace = 60)
+	{
+		if ( ! in_array($state, array('queued', 'running'), true)) {
+			return false;   // done / error / unknown → not a live job
+		}
+		if ($pid_alive) {
+			return false;   // worker still running → fine
+		}
+		return (int) $age_secs > (int) $grace;   // worker gone + past grace → crashed
 	}
 }
 
@@ -2178,16 +2838,15 @@ if ( ! function_exists('competitor_item_kind'))
 	 * Classify one crawled product for the Review list: 'package' when its content
 	 * carries a price (a currency figure like "RM1,899" / "SGD 250" / "$1,200"),
 	 * otherwise 'itinerary'. The rule is simply: content mentions a price → it is a
-	 * priced PACKAGE; no price → a plain ITINERARY. Uses the same price pattern as
-	 * competitor_has_product_signal() so both agree on what "a price" is. Pure.
+	 * priced PACKAGE; no price → a plain ITINERARY. Shares competitor_has_price() with
+	 * the rest of the module so every price check (incl. 中文 人民币/元) agrees. Pure.
 	 */
 	function competitor_item_kind($text)
 	{
 		if ( ! is_string($text) || $text === '') {
 			return 'itinerary';
 		}
-		$has_price = (bool) preg_match('/(?:rm|myr|sgd|usd|eur|php|idr|thb|aud|\$|£|€)\s*[0-9][0-9,]{2,}/iu', $text);
-		return $has_price ? 'package' : 'itinerary';
+		return competitor_has_price($text) ? 'package' : 'itinerary';
 	}
 }
 
@@ -2239,6 +2898,8 @@ if ( ! function_exists('competitor_job_public_view'))
 			'message'     => competitor_job_progress_message($s),
 			'count'       => isset($s['count']) ? (int) $s['count'] : 0,
 			'keyword'     => isset($s['keyword']) ? (string) $s['keyword'] : '',
+			// User-supplied competitor name (label only; shown in the results table).
+			'name'        => isset($s['competitor_name']) ? (string) $s['competitor_name'] : '',
 			'ai_crawl'    => ! empty($s['ai_crawl']),
 			'is_paste'    => ($mode === 'paste'),
 			'is_upload'   => ($mode === 'upload'),
@@ -2325,21 +2986,27 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 			$analysed = 0;
 			$running = false;
 			$reviewable = false;
-			$active = null;   // the first in-progress run, to surface on the merged row
+			// Surface an in-progress run on the merged row, PREFERRING a running one over a
+			// merely-queued one — so a host with 1 running + 1 queued shows "running", not
+			// "queued" (the running work is what matters to the user).
+			$active_running = null;
+			$active_queued  = null;
 			foreach ($runs as $r) {
 				$cost     += (float) (isset($r['cost_total']) ? $r['cost_total'] : 0);
 				$analysed += (int) (isset($r['analysed']) ? $r['analysed'] : 0);
 				$state = (string) (isset($r['state']) ? $r['state'] : '');
-				if (in_array($state, array('queued', 'running'), true)) {
+				if ($state === 'running') {
 					$running = true;
-					if ($active === null) {
-						$active = $r;
-					}
+					if ($active_running === null) { $active_running = $r; }
+				} elseif ($state === 'queued') {
+					$running = true;
+					if ($active_queued === null) { $active_queued = $r; }
 				}
 				if ( ! empty($r['reviewable'])) {
 					$reviewable = true;
 				}
 			}
+			$active = $active_running !== null ? $active_running : $active_queued;
 			$face = $active !== null ? $active : $latest;
 
 			$rows[] = array(
@@ -2353,11 +3020,14 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 				'analysed'   => $analysed,
 				'cost_total' => $cost,
 				'keyword'    => (string) (isset($latest['keyword']) ? $latest['keyword'] : ''),
+				'name'       => (string) (isset($latest['name']) ? $latest['name'] : ''),
 				'ai_crawl'   => ! empty($latest['ai_crawl']),
 				'ts'         => (string) (isset($latest['ts']) ? $latest['ts'] : ''),
 				'done'       => (int) (isset($face['done']) ? $face['done'] : 0),
 				'total'      => (int) (isset($face['total']) ? $face['total'] : 0),
 				'read_start' => (string) (isset($face['read_start']) ? $face['read_start'] : ''),
+				'read_total' => (int) (isset($face['read_total']) ? $face['read_total'] : 0),
+				'read_done'  => (int) (isset($face['read_done']) ? $face['read_done'] : 0),
 				'running'    => $running,
 				'reviewable' => $reviewable,
 			);
@@ -2422,6 +3092,59 @@ if ( ! function_exists('competitor_ice_listing_api_url'))
 		}
 		$origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
 		return $origin . '/api/v1/series?' . $parts['query'];
+	}
+}
+
+if ( ! function_exists('competitor_tripfez_cruise_items'))
+{
+	/**
+	 * PER-SITE ADAPTER (tripfez.com only). tripfez is a React SPA with no crawlable
+	 * product pages; its cruise catalogue is a clean public JSON API
+	 * ({data:[{slug,name,durationDays,durationNights,ship,route,seawareFromPriceCents,
+	 * description}], totalData}). Turn each object into a ready-to-analyse crawl item
+	 * [{url,title,text}] so the crawler skips per-page headless rendering (slow +
+	 * render-budget-capped). Objects without a slug are skipped. $origin is the tripfez
+	 * site origin used to build the product URL (/cruise/<slug>). Isolated by design —
+	 * the general path is the gate/coverage helpers; this only ever runs for tripfez.
+	 * Pure — no network (the caller fetches the API body). Returns [] on junk/empty.
+	 */
+	function competitor_tripfez_cruise_items($json, $origin)
+	{
+		$d = is_string($json) ? json_decode($json, true) : (is_array($json) ? $json : null);
+		if ( ! is_array($d) || empty($d['data']) || ! is_array($d['data'])) {
+			return array();
+		}
+		$origin = rtrim((string) $origin, '/');
+		$items = array();
+		foreach ($d['data'] as $c) {
+			if ( ! is_array($c) || empty($c['slug'])) {
+				continue;
+			}
+			$name = trim((string) (isset($c['name']) ? $c['name'] : ''));
+			$lines = array('Product: ' . ($name !== '' ? $name : $c['slug']));
+			if (isset($c['durationDays']) || isset($c['durationNights'])) {
+				$lines[] = 'Duration: ' . (int) (isset($c['durationDays']) ? $c['durationDays'] : 0)
+					. 'D' . (int) (isset($c['durationNights']) ? $c['durationNights'] : 0) . 'N';
+			}
+			if ( ! empty($c['ship']))     { $lines[] = 'Ship: ' . $c['ship']; }
+			if ( ! empty($c['operator'])) { $lines[] = 'Operator: ' . $c['operator']; }
+			if (isset($c['route'])) {
+				$route = is_array($c['route']) ? implode(' ', $c['route']) : (string) $c['route'];
+				if (trim($route) !== '') { $lines[] = 'Route: ' . trim($route); }
+			}
+			if (isset($c['seawareFromPriceCents']) && is_numeric($c['seawareFromPriceCents']) && $c['seawareFromPriceCents'] > 0) {
+				$lines[] = 'Price: From RM' . number_format($c['seawareFromPriceCents'] / 100, 2);
+			}
+			if ( ! empty($c['description'])) {
+				$lines[] = "\n" . trim(preg_replace('/\s+/u', ' ', strip_tags((string) $c['description'])));
+			}
+			$items[] = array(
+				'url'   => $origin . '/cruise/' . $c['slug'],
+				'title' => $name !== '' ? $name : (string) $c['slug'],
+				'text'  => implode("\n", $lines),
+			);
+		}
+		return $items;
 	}
 }
 
@@ -2543,8 +3266,10 @@ if ( ! function_exists('competitor_ice_api_kind'))
 {
 	/**
 	 * Classify an ICE Holidays JSON API URL so the analyser reads it with the
-	 * right extractor: 'series' for /api/v1/series/<id> (a tour product),
-	 * 'posts' for /api/v1/posts/<id> (a CMS/brochure page), '' otherwise. Pure.
+	 * right extractor: 'series' for /api/v1/series/<id> (a tour product — cruises
+	 * too, read as /api/v1/series/<id>?type=cruise), 'land_tour' for
+	 * /b2c2b/api/v1/land_tours/<id>, 'posts' for /api/v1/posts/<id> (a CMS/brochure
+	 * page), '' otherwise. Pure.
 	 */
 	function competitor_ice_api_kind($url)
 	{
@@ -2554,6 +3279,9 @@ if ( ! function_exists('competitor_ice_api_kind'))
 		}
 		if (preg_match('#/api/v1/series/\d+#', $path)) {
 			return 'series';
+		}
+		if (preg_match('#/b2c2b/api/v1/land_tours/\d+#', $path)) {
+			return 'land_tour';
 		}
 		if (preg_match('#/api/v1/posts/\d+#', $path)) {
 			return 'posts';
@@ -2642,6 +3370,238 @@ if ( ! function_exists('competitor_ice_series_items'))
 			}
 		}
 		return array_values($out);
+	}
+}
+
+if ( ! function_exists('competitor_ice_code_list_items'))
+{
+	/**
+	 * Turn an ICE flat code list (`/api/v1/series/itinerary_list` or
+	 * `/api/v1/series/cruise_itinerary_list`, shape `{codes:[[id,code],…]}`) into
+	 * pick-list items [{url,label}]. This is the AUTHORITATIVE full catalogue — no
+	 * 25-per-query keyword cap. url is the detail API the crawler reads at analysis
+	 * time: `/api/v1/series/<id>` for $kind 'series', `/api/v1/series/<id>?type=cruise`
+	 * for 'cruise' (same rich shape, so it reuses the series reader). label is the
+	 * product code. Deduped by url; rows without a positive id are skipped. Pure.
+	 */
+	function competitor_ice_code_list_items($json, $origin, $kind = 'series')
+	{
+		$data = is_string($json) ? json_decode($json, true) : $json;
+		if ( ! is_array($data) || empty($data['codes']) || ! is_array($data['codes'])) {
+			return array();
+		}
+		$origin = rtrim((string) $origin, '/');
+		$suffix = ($kind === 'cruise') ? '?type=cruise' : '';
+		$out = array();
+		foreach ($data['codes'] as $row) {
+			if ( ! is_array($row) || ! isset($row[0]) || ! is_numeric($row[0]) || (int) $row[0] <= 0) {
+				continue;
+			}
+			$id   = (string) (int) $row[0];
+			$url  = $origin . '/api/v1/series/' . $id . $suffix;
+			if (isset($out[$url])) {
+				continue;
+			}
+			$code = isset($row[1]) ? trim(preg_replace('/\s+/', ' ', (string) $row[1])) : '';
+			$out[$url] = array('url' => $url, 'label' => $code !== '' ? $code : ('Series ' . $id));
+		}
+		return array_values($out);
+	}
+}
+
+if ( ! function_exists('competitor_ice_list_total_pages'))
+{
+	/**
+	 * Read `meta.total_pages` from a paginated ICE list response (land_tours /
+	 * tagged_tours). Defaults to 1 when absent or on junk. Pure.
+	 */
+	function competitor_ice_list_total_pages($json)
+	{
+		$d = is_string($json) ? json_decode($json, true) : $json;
+		if (is_array($d) && isset($d['meta']['total_pages']) && (int) $d['meta']['total_pages'] > 0) {
+			return (int) $d['meta']['total_pages'];
+		}
+		return 1;
+	}
+}
+
+if ( ! function_exists('competitor_ice_land_tour_items'))
+{
+	/**
+	 * Turn one `/b2c2b/api/v1/land_tours` page (`{data:[{id,attributes}], meta}`) into
+	 * pick-list items [{url,label}]: url is the per-id detail API
+	 * `/b2c2b/api/v1/land_tours/<id>` (read at analysis time), label is
+	 * "<title> · <country> · MYR <price> · <code>" (prices are MYR — gd.my is a
+	 * Malaysian wholesaler). Deduped by url; rows without an id are skipped. Pure.
+	 */
+	function competitor_ice_land_tour_items($json, $origin)
+	{
+		$data = is_string($json) ? json_decode($json, true) : $json;
+		if ( ! is_array($data) || empty($data['data']) || ! is_array($data['data'])) {
+			return array();
+		}
+		$origin = rtrim((string) $origin, '/');
+		$out = array();
+		foreach ($data['data'] as $row) {
+			if ( ! is_array($row) || ! isset($row['id']) || $row['id'] === '') {
+				continue;
+			}
+			$id   = (string) $row['id'];
+			$url  = $origin . '/b2c2b/api/v1/land_tours/' . $id;
+			if (isset($out[$url])) {
+				continue;
+			}
+			$attr = (isset($row['attributes']) && is_array($row['attributes'])) ? $row['attributes'] : array();
+			$s = function ($k) use ($attr) { return isset($attr[$k]) ? trim(preg_replace('/\s+/', ' ', (string) $attr[$k])) : ''; };
+			$title   = $s('title');
+			$code    = $s('code');
+			$country = $s('country');
+			$price   = $s('price');
+			if (preg_match('/^\d+\.\d+$/', $price)) {
+				$price = rtrim(rtrim($price, '0'), '.');
+			}
+			$name = $title !== '' ? $title : ($code !== '' ? $code : ('Land tour ' . $id));
+			$meta = array();
+			if ($country !== '')           { $meta[] = $country; }
+			if ($price !== '' && $price !== '0') { $meta[] = 'MYR ' . $price; }
+			if ($code !== '' && $title !== '')   { $meta[] = $code; }
+			$out[$url] = array('url' => $url, 'label' => $name . ($meta ? ' · ' . implode(' · ', $meta) : ''));
+		}
+		return array_values($out);
+	}
+}
+
+if ( ! function_exists('competitor_interleave_unique'))
+{
+	/**
+	 * Round-robin merge several pick-item lists into one, deduped by $key (default
+	 * 'url'). Keeps a BOUNDED pick varied across sources (e.g. series/cruise/land/
+	 * posts) instead of filling the cap from the first source. Pure.
+	 */
+	function competitor_interleave_unique(array $lists, $key = 'url')
+	{
+		$out = array();
+		$seen = array();
+		$i = 0;
+		$more = true;
+		while ($more) {
+			$more = false;
+			foreach ($lists as $list) {
+				if ( ! is_array($list) || ! isset($list[$i])) {
+					continue;
+				}
+				$more = true;
+				$item = $list[$i];
+				$k = (is_array($item) && isset($item[$key])) ? $item[$key] : null;
+				if ($k !== null && isset($seen[$k])) {
+					continue;
+				}
+				if ($k !== null) { $seen[$k] = true; }
+				$out[] = $item;
+			}
+			$i++;
+		}
+		return $out;
+	}
+}
+
+if ( ! function_exists('competitor_ice_land_tour_to_text'))
+{
+	/**
+	 * Flatten an ICE `/b2c2b/api/v1/land_tours/<id>` detail object into rich text for
+	 * the AI: title/code/country/duration, highlights, description, the inc_* inclusion
+	 * flags, flight legs (when the land tour bundles flights), the day-by-day itinerary
+	 * (`itinerary[]` of {day_no,title,description}), and per-category from-prices
+	 * (`pricing_categories[]`). Returns '' when empty. Pure.
+	 */
+	function competitor_ice_land_tour_to_text($json)
+	{
+		$d = is_string($json) ? json_decode($json, true) : $json;
+		if ( ! is_array($d)) {
+			return '';
+		}
+		if ( ! isset($d['title']) && ! isset($d['code']) && isset($d['data']) && is_array($d['data'])) {
+			$d = $d['data'];
+		}
+		$g = function ($k) use ($d) {
+			if ( ! isset($d[$k]) || ! is_scalar($d[$k])) { return ''; }
+			return trim(preg_replace('/\s+/', ' ', (string) $d[$k]));
+		};
+
+		$lines = array();
+		if ($g('title') !== '') { $lines[] = 'Product: ' . $g('title'); }
+
+		$head = array();
+		if ($g('code') !== '')    { $head[] = 'Code: ' . $g('code'); }
+		if ($g('country') !== '') { $head[] = 'Country: ' . $g('country'); }
+		$days = (int) $g('days'); $nights = (int) $g('nights');
+		if ($days > 0)            { $head[] = 'Duration: ' . $days . 'D' . ($nights > 0 ? $nights . 'N' : ''); }
+		elseif ($g('duration') !== '') { $head[] = 'Duration: ' . $g('duration'); }
+		if ($head) { $lines[] = implode('  ', $head); }
+
+		foreach (array('highlight' => 'Highlights', 'description' => 'Description') as $k => $lbl) {
+			if ( ! empty($d[$k]) && is_string($d[$k])) {
+				$t = competitor_html_to_text($d[$k], 8000);
+				if ($t !== '') { $lines[] = $lbl . ":\n" . $t; }
+			}
+		}
+
+		$inc_map = array(
+			'inc_hotel' => 'Hotel', 'inc_flight' => 'Flight',
+			'inc_half_board_meals' => 'Half-board meals', 'inc_full_board_meals' => 'Full-board meals',
+			'inc_entrance_ticket' => 'Entrance tickets', 'inc_transportation' => 'Transportation',
+			'inc_shopping_stop' => 'Shopping stop', 'inc_instant_confirmation' => 'Instant confirmation',
+		);
+		$inc = array();
+		foreach ($inc_map as $k => $lbl) {
+			if ( ! empty($d[$k])) { $inc[] = $lbl; }
+		}
+		if ($inc) { $lines[] = "Inclusions:\n- " . implode("\n- ", $inc); }
+
+		$flt = array();
+		if ($g('flight_depart_origin_destination') !== '') {
+			$flt[] = trim('Depart ' . $g('flight_departure_date') . ' ' . $g('flight_depart_origin_destination') . ' ' . $g('flight_departure_no'));
+		}
+		if ($g('flight_return_origin_destination') !== '') {
+			$flt[] = trim('Return ' . $g('flight_return_date') . ' ' . $g('flight_return_origin_destination') . ' ' . $g('flight_return_no'));
+		}
+		if ($flt) { $lines[] = "Flights:\n- " . implode("\n- ", $flt); }
+
+		if ( ! empty($d['itinerary']) && is_array($d['itinerary'])) {
+			$days_txt = array();
+			foreach ($d['itinerary'] as $day) {
+				if ( ! is_array($day)) { continue; }
+				$no    = isset($day['day_no']) ? trim((string) $day['day_no']) : '';
+				$title = isset($day['title']) ? trim(preg_replace('/\s+/', ' ', (string) $day['title'])) : '';
+				$desc  = isset($day['description']) ? competitor_html_to_text((string) $day['description'], 2000) : '';
+				$seg = trim($no . ($title !== '' ? ': ' . $title : '') . ($desc !== '' ? ' — ' . $desc : ''));
+				if ($seg !== '') { $days_txt[] = $seg; }
+			}
+			if ($days_txt) { $lines[] = "Itinerary:\n- " . implode("\n- ", $days_txt); }
+		}
+
+		if ( ! empty($d['pricing_categories']) && is_array($d['pricing_categories'])) {
+			$pr = array();
+			foreach ($d['pricing_categories'] as $cat) {
+				if ( ! is_array($cat)) { continue; }
+				$name  = isset($cat['category']) ? trim((string) $cat['category']) : '';
+				$price = '';
+				if ( ! empty($cat['price_dates']) && is_array($cat['price_dates'])) {
+					foreach ($cat['price_dates'] as $pd) {
+						if (is_array($pd) && isset($pd['price']) && $pd['price'] !== '') {
+							$p = (string) $pd['price'];
+							if (preg_match('/^\d+\.\d+$/', $p)) { $p = rtrim(rtrim($p, '0'), '.'); }
+							if ($p !== '' && $p !== '0') { $price = $p; break; }
+						}
+					}
+				}
+				$seg = trim($name . ($price !== '' ? ': MYR ' . $price : ''));
+				if ($seg !== '') { $pr[] = $seg; }
+			}
+			if ($pr) { $lines[] = "Pricing:\n- " . implode("\n- ", $pr); }
+		}
+
+		return trim(implode("\n", $lines));
 	}
 }
 
@@ -4426,6 +5386,7 @@ if ( ! function_exists('competitor_orphan_crawl_rows'))
 				'analysis_id' => (int) $r->id,
 				'url'         => $url,
 				'title'       => (string) (isset($r->product_name) ? $r->product_name : ''),
+				'name'        => (string) (isset($r->competitor_name) ? $r->competitor_name : ''),
 				'state'       => ((isset($r->status) ? $r->status : '') === 'error') ? 'error' : 'done',
 				'message'     => 'Crawled',
 				'count'       => 1,

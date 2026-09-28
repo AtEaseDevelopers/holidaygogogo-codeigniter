@@ -61,6 +61,9 @@ class Faq_Suggestion_Model extends CI_Model
 	{
 		$this->load->helper('faq_suggestion');
 		$this->db->select('RunID, Source, StartDate, EndDate, Mobile, FileName, Model, CostUsd, Proposed, Created, RunState, ErrorMessage, InsertBy, InsertDate');
+		// Cheap presence flag so the listing can show a "View input" button without
+		// pulling the (potentially large) transcript into the grid query.
+		$this->db->select("(CASE WHEN InputText IS NOT NULL AND InputText <> '' THEN 1 ELSE 0 END) AS HasInput", false);
 		$this->db->from('faq_suggestion_runs');
 		$this->db->where('Status', 'Y');
 		$this->db->order_by('RunID', 'DESC');
@@ -137,7 +140,7 @@ class Faq_Suggestion_Model extends CI_Model
 	/** Update a run's outcome fields (counts / cost / model / state / error). */
 	function Update_Run($run_id, $data)
 	{
-		$allowed = array('Model', 'CostUsd', 'Proposed', 'Created', 'RunState', 'ErrorMessage');
+		$allowed = array('Model', 'CostUsd', 'Proposed', 'Created', 'RunState', 'ErrorMessage', 'InputText');
 		$row = array();
 		foreach ($allowed as $k) {
 			if (array_key_exists($k, $data)) {
@@ -316,6 +319,10 @@ class Faq_Suggestion_Model extends CI_Model
 					$this->Update_Run($run_id, array('RunState' => 'done', 'Proposed' => 0, 'Created' => 0));
 					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
 				}
+				// Keep the exact text handed to the AI so operators can review the
+				// input a run's suggestions came from (stored before the call so it
+				// survives an AI failure).
+				$this->Update_Run($run_id, array('InputText' => $transcript));
 				$this->load->library('FaqSuggestionService');
 				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs);
 			} else {
@@ -329,6 +336,8 @@ class Faq_Suggestion_Model extends CI_Model
 					$this->Update_Run($run_id, array('RunState' => 'done', 'Proposed' => 0, 'Created' => 0));
 					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
 				}
+				// Keep the exact text handed to the AI (see chat-file branch above).
+				$this->Update_Run($run_id, array('InputText' => $transcript));
 				$this->load->library('FaqSuggestionService');
 				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs);
 			}

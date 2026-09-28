@@ -514,6 +514,36 @@ if (!function_exists('faq_suggestion_run_scope')) {
 	}
 }
 
+if (!function_exists('faq_suggestion_input_preview')) {
+	/**
+	 * A short, single-line preview of the exact text sent to the AI (the
+	 * customer/agent transcript for a chats / chat-file run). Collapses all
+	 * whitespace to single spaces and caps the length with an ellipsis, for use
+	 * as a tooltip / inline hint on the runs listing. Blank in → '' out. Pure.
+	 */
+	function faq_suggestion_input_preview($text, $max = 200)
+	{
+		$text = trim(preg_replace('/\s+/u', ' ', (string) $text));
+		if ($text === '') {
+			return '';
+		}
+		$max = (int) $max;
+		if ($max < 1) {
+			$max = 1;
+		}
+		if (function_exists('mb_strlen')) {
+			if (mb_strlen($text, 'UTF-8') <= $max) {
+				return $text;
+			}
+			return rtrim(mb_substr($text, 0, $max, 'UTF-8')) . '…';
+		}
+		if (strlen($text) <= $max) {
+			return $text;
+		}
+		return rtrim(substr($text, 0, $max)) . '…';
+	}
+}
+
 if (!function_exists('faq_suggestion_fmt_date')) {
 	/**
 	 * Format a 'Y-m-d' (or 'Y-m-d H:i:s') string as 'j M Y' ("17 Sep 2026"),

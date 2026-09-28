@@ -31,6 +31,9 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
                         <?php } elseif(!empty($a->tour_code)) { ?>
                             <span class="label label-light-primary label-inline font-weight-bold ml-2" style="font-size:12px;"><?php echo htmlspecialchars($a->tour_code); ?></span>
                         <?php } ?>
+                        <?php if(!empty($a->competitor_name)) { ?>
+                            <span class="label label-light-success label-inline font-weight-bold ml-2" style="font-size:12px;"><i class="la la-building mr-1"></i><?php echo htmlspecialchars($a->competitor_name); ?></span>
+                        <?php } ?>
                     </h3>
                 </div>
                 <div class="card-toolbar">

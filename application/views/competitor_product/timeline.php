@@ -74,7 +74,16 @@
     }
     function jobStatusBadge(j) {
         if(j.state === 'error') return '<span class="label label-light-danger label-inline font-weight-bold">Error</span>';
+        // Queued behind a running crawl (one crawl at a time) — pause icon, black text on grey.
+        if(j.state === 'queued') {
+            return '<span class="label label-inline font-weight-bold" style="background-color:#eeeeee; color:#000;" title="' + $('<div>').text(j.message || 'Queued').html() + '"><i class="la la-pause-circle mr-1" style="color:#000;"></i>Queued</span>';
+        }
         if(j.state !== 'done') {
+            // Multi-chunk crawl: show read X / Y (+ %) from discovered vs done counts.
+            if(j.read_total > 0) {
+                var pct = Math.min(100, Math.round((j.read_done || 0) * 100 / j.read_total));
+                return '<span class="label label-light-warning label-inline font-weight-bold"><i class="la la-spinner la-spin mr-1"></i>Reading ' + (j.read_done||0).toLocaleString() + ' / ' + j.read_total.toLocaleString() + ' (' + pct + '%)</span>';
+            }
             var badge = '<span class="label label-light-warning label-inline font-weight-bold"><i class="la la-spinner la-spin mr-1"></i>' + $('<div>').text(j.message || 'Working…').html() + '</span>';
             var eta = jobEta(j);
             return badge + (eta ? '<br><span style="font-size:10px; color:#8ba0c4;">' + $('<div>').text(eta).html() + '</span>' : '');

@@ -62,6 +62,16 @@ class CompetitorAnalysisService
 	 * so a whole catalogue isn't analysed as one bogus "product".
 	 */
 	protected $last_is_listing = false;
+	// Set per page while reading: the page's JSON-LD declares it a Product/Trip — a
+	// language-neutral keep-signal for the tour gate (competitor_jsonld_is_product).
+	protected $last_is_product = false;
+	// Per-crawl memo of collect_sitemap_locs() keyed by origin (the sitemap tree is
+	// walked by discovery, the coverage target and the recrawl sweep — fetch it once).
+	protected $sitemap_locs_cache = array();
+	// Adaptive politeness: host => unix timestamp until which to hold off, set when the
+	// host returns 429/503 (honouring Retry-After). Both fetch paths wait it out so we
+	// back off instead of hammering a throttling host into more 429s.
+	protected $host_cooldown = array();
 
 	/** Set by extract_source_text(): the page's real product name (<h1>/og:title). */
 	protected $last_page_title = '';
@@ -102,6 +112,121 @@ class CompetitorAnalysisService
 
 	/** Whether reading a product page may fall back to headless Chrome (see above). */
 	protected $reading_allow_headless = true;
+
+	/**
+	 * The site's AUTHORITATIVE product total for the current crawl, when known exactly
+	 * (set by discover_ice() to the enumerated ICE catalogue size). 0 = unknown here;
+	 * authoritative_total() then falls back to the listing's declared count. Drives the
+	 * self-healing coverage recrawl in crawl_to_text().
+	 */
+	protected $last_authoritative_total = 0;
+
+	/** True for the first FULL crawl of a host (no learned baseline): union headless with
+	 * the normal discovery to establish the site's true best (recorded as the "note"). */
+	protected $thorough_discovery = false;
+
+	/** Optional file the discovered URL list is written to (set per-crawl by the worker,
+	 * truncated at the start of each crawl). '' = don't persist. */
+	protected $discovery_url_file = '';
+
+	/** Set the per-crawl discovered-URL file (the work queue). NOT truncated here: the first
+	 * run writes it fresh (each crawl has its own per-job file), and a continuation run REUSES
+	 * it to skip re-discovery (discover-once-then-reuse). Pass '' to disable. */
+	public function set_discovery_url_file($path)
+	{
+		$this->discovery_url_file = (string) $path;
+	}
+
+	/** Hard cap on URLs collected during discovery — the memory guard that stops a mega-site
+	 * (millions of sitemap entries) from OOM-killing the worker. COMPETITOR_MAX_DISCOVER_URLS
+	 * overrides; default 5000 (far above any real competitor, only ever bites aggregators). */
+	protected function discovery_cap()
+	{
+		$n = (int) get_env('COMPETITOR_MAX_DISCOVER_URLS');
+		// Generous by default so a full catalogue is captured (real competitors are well under
+		// this; only a mega-aggregator hits it). It's just a memory guard — 20k URLs is a few MB.
+		return $n > 0 ? $n : 20000;
+	}
+
+	/** Max products READ per full crawl. Default 0 = no cap — reading is instead bounded by
+	 * the discovery cap and made safe by chunked checkpointing (below). COMPETITOR_MAX_READ
+	 * overrides; set > 0 only if you want an explicit hard sample. */
+	protected function read_cap()
+	{
+		$n = get_env('COMPETITOR_MAX_READ');
+		return ($n === '' || $n === null) ? 0 : (int) $n;
+	}
+
+	/** One uniform CHUNK size for EVERY crawl: read this many URLs per run, checkpoint the items
+	 * file, then (if more remain) re-spawn to continue. A small site finishes in one chunk; a big
+	 * site auto-continues over many paced runs. COMPETITOR_READ_CHUNK overrides; default 500.
+	 * <= 0 disables chunking (read everything in one run, single final write). */
+	protected function read_chunk()
+	{
+		$n = get_env('COMPETITOR_READ_CHUNK');
+		return ($n === '' || $n === null) ? 500 : (int) $n;
+	}
+
+	/** Optional items file crawl_to_text checkpoints to after each chunk (set per-crawl by the
+	 * worker). '' = don't checkpoint mid-read. */
+	protected $items_checkpoint_file = '';
+
+	/** Set the file crawl_to_text flushes read products to after each chunk (crash-resilience). */
+	public function set_items_checkpoint_file($path)
+	{
+		$this->items_checkpoint_file = (string) $path;
+	}
+
+	/** Optional file tracking URLs already ATTEMPTED across resumable chunk runs. When set (with
+	 * a positive read_chunk), a crawl reads only the next chunk and carries prior progress. */
+	protected $done_file = '';
+
+	/** True after crawl_to_text if more discovered URLs remain unread — the worker re-spawns the
+	 * job to continue the next chunk. */
+	protected $last_has_more = false;
+
+	/** The URLs read in the current run's chunk — marked "done" AFTER reading so a mid-chunk
+	 * crash loses nothing (the chunk is re-read next run and deduped). */
+	protected $last_run_urls = array();
+
+	/** Set the resume "attempted URLs" file to enable resumable chunked crawling. */
+	public function set_done_file($path)
+	{
+		$this->done_file = (string) $path;
+	}
+
+	/** Whether the last crawl_to_text left unread URLs (→ worker should re-spawn to continue). */
+	public function crawl_has_more()
+	{
+		return (bool) $this->last_has_more;
+	}
+
+	/** The discovery method used ('sitemap','ice','html','headless','ai','resume',…) — the worker
+	 * persists this after the first run so continuation runs can restore it (keeps headless
+	 * gating correct across chunks; e.g. an ICE site must NOT headless-render on resume). */
+	public function discovery_source()
+	{
+		return (string) $this->last_discovery_source;
+	}
+
+	/** Restore the discovery source on a continuation run (see discovery_source()). '' = ignore. */
+	public function set_forced_source($source)
+	{
+		$this->forced_source = (string) $source;
+	}
+	protected $forced_source = '';
+
+	/** Flush the products read so far to the checkpoint file (best-effort, atomic-ish). */
+	protected function checkpoint_items($out)
+	{
+		if ($this->items_checkpoint_file === '') {
+			return;
+		}
+		$tmp = $this->items_checkpoint_file . '.tmp';
+		if (@file_put_contents($tmp, json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) !== false) {
+			@rename($tmp, $this->items_checkpoint_file);   // atomic swap — never a half-written file
+		}
+	}
 
 	/** Below this many chars, an SPA's recovered metadata is treated as partial. */
 	const SPA_PARTIAL_MAX = 2000;
@@ -175,6 +300,22 @@ class CompetitorAnalysisService
 		// the sweep is site-root only.
 		if (competitor_is_site_root($base_url)) {
 			$sweep = $this->discover_all_urls($base_url, $limit);
+			// First crawl of this host (thorough learn): ALSO render (headless) + mine the
+			// hydration blobs, then union — so a JS site's links are learned even when the
+			// sitemap/BFS alone would miss them. Slow, once per new host; the note then
+			// carries the baseline forward so later crawls skip this.
+			if ($this->thorough_discovery) {
+				$rendered = $this->discover_via_headless($base_url, $limit);
+				$before   = count($sweep);
+				$sweep    = array_values(array_unique(array_merge(
+					$this->discovered_urls($sweep), $this->discovered_urls($rendered))));
+				$this->log_crawl('thorough_union', array('sweep' => $before,
+					'headless_added' => count($sweep) - $before, 'total' => count($sweep)));
+				if ( ! empty($sweep)) {
+					$this->last_discovery_source = 'thorough';   // reading may render JS tours
+					return $sweep;
+				}
+			}
 			if ( ! empty($sweep)) {
 				$this->last_discovery_source = 'sweep';   // not sitemap/ice → reading may render JS tours
 				return $sweep;
@@ -185,6 +326,17 @@ class CompetitorAnalysisService
 		// links are injected by JavaScript, e.g. chanbrothers), render the page — and
 		// its category pages — with headless Chrome and pull the product links.
 		$urls = $this->crawl_product_urls($base_url, $limit);
+		if (count($urls) < 3) {
+			// Many SPAs (Next.js/Nuxt) ship every tour's url/slug in a hydration blob
+			// INSIDE the served HTML even when the DOM has no anchors — mine it before
+			// paying for a headless render. Often turns a "needs headless" SPA into a
+			// cheap plain-HTML crawl.
+			$embedded = competitor_urls_from_embedded_json($this->fetch_url($base_url), $base_url);
+			if ( ! empty($embedded)) {
+				$urls = array_values(array_unique(array_merge($urls, $embedded)));
+				$this->log_crawl('embedded_json_discovery', array('base_url' => $base_url, 'products' => count($embedded)));
+			}
+		}
 		if (count($urls) >= 3) {
 			$this->last_discovery_source = 'html';   // enough static links — trust it
 		} else {
@@ -233,25 +385,45 @@ class CompetitorAnalysisService
 			return array();
 		}
 		$origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+		// Walk the whole sitemap tree at most ONCE per origin per crawl — discovery, the
+		// coverage-target estimate and the recrawl sweep all ask for it, and it's dozens
+		// of fetches on a big site. Cached on the instance (one crawl = one origin).
+		if (isset($this->sitemap_locs_cache[$origin])) {
+			return $this->sitemap_locs_cache[$origin];
+		}
 		$norm   = function ($h) { return preg_replace('/^www\./i', '', strtolower((string) $h)); };
 		$host   = $norm($parts['host']);
 
-		$queue = competitor_robots_sitemaps($this->fetch_url($origin . '/robots.txt'));
-		if (empty($queue)) {
-			$queue = array($origin . '/sitemap.xml');
-		}
+		// Prefer the sitemap(s) robots.txt DECLARES (authoritative). If it declares none,
+		// PROBE the well-known locations so a site that keeps its sitemap off the default
+		// path (WordPress /wp-sitemap.xml, Yoast /sitemap_index.xml…) still gets found
+		// instead of collapsing to the slow headless fallback.
+		$declared = competitor_robots_sitemaps($this->fetch_url($origin . '/robots.txt'));
+		$queue    = ! empty($declared) ? $declared : competitor_sitemap_candidates($origin);
 
+		$cap  = $this->discovery_cap();   // memory guard — stop before a mega-sitemap OOMs us
 		$seen = array();
 		$locs = array();
 		while ( ! empty($queue)) {
+			if (count($locs) >= $cap) {
+				$this->log_crawl('sitemap_cap', array('cap' => $cap, 'origin' => $origin));
+				break;   // bounded: don't hold millions of sitemap URLs in RAM
+			}
 			$sm = array_shift($queue);
 			if (isset($seen[$sm])) {
 				continue;
 			}
 			$seen[$sm] = true;
 
+			// fetch_url already retries transient failures (timeout / 5xx / 429 / empty-200)
+			// on a fresh connection — don't add more hits here (retrying INTO a rate-limit
+			// only makes a 429 worse). An empty result just skips this sitemap.
 			$xml = $this->fetch_url($sm);
 			if ($xml === '') {
+				// A declared sitemap that comes back EMPTY is the tell-tale of a site blanking
+				// the response to automated fetches (seen on lovelyvacation.com.my) — log it so
+				// the "few products" cause is visible instead of silently falling to headless.
+				$this->log_crawl('sitemap_empty', array('sm' => $sm));
 				continue;
 			}
 			if (substr($xml, 0, 2) === "\x1f\x8b" && function_exists('gzdecode')) {
@@ -270,7 +442,14 @@ class CompetitorAnalysisService
 				}
 				$seen[$u] = true;
 				$locs[] = $u;
+				if (count($locs) >= $cap) { break; }   // stop mid-file too
 			}
+		}
+		// Cache only a NON-empty result — an empty one is almost always a transient fetch
+		// failure (cold-start/timeout), and caching it would lock the whole crawl out of
+		// the sitemap; leaving it uncached lets a later caller retry and recover.
+		if ( ! empty($locs)) {
+			$this->sitemap_locs_cache[$origin] = $locs;
 		}
 		return $locs;
 	}
@@ -333,6 +512,10 @@ class CompetitorAnalysisService
 		}
 		// Opaque SPA: product links live only in the captured JSON APIs, not the DOM.
 		foreach ($this->urls_from_apis($base_url) as $p) {
+			$products[$p] = true;
+		}
+		// …or in the hydration blob embedded in the rendered HTML (__NEXT_DATA__/__NUXT__).
+		foreach (competitor_urls_from_embedded_json($rendered, $base_url) as $p) {
 			$products[$p] = true;
 		}
 
@@ -425,42 +608,55 @@ class CompetitorAnalysisService
 		}
 		$this->log_crawl('ice_detected', array('origin' => $origin, 'countries' => count($cl['countries'])));
 
-		// Unbounded ($limit <= 0): probe every country and take every series.
-		// Bounded: spread the picks across several countries for variety (rather
-		// than filling the whole list from the first one) and stop at 25 probes.
-		$unbounded   = $limit <= 0;
-		$per_country = $unbounded ? PHP_INT_MAX : max(2, (int) ceil($limit / 4));
-		$items = array();
-		$seen  = array();
-		$probed = 0;
-		foreach ($cl['countries'] as $country) {
-			if (( ! $unbounded && count($items) >= $limit) || ( ! $unbounded && $probed >= 25)) {
-				break;
-			}
-			$country = trim((string) $country);
-			if ($country === '') {
-				continue;
-			}
-			$probed++;
-			$resp = $this->fetch_url($origin . '/api/v1/series?keyword=' . rawurlencode($country));
-			$taken = 0;
-			foreach (competitor_ice_series_items($resp, $origin, $limit) as $it) {
-				if (isset($seen[$it['url']])) {
-					continue;
-				}
-				$seen[$it['url']] = true;
-				$items[] = $it;
-				if (++$taken >= $per_country || ( ! $unbounded && count($items) >= $limit)) {
-					break;
-				}
-			}
+		// Enumerate the AUTHORITATIVE flat catalogues — no 25-per-keyword-query cap and
+		// no reliance on the (incomplete) country_list. Series + cruise share the
+		// /api/v1/series/<id> reader (cruise via ?type=cruise); land tours are a separate
+		// /b2c2b catalogue read per id; posts are promo bundles outside the series list.
+		$series = competitor_ice_code_list_items($this->fetch_url($origin . '/api/v1/series/itinerary_list'), $origin, 'series');
+		$cruise = competitor_ice_code_list_items($this->fetch_url($origin . '/api/v1/series/cruise_itinerary_list'), $origin, 'cruise');
+		$land   = $this->discover_ice_land_tours($origin);
+		$posts  = $this->discover_ice_posts_auto($base_url, '');
+
+		// Interleave the four sources so a BOUNDED pick stays varied (rather than filling
+		// the whole cap from series alone); dedupe by url.
+		$items = competitor_interleave_unique(array($series, $cruise, $land, $posts));
+		// The interleaved set IS the full ICE catalogue — record it as the authoritative
+		// total (before any limit slice) so the coverage check knows the crawl is complete.
+		$this->last_authoritative_total = count($items);
+		if ($limit > 0) {
+			$items = array_slice($items, 0, $limit);
 		}
-		// Fold in "posts" (promo bundles outside the series catalogue — gd.my's Sabah).
-		foreach ($this->discover_ice_posts_auto($base_url, '') as $p) {
-			if ( ! isset($seen[$p['url']])) { $items[] = $p; }
-		}
-		$this->log_crawl('ice_discovery', array('origin' => $origin, 'probed' => $probed, 'count' => count($items)));
+		$this->log_crawl('ice_discovery', array('origin' => $origin,
+			'series' => count($series), 'cruise' => count($cruise),
+			'land' => count($land), 'posts' => count($posts), 'count' => count($items)));
 		return $items;
+	}
+
+	/**
+	 * Enumerate the ICE /b2c2b land-tour catalogue: page 1 exposes meta.total_pages,
+	 * then we walk the rest (20/page). Bounded by COMPETITOR_ICE_MAX_LIST_PAGES
+	 * (<= 0 = all pages; total_pages caps it either way). Each row becomes a
+	 * /b2c2b/api/v1/land_tours/<id> detail-URL pick. Returns [{url,label}].
+	 */
+	protected function discover_ice_land_tours($origin)
+	{
+		$first = $this->fetch_url($origin . '/b2c2b/api/v1/land_tours');
+		$items = competitor_ice_land_tour_items($first, $origin);
+		if (empty($items)) {
+			return array();
+		}
+		$total = competitor_ice_list_total_pages($first);
+		$cap   = (int) get_env('COMPETITOR_ICE_MAX_LIST_PAGES');   // <= 0 = all pages
+		$last  = ($cap > 0) ? min($total, $cap) : $total;
+		for ($page = 2; $page <= $last; $page++) {
+			$resp = $this->fetch_url($origin . '/b2c2b/api/v1/land_tours?page=' . $page);
+			$items = array_merge($items, competitor_ice_land_tour_items($resp, $origin));
+		}
+		if ($cap > 0 && $total > $cap) {
+			$this->log_crawl('ice_land_tours_capped', array('total_pages' => $total, 'read_pages' => $last));
+		}
+		$this->log_crawl('ice_land_tours', array('total_pages' => $total, 'read_pages' => $last, 'count' => count($items)));
+		return array_values($items);
 	}
 
 	/** ICE post categories to probe (brand-prefixed, e.g. gd_domestic) — there's no
@@ -781,20 +977,127 @@ class CompetitorAnalysisService
 	 * visited-set guarantees it terminates); an optional COMPETITOR_MAX_SITE_PAGES caps
 	 * it only for a runaway/huge site. Returns a URL list.
 	 */
+	/**
+	 * The recrawl trigger tolerance (0.1 = escalate when discovery got < 90% of the
+	 * site's declared total). COMPETITOR_COVERAGE_TOLERANCE overrides; kept in [0,1).
+	 */
+	protected function coverage_tolerance()
+	{
+		$t = get_env('COMPETITOR_COVERAGE_TOLERANCE');
+		$t = ($t === '' || $t === null) ? 0.1 : (float) $t;
+		return ($t < 0 || $t >= 1) ? 0.1 : $t;
+	}
+
+	/**
+	 * The site's AUTHORITATIVE product total, or 0 when it can't be known reliably.
+	 * ICE sites expose it exactly (enumerated catalogue, stashed during discover_ice).
+	 * Otherwise read the base listing's own declared count — its "X of Y results" prose
+	 * and/or its JSON listing API's meta.total. Only trustworthy product-level signals
+	 * are used, so a 0 leaves the crawl behaving exactly as before.
+	 */
+	protected function authoritative_total($base_url, $source)
+	{
+		if ($source === 'ice') {
+			return (int) $this->last_authoritative_total;
+		}
+		$total = 0;
+		$html = $this->fetch_url($base_url);
+		if ($html !== '') {
+			$total = competitor_result_count_hint(
+				competitor_html_to_text($html, competitor_page_char_cap(get_env('COMPETITOR_MAX_PAGE_CHARS')))
+			);
+			$api = competitor_spa_api_url($base_url);
+			if ($api !== '') {
+				$api_total = competitor_paginator_total($this->fetch_url($api));
+				if ($api_total > $total) { $total = $api_total; }
+			}
+		}
+		// Sitemap dominant-cluster estimate: the largest same-shaped URL family in the
+		// sitemap is almost always the product namespace — a language-free product count
+		// for the many sites (SPA / 中文 / BM) that declare none in prose. Only trusted
+		// when the cluster's URLs look product-ish (keyword or product-URL shape), so a
+		// big blog/news family can't set a false-high target and trigger a wasted recrawl.
+		$host = parse_url($base_url, PHP_URL_HOST);
+		$locs = array();
+		foreach ($this->collect_sitemap_locs($base_url) as $u) {
+			if (competitor_is_candidate_url($u, $host) && ! competitor_is_guide_url($u)) {
+				$locs[] = $u;
+			}
+		}
+		$cluster = competitor_dominant_path_cluster($locs);
+		if ( ! empty($cluster)
+			&& (competitor_is_product_url($cluster[0]) || competitor_path_has_product_keyword($cluster[0]))
+			&& count($cluster) > $total) {
+			$this->log_crawl('sitemap_cluster_total', array('template_sample' => $cluster[0],
+				'cluster' => count($cluster), 'prev_total' => $total));
+			$total = count($cluster);
+		}
+		return (int) $total;
+	}
+
+	/**
+	 * Self-healing coverage: when discovery came up short of the site's authoritative
+	 * total ($target), escalate — each strategy applied at most ONCE, capped by
+	 * COMPETITOR_MAX_RECRAWL_ROUNDS — unioning whatever new product URLs each finds.
+	 * Two strategies: the whole-site SWEEP (BFS + sitemap union) and HTML PAGINATION
+	 * (?page=2..N) — the one gap the sweep can't close on its own. Headless is NOT a
+	 * recrawl strategy: it's already the discovery fallback, so re-running it here just
+	 * repeats work. Guaranteed to terminate (per-strategy-once + round cap). Full
+	 * unbounded crawls only (the caller gates on limit/keyword). Returns widened URLs.
+	 */
+	protected function close_coverage_gap($base_url, array $urls, $target)
+	{
+		$max = (int) get_env('COMPETITOR_MAX_RECRAWL_ROUNDS');
+		if ($max <= 0) { $max = 2; }
+		$tol = $this->coverage_tolerance();
+		$applied   = array();
+		$rounds    = 0;
+		$base_html = null;
+		while ($rounds < $max && competitor_coverage_short(count($urls), $target, $tol)) {
+			$strategy = '';
+			$found    = array();
+			if ( ! isset($applied['sweep']) && ! in_array($this->last_discovery_source, array('sweep', 'sitemap', 'thorough'), true)) {
+				$strategy = 'sweep';                          // whole-site BFS + sitemap union
+				$found = $this->discover_all_urls($base_url, 0);
+			} elseif ( ! isset($applied['html_pagination'])) {
+				$strategy = 'html_pagination';                // follow ?page=2..N from the root listing
+				if ($base_html === null) { $base_html = $this->fetch_url($base_url); }
+				$found = $this->html_paginated_child_urls($base_url, $base_html);
+			} else {
+				break;                                         // no strategies left to try
+			}
+			$applied[$strategy] = true;
+			$before = count($urls);
+			$urls = array_values(array_unique(array_merge($urls, $this->discovered_urls($found))));
+			$rounds++;
+			$this->log_crawl('coverage_recrawl', array('round' => $rounds, 'strategy' => $strategy,
+				'before' => $before, 'after' => count($urls), 'target' => $target));
+		}
+		return $urls;
+	}
+
 	protected function discover_all_urls($base_url, $limit)
 	{
-		$page_cap = (int) get_env('COMPETITOR_MAX_SITE_PAGES');   // <= 0 = unlimited
+		$page_cap = (int) get_env('COMPETITOR_MAX_SITE_PAGES');
+		// Default the BFS breadth to the discovery cap (memory guard) so a mega-site can't
+		// balloon the visited-set; a normal site finishes far below it (unaffected).
+		$page_cap = $page_cap > 0 ? $page_cap : $this->discovery_cap();
 
-		$crawled = $this->crawl_all_urls($base_url, $page_cap);
-
-		// Union in the sitemap's same-host URLs — reaches SPA tours the raw-HTML BFS
-		// can't (client-paginated listings). Guides/articles are filtered out; the gate
-		// drops any non-tour or stale entry during reading.
+		// SITEMAP FIRST (cold): fetch the sitemap BEFORE the broad BFS burst. A throttling host
+		// (e.g. lovelyvacation.com.my, Crawl-delay set) returns empty bodies to a burst — so if
+		// the BFS ran first it would throttle the site and the later sitemap fetch would come back
+		// empty (losing the authoritative product list). Reading it cold, as the first request,
+		// gets the full list; the result is cached so the union below is free. Guides filtered out.
 		$sitemap = array();
 		foreach ($this->collect_sitemap_locs($base_url) as $u) {
 			if (competitor_is_guide_url($u)) { continue; }
 			$sitemap[] = $u;
 		}
+
+		// Then the broad same-host BFS (raw-HTML crawl) for anything the sitemap misses.
+		$crawled = $this->crawl_all_urls($base_url, $page_cap);
+
+		// Union: sitemap ∪ BFS (order can only ADD coverage — nothing is dropped).
 		$sitemap_new = array_values(array_diff($sitemap, $crawled));
 		$cands = array_values(array_unique(array_merge($crawled, $sitemap_new)));
 		if ( ! empty($sitemap_new)) {
@@ -1012,8 +1315,11 @@ class CompetitorAnalysisService
 		// category pages, blog posts and under-scraped shells fail this, so they're
 		// dropped here rather than analysed. Logged so the crawl log shows exactly what
 		// was skipped (no silent truncation).
-		if (competitor_scrape_is_thin($text) || ! competitor_is_tour_page($text)) {
-			$this->log_crawl('dropped_not_tour', array('url' => $url, 'text_len' => strlen($text)));
+		if (competitor_scrape_is_thin($text)
+			|| ! competitor_is_tour_page($text, $this->last_is_product, competitor_is_product_url($url))) {
+			$this->log_crawl('dropped_not_tour', array('url' => $url, 'text_len' => strlen($text),
+				'jsonld_product' => $this->last_is_product ? 1 : 0,
+				'product_url' => competitor_is_product_url($url) ? 1 : 0));
 			return array();
 		}
 		// Store the customer-facing web URL for an ICE series (set while extracting),
@@ -1156,6 +1462,30 @@ class CompetitorAnalysisService
 	}
 
 	/**
+	 * PER-SITE adapters: a few competitors are opaque SPAs whose products are only in a
+	 * clean public JSON API — read it directly (one call, no per-page render) and return
+	 * ready crawl items [{url,title,text}]. These WIN over any headless-scraped duplicate
+	 * of the same URL. Isolated per host by design (the general path is discovery + the
+	 * gate/coverage helpers); returns [] for every other site so nothing else is affected.
+	 */
+	protected function site_adapter_items($base_url)
+	{
+		$host   = preg_replace('/^www\./i', '', strtolower((string) parse_url($base_url, PHP_URL_HOST)));
+		$parts  = parse_url($base_url);
+		$origin = ( ! empty($parts['scheme']) && ! empty($parts['host']))
+			? $parts['scheme'] . '://' . $parts['host'] : (string) $base_url;
+
+		if ($host === 'tripfez.com') {
+			// tripfez React SPA: its cruise catalogue is one public JSON call (~44 items).
+			$body  = $this->fetch_api('https://api.cruisemalaysia.com.my/api/v1/cruises?limit=1000', $base_url);
+			$items = competitor_tripfez_cruise_items($body, $origin);
+			$this->log_crawl('site_adapter', array('host' => $host, 'source' => 'cruise_api', 'items' => count($items)));
+			return $items;
+		}
+		return array();
+	}
+
+	/**
 	 * Enumerate ALL product URLs behind a paginated SPA listing (e.g. tio.asia's
 	 * /tour-package, whose /api/tour-package returns {data,links,meta} 16 at a time).
 	 * Finds the paginated API among the listing's captured render XHRs, walks every
@@ -1258,6 +1588,7 @@ class CompetitorAnalysisService
 	{
 		$this->last_spa_partial = false;
 		$this->last_is_listing  = false;
+		$this->last_is_product  = false;
 		$this->last_page_title  = '';
 		$this->last_page_links  = array();
 		$this->last_page_links_raw = array();
@@ -1283,6 +1614,17 @@ class CompetitorAnalysisService
 				$origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
 				$this->last_ice_web_url = competitor_ice_series_web_url($body, $origin);
 			}
+		} elseif ($kind === 'land_tour') {
+			$body = $fetch_self();
+			$text = competitor_ice_land_tour_to_text($body);
+			// Show the customer-facing /web/land-tour/<code> page, not the /b2c2b API URL.
+			$d = json_decode($body, true);
+			$code = (is_array($d) && isset($d['code'])) ? trim((string) $d['code']) : '';
+			$parts = parse_url($url);
+			if ($code !== '' && ! empty($parts['scheme']) && ! empty($parts['host'])) {
+				$origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+				$this->last_ice_web_url = $origin . '/web/land-tour/' . rawurlencode($code);
+			}
 		} elseif ($kind === 'posts') {
 			$text = competitor_json_api_to_text($fetch_self());
 		} else {
@@ -1298,7 +1640,12 @@ class CompetitorAnalysisService
 
 			// Category/listing/search page (per its JSON-LD) — not a single product;
 			// flag so expand_source_items() drops it instead of analysing a catalogue.
-			$this->last_is_listing = competitor_looks_like_listing(competitor_jsonld_types($html));
+			// The same JSON-LD also gives the positive keep-signal (Product/Trip type)
+			// so a page the site DECLARES a tour survives even if the (multilingual) text
+			// regex misses — e.g. an SPA shell whose itinerary loads later.
+			$ld_types = competitor_jsonld_types($html);
+			$this->last_is_listing = competitor_looks_like_listing($ld_types);
+			$this->last_is_product = competitor_jsonld_is_product($ld_types);
 
 			// The real product name (<h1>/og:title) — reliable title for review + AI,
 			// vs the first body line which is usually menu/CTA/inquiry-form chrome.
@@ -1382,7 +1729,9 @@ class CompetitorAnalysisService
 						if ($this->last_page_title === '') {
 							$this->last_page_title = competitor_page_title($refetched);
 						}
-						$this->last_is_listing = competitor_looks_like_listing(competitor_jsonld_types($refetched));
+						$rf_types = competitor_jsonld_types($refetched);
+						$this->last_is_listing = competitor_looks_like_listing($rf_types);
+						$this->last_is_product = competitor_jsonld_is_product($rf_types);
 					}
 				}
 			}
@@ -1580,6 +1929,9 @@ class CompetitorAnalysisService
 	{
 		$this->websearch_cap   = competitor_websearch_cap(get_env('COMPETITOR_MAX_WEBSEARCH'));
 		$this->websearch_count = 0;
+		// Single headless budget for all crawls (COMPETITOR_MAX_HEADLESS; set it to 0 for
+		// uncapped). A thorough first-crawl gets its extra reach from the headless UNION in
+		// discovery, not a separate budget.
 		$this->headless_cap    = competitor_headless_cap(get_env('COMPETITOR_MAX_HEADLESS'));
 		$this->headless_count  = 0;
 		$this->run_cost        = 0.0;
@@ -1627,8 +1979,18 @@ class CompetitorAnalysisService
 		}
 		$secs = (int) get_env('COMPETITOR_HEADLESS_TIMEOUT');
 		$secs = $secs > 0 ? $secs : 35;
+		// Pass the proxy to the headless renderer (render.js reads these env vars → Playwright
+		// launches Chromium through the proxy), so rendered pages route through the same IP.
+		$env = '';
+		$proxy = $this->proxy_config();
+		if ($proxy !== null) {
+			$env = 'COMPETITOR_PROXY=' . escapeshellarg($proxy['url']) . ' ';
+			if ($proxy['auth'] !== '') {
+				$env .= 'COMPETITOR_PROXY_AUTH=' . escapeshellarg($proxy['auth']) . ' ';
+			}
+		}
 		// No done-marker: node prints its JSON then exits, so wait for exit (salvage off).
-		$raw = $this->run_with_timeout($cmd . ' ' . escapeshellarg($url), $secs + 10, 'render.js', '');
+		$raw = $this->run_with_timeout($env . $cmd . ' ' . escapeshellarg($url), $secs + 10, 'render.js', '');
 		$data = json_decode((string) $raw, true);
 		if ( ! is_array($data) || ! empty($data['error'])) {
 			if (is_array($data) && ! empty($data['error'])) {
@@ -1690,9 +2052,13 @@ class CompetitorAnalysisService
 		// often not writable, and Chrome otherwise fails to launch on Linux. Reused
 		// per-process (our renders are sequential, so no profile-lock clash).
 		$profile = sys_get_temp_dir() . '/cmp_chrome_' . getmypid();
+		// Chrome fallback: route through the proxy too (credentials aren't supported inline on
+		// the Chrome CLI — an auth'd proxy works via the curl + Playwright paths).
+		$proxy = $this->proxy_config();
+		$proxy_arg = ($proxy !== null) ? ' --proxy-server=' . escapeshellarg($proxy['url']) : '';
 		$cmd = escapeshellarg($bin)
 			. ' --headless --disable-gpu --no-sandbox --disable-dev-shm-usage'
-			. ' --user-data-dir=' . escapeshellarg($profile)
+			. ' --user-data-dir=' . escapeshellarg($profile) . $proxy_arg
 			. ' --virtual-time-budget=9000 --timeout=9000 --user-agent=' . escapeshellarg($ua)
 			. ' --dump-dom ' . escapeshellarg($url);
 
@@ -1845,13 +2211,36 @@ class CompetitorAnalysisService
 			throw new Exception('Please enter a valid http(s) URL.');
 		}
 		$tick = is_callable($progress) ? $progress : function () {};
+		$keyword = trim((string) $keyword);
+		// ALWAYS run the thorough (slowest, most complete) discovery for a full site crawl:
+		// union headless rendering with the normal sweep so JS-injected tour links are caught.
+		// Slower, but maximises coverage every time. A keyword/limited crawl stays scoped.
+		$this->thorough_discovery = ($keyword === '' && (int) $limit <= 0);
 		$this->reset_render_budget();
+		$this->last_authoritative_total = 0;   // recomputed per crawl (set by discover_ice)
 
 		// A base URL is always discovered into its full product list — UNCAPPED
 		// (bounded only by the same-host crawl's visited-set + fetch guard).
 		$tick('discovering', 0, 0, $base_url);
-		$keyword = trim((string) $keyword);
+		if ($this->thorough_discovery) {
+			$this->log_crawl('thorough_discovery_mode', array('base_url' => $base_url));
+		}
 
+		// DISCOVER-ONCE-THEN-REUSE: on a continuation run (the queue file AND a non-empty
+		// done-file both already exist), reuse the saved URL queue instead of re-discovering
+		// the whole site — so discovery runs ONCE on the first run, not again on every
+		// auto-continue chunk. A fresh crawl (new job → no done-file) discovers normally.
+		$resume = ($this->discovery_url_file !== '' && is_file($this->discovery_url_file) && filesize($this->discovery_url_file) > 0
+			&& $this->done_file !== '' && is_file($this->done_file) && filesize($this->done_file) > 0);
+		if ($resume) {
+			$urls = array_values(array_filter(array_map('trim',
+				file($this->discovery_url_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES))));
+			// Restore the ORIGINAL discovery source (persisted by the worker) so headless gating
+			// stays correct across chunks — e.g. an ICE/sitemap site must not headless-render on
+			// resume. Fall back to 'resume' (headless allowed) only if none was persisted.
+			$this->last_discovery_source = ($this->forced_source !== '') ? $this->forced_source : 'resume';
+			$this->log_crawl('resume_reuse_queue', array('urls' => count($urls), 'source' => $this->last_discovery_source));
+		} else {
 		// ICE site + keyword → use ICE's native search API (server-side match), not a
 		// full-catalogue enumeration + text filter. Returns null when it isn't ICE.
 		$ice_kw  = ($keyword !== '') ? $this->discover_ice_keyword($base_url, $keyword) : null;
@@ -1913,8 +2302,70 @@ class CompetitorAnalysisService
 		} elseif (empty($urls)) {
 			$urls = array($base_url);
 		}
+
+		// Self-healing coverage (full unbounded, non-keyword crawls only): if the site
+		// declares more products than discovery found, escalate discovery to close the
+		// gap automatically — no manual per-site deep-dive. A 0/unknown target or an
+		// already-complete crawl is a no-op (behaves exactly as before).
+		if ($keyword === '' && (int) $limit <= 0) {
+			$target = $this->authoritative_total($base_url, $this->last_discovery_source);
+			if (competitor_coverage_short(count($urls), $target, $this->coverage_tolerance())) {
+				$urls = $this->close_coverage_gap($base_url, $urls, $target);
+			}
+			$this->log_crawl('coverage_result', array('source' => $this->last_discovery_source,
+				'target' => $target, 'discovered' => count($urls)));
+		}
+
 		if ((int) $limit > 0) {
 			$urls = array_slice($urls, 0, (int) $limit);
+		} else {
+			// Full crawl: cap the READING to a bounded sample so a mega-site's discovered
+			// list doesn't turn into hours of page reads. Real competitors sit under the cap
+			// (unaffected); only aggregators get sampled. Logged so the truncation is visible.
+			$read_cap = $this->read_cap();
+			if ($read_cap > 0 && count($urls) > $read_cap) {
+				$this->log_crawl('read_cap_truncated', array('discovered' => count($urls), 'cap' => $read_cap));
+				$urls = array_slice($urls, 0, $read_cap);
+			}
+		}
+
+		// Persist the final discovered URL list (the exact set about to be read) to the
+		// per-crawl queue file — written ONCE on the first run; continuation runs reuse it
+		// (see discover-once-then-reuse above). Bounded by the caps, so it's cheap.
+		if ($this->discovery_url_file !== '' && ! empty($urls)) {
+			@file_put_contents($this->discovery_url_file, implode("\n", $urls) . "\n");
+		}
+		}   // end discover-once (the !$resume branch)
+
+		// CHECKPOINT-STYLE READING FOR EVERY CRAWL: read the discovered URLs one CHUNK per run,
+		// carrying forward prior chunks' products, and re-spawn to continue until done. A small
+		// site finishes in one chunk; a huge site (aggregator) auto-continues over many short,
+		// paced runs that survive blocks/kills. Same flow for all — no special one-shot path.
+		$resume_existing_items = array();
+		$this->last_has_more   = false;
+		$this->last_run_urls   = array();
+		$chunk = $this->read_chunk();   // one uniform chunk size, used for every crawl
+		if ($this->done_file !== '' && $chunk > 0) {
+			$done = array();
+			if (is_file($this->done_file)) {
+				foreach (file($this->done_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $d) {
+					$d = trim($d);
+					if ($d !== '') { $done[$d] = true; }
+				}
+			}
+			if ( ! empty($done) && $this->items_checkpoint_file !== '' && is_file($this->items_checkpoint_file)) {
+				$prev = json_decode((string) @file_get_contents($this->items_checkpoint_file), true);
+				if (is_array($prev)) { $resume_existing_items = $prev; }
+			}
+			$next = competitor_next_chunk($urls, $done, $chunk);   // pure, unit-tested
+			$urls = $next['chunk'];
+			$this->last_has_more = $next['has_more'];
+			// Remember this run's chunk — marked done AFTER reading (below), so a mid-chunk crash
+			// loses nothing (the chunk is simply re-read next run and deduped).
+			$this->last_run_urls = $urls;
+			$this->log_crawl('resume_chunk', array('already_done' => count($done),
+				'this_run' => count($urls), 'chunk' => $chunk, 'has_more' => $this->last_has_more,
+				'remaining' => $next['remaining'], 'carried_forward' => count($resume_existing_items)));
 		}
 
 		// #4 Headless gating: a structured-catalogue site (sitemap / ICE API) has
@@ -1956,7 +2407,21 @@ class CompetitorAnalysisService
 			}
 		}
 
-		$out = array();
+		// Per-site adapter: an opaque SPA may expose a clean public product API. Read it
+		// directly (one call) and treat those products as ALREADY read — seed the output
+		// with them and drop their URLs from the render queue, so we don't waste the
+		// headless budget re-rendering pages the API already gave us cleanly. Full crawls
+		// only (a keyword crawl stays targeted). Never throws.
+		$adapter_items = ($keyword === '') ? $this->site_adapter_items($base_url) : array();
+		$adapter_urls  = array();
+		foreach ($adapter_items as $it) { $adapter_urls[$it['url']] = true; }
+		if ( ! empty($adapter_urls)) {
+			$urls = array_values(array_filter($urls, function ($u) use ($adapter_urls) {
+				return ! isset($adapter_urls[$u]);
+			}));
+		}
+
+		$out = $adapter_items;   // adapter products count as read (they carry their text)
 		$i = 0;
 		// Read in parallel batches, fetching each batch's page bodies concurrently
 		// (curl_multi) then extracting from the prefetched body. Queue-based so a
@@ -1965,13 +2430,29 @@ class CompetitorAnalysisService
 		$queue   = array_values($urls);
 		$visited = array();
 		foreach ($queue as $u) { $visited[$u] = true; }
+		foreach ($adapter_urls as $u => $_) { $visited[$u] = true; }   // never re-queue an adapter URL
+		// Carry forward prior chunks' products (resume): seed the output + mark their URLs
+		// visited so they're never re-read, and so checkpoints keep the full accumulated set.
+		if ( ! empty($resume_existing_items)) {
+			$have = array();
+			foreach ($out as $it) { if (isset($it['url'])) { $have[$it['url']] = true; } }
+			foreach ($resume_existing_items as $it) {
+				$u = isset($it['url']) ? $it['url'] : null;
+				if ($u !== null && ! isset($have[$u])) { $out[] = $it; $have[$u] = true; $visited[$u] = true; }
+			}
+		}
 		$drill_cap = (int) get_env('COMPETITOR_DRILL_MAX');
-		$drill_cap = $drill_cap > 0 ? $drill_cap : 300;
+		$drill_cap = $drill_cap > 0 ? $drill_cap : 800;   // generous — pull more products out of listing pages
 		$drilled = 0;
 		$drill_skipped = 0;   // fresh child products dropped because the cap was hit
 		// Narrow the batch on a self-throttling host so the burst doesn't trip its limit.
 		$batch_size = $crawl_delay > 0 ? 3 : 8;
-		$this->log_crawl('reading_pace', array('crawl_delay' => $crawl_delay, 'batch_size' => $batch_size));
+		// Chunked checkpointing: flush progress to the items file every N products read, so a
+		// crash / kill / block mid-read never loses everything already read (and the read is
+		// naturally paced across chunks). 0 = single final write only.
+		$chunk       = $this->read_chunk();
+		$last_ckpt   = 0;
+		$this->log_crawl('reading_pace', array('crawl_delay' => $crawl_delay, 'batch_size' => $batch_size, 'chunk' => $chunk));
 		while ( ! empty($queue)) {
 			$batch  = array_splice($queue, 0, $batch_size);
 			$tick('reading', $i, count($visited), $batch[0]);
@@ -2008,6 +2489,12 @@ class CompetitorAnalysisService
 					}
 				}
 				$tick('reading', ++$i, count($visited), $purl);
+			}
+			// Checkpoint a full chunk's worth of progress to disk (crash-resilience).
+			if ($chunk > 0 && (count($out) - $last_ckpt) >= $chunk) {
+				$this->checkpoint_items($out);
+				$this->log_crawl('read_checkpoint', array('read_so_far' => count($out), 'remaining_queue' => count($queue)));
+				$last_ckpt = count($out);
 			}
 			// Respect the host's Crawl-delay between batches so we don't get throttled.
 			if ($crawl_delay > 0 && ! empty($queue)) {
@@ -2055,6 +2542,13 @@ class CompetitorAnalysisService
 			}
 			$this->reading_allow_headless = $prev_allow_headless;
 			$this->log_crawl('recovery_pass', array('attempted' => count($recover), 'recovered' => $recovered));
+		}
+		// Mark this run's chunk as ATTEMPTED now that reading (incl. recovery) is complete — so
+		// the next run skips them. Done AFTER reading: a mid-chunk crash leaves them un-marked,
+		// so they're safely re-read next run rather than lost. Failures count as done (attempted),
+		// so a persistently-failing URL isn't retried forever.
+		if ($this->done_file !== '' && ! empty($this->last_run_urls)) {
+			@file_put_contents($this->done_file, implode("\n", $this->last_run_urls) . "\n", FILE_APPEND);
 		}
 		// Strip site chrome (mega-menu / header / footer) that repeats verbatim across
 		// every product — our tag scraper misses it when it's plain <div>/<ul>. Fixes
@@ -2161,13 +2655,28 @@ class CompetitorAnalysisService
 	}
 
 	/** Browser-like curl options for a single URL, shared by fetch_url + multi. */
+	/**
+	 * Optional outbound proxy for ALL crawl traffic (curl + headless), so you can route
+	 * through a proxy / rotating residential IP to get past hard IP blocks (e.g. tourradar
+	 * 403). Returns ['url' => 'scheme://host:port', 'auth' => 'user:pass'] or null when
+	 * COMPETITOR_PROXY isn't set (default: no proxy, zero effect on normal crawls).
+	 */
+	protected function proxy_config()
+	{
+		$url = trim((string) get_env('COMPETITOR_PROXY'));
+		if ($url === '') {
+			return null;
+		}
+		return array('url' => $url, 'auth' => trim((string) get_env('COMPETITOR_PROXY_AUTH')));
+	}
+
 	protected function curl_opts($url)
 	{
 		// Shorter timeout so one slow/hanging page can't stall a wide crawl.
 		// Override with COMPETITOR_FETCH_TIMEOUT (seconds).
 		$timeout = (int) get_env('COMPETITOR_FETCH_TIMEOUT');
 		$timeout = $timeout > 0 ? $timeout : 15;
-		return array(
+		$opts = array(
 			CURLOPT_URL            => $url,
 			CURLOPT_RETURNTRANSFER => true,
 			CURLOPT_FOLLOWLOCATION => true,
@@ -2191,6 +2700,15 @@ class CompetitorAnalysisService
 				'Accept-Language: en-US,en;q=0.9',
 			),
 		);
+		// Route through the configured proxy / rotating IP, if any (gets past hard IP blocks).
+		$proxy = $this->proxy_config();
+		if ($proxy !== null) {
+			$opts[CURLOPT_PROXY] = $proxy['url'];
+			if ($proxy['auth'] !== '') {
+				$opts[CURLOPT_PROXYUSERPWD] = $proxy['auth'];
+			}
+		}
+		return $opts;
 	}
 
 	/**
@@ -2200,6 +2718,15 @@ class CompetitorAnalysisService
 	 */
 	protected function fetch_url($url)
 	{
+		$host = (string) parse_url($url, PHP_URL_HOST);
+		// Cross-crawl cache: a still-fresh page is served straight from disk with NO
+		// network request, so a re-crawl (or our own testing) doesn't re-hit — and
+		// rate-limit — the host. A stale entry revalidates conditionally (304 = cheap).
+		$cache = $this->http_cache_read($url);
+		if ($cache !== null && competitor_http_cache_is_fresh($cache['meta'], time(), $this->http_cache_ttl())) {
+			return $cache['body'];
+		}
+		$this->await_host_cooldown($host);
 		// Retry on a TRANSIENT failure: timeout / connection reset / 5xx / 429, AND — the
 		// subtle one — a 200 with an EMPTY body. Across a crawl the shared, HTTP/2-
 		// multiplexed connection gets closed by the server (a GOAWAY after N streams) or
@@ -2221,13 +2748,34 @@ class CompetitorAnalysisService
 				$opts[CURLOPT_HTTP_VERSION]  = defined('CURL_HTTP_VERSION_1_1')
 					? CURL_HTTP_VERSION_1_1 : $opts[CURLOPT_HTTP_VERSION];   // avoid h2 multiplexing
 			}
+			// Conditional revalidation of a stale cache entry — the server can answer 304.
+			if ($cache !== null) {
+				$cond = competitor_http_cache_conditional($cache['meta']);
+				if ( ! empty($cond) && isset($opts[CURLOPT_HTTPHEADER])) {
+					$opts[CURLOPT_HTTPHEADER] = array_merge($opts[CURLOPT_HTTPHEADER], $cond);
+				}
+			}
+			// Capture Retry-After (politeness) + ETag/Last-Modified (cache validators).
+			$retry_after = ''; $etag = ''; $last_mod = '';
+			$opts[CURLOPT_HEADERFUNCTION] = function ($c, $line) use (&$retry_after, &$etag, &$last_mod) {
+				if (stripos($line, 'retry-after:') === 0)        { $retry_after = trim(substr($line, 12)); }
+				elseif (stripos($line, 'etag:') === 0)           { $etag = trim(substr($line, 5)); }
+				elseif (stripos($line, 'last-modified:') === 0)  { $last_mod = trim(substr($line, 14)); }
+				return strlen($line);
+			};
 			curl_setopt_array($ch, $opts);
 			$body  = curl_exec($ch);
 			$errno = curl_errno($ch);
 			$code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 			curl_close($ch);
 
+			// 304 Not Modified → our cached copy is still valid; refresh its fresh-window.
+			if ( ! $errno && $code === 304 && $cache !== null) {
+				$this->http_cache_touch($url);
+				return $cache['body'];
+			}
 			if ( ! $errno && $code >= 200 && $code < 400 && is_string($body) && $body !== '') {
+				$this->http_cache_write($url, $body, $etag, $last_mod);
 				return $body;   // real, non-empty success
 			}
 			// Retry transient failures + an empty-body 2xx/3xx; give up on a hard 4xx.
@@ -2235,9 +2783,127 @@ class CompetitorAnalysisService
 			if ( ! $transient || $i === $attempts - 1) {
 				break;
 			}
-			usleep(500000);   // 0.5s back-off, also eases the host's crawl-delay
+			// A throttling response (429/503): back off for real — honour Retry-After, else
+			// exponential backoff — AND set a host cooldown so every later request to this
+			// host waits too, instead of hammering it into more 429s.
+			if ($code === 429 || $code === 503) {
+				$wait = competitor_retry_after_seconds($retry_after);
+				if ($wait <= 0) { $wait = competitor_backoff_seconds($i); }
+				$this->note_host_cooldown($host, $wait);
+				usleep((int) (min($wait, 30) * 1000000));
+			} else {
+				usleep(500000);   // 0.5s back-off, also eases the host's crawl-delay
+			}
 		}
 		return '';
+	}
+
+	/**
+	 * Record that $host asked us to back off for $secs (429/503) — extends its cooldown
+	 * window so both fetch paths hold off. Bounded by the Retry-After cap already applied.
+	 */
+	protected function note_host_cooldown($host, $secs)
+	{
+		if ($host === '' || $secs <= 0) {
+			return;
+		}
+		$until = time() + (int) ceil($secs);
+		if (empty($this->host_cooldown[$host]) || $until > $this->host_cooldown[$host]) {
+			$this->host_cooldown[$host] = $until;
+			$this->log_crawl('rate_limited', array('host' => $host, 'cooldown_s' => (int) ceil($secs)));
+		}
+	}
+
+	/**
+	 * Block until $host's 429/503 cooldown has elapsed (capped per wait so a hostile
+	 * value can't stall the crawl). No-op when the host isn't cooling down.
+	 */
+	protected function await_host_cooldown($host)
+	{
+		if ($host === '' || empty($this->host_cooldown[$host])) {
+			return;
+		}
+		$wait = $this->host_cooldown[$host] - time();
+		if ($wait > 0) {
+			usleep((int) (min($wait, 30) * 1000000));
+		}
+	}
+
+	/**
+	 * Fresh-window (seconds) for the cross-crawl HTTP cache. >0 = serve from disk without
+	 * a network hit for that long; 0 = always revalidate conditionally; <0 = cache OFF.
+	 * DEFAULT OFF: the cache stores full page bodies with no size cap, so left on across
+	 * many big crawls it can fill the disk (it did). Opt in with COMPETITOR_HTTP_CACHE_TTL
+	 * (e.g. 3600 for a 1h window) only when you're watching disk usage. Politeness/backoff,
+	 * not this cache, is the primary throttle protection.
+	 */
+	protected function http_cache_ttl()
+	{
+		$t = get_env('COMPETITOR_HTTP_CACHE_TTL');
+		return ($t === '' || $t === null) ? -1 : (int) $t;
+	}
+
+	protected function http_cache_dir()
+	{
+		$d = APPPATH . 'logs/competitor_crawl/httpcache/';
+		if ( ! is_dir($d)) { @mkdir($d, 0755, true); }
+		return $d;
+	}
+
+	/** Read a URL's cache entry {meta, body}, or null when absent/disabled/unreadable. */
+	protected function http_cache_read($url)
+	{
+		if ($this->http_cache_ttl() < 0) {
+			return null;   // caching disabled
+		}
+		$key = competitor_http_cache_key($url);
+		if ($key === '') {
+			return null;
+		}
+		$meta_f = $this->http_cache_dir() . $key . '.json';
+		$body_f = $this->http_cache_dir() . $key . '.body';
+		if ( ! is_file($meta_f) || ! is_file($body_f)) {
+			return null;
+		}
+		$meta = json_decode((string) @file_get_contents($meta_f), true);
+		$body = (string) @file_get_contents($body_f);
+		if ( ! is_array($meta) || $body === '') {
+			return null;
+		}
+		return array('meta' => $meta, 'body' => $body);
+	}
+
+	/** Store a fresh 200 body + its ETag/Last-Modified validators. No-op when disabled. */
+	protected function http_cache_write($url, $body, $etag, $last_modified)
+	{
+		if ($this->http_cache_ttl() < 0 || ! is_string($body) || $body === '') {
+			return;
+		}
+		$key = competitor_http_cache_key($url);
+		if ($key === '') {
+			return;
+		}
+		$dir = $this->http_cache_dir();
+		@file_put_contents($dir . $key . '.body', $body);
+		@file_put_contents($dir . $key . '.json', json_encode(
+			array('url' => $url, 'ts' => time(), 'etag' => (string) $etag, 'last_modified' => (string) $last_modified),
+			JSON_UNESCAPED_SLASHES));
+	}
+
+	/** Refresh a cache entry's fresh-window after a 304 (content unchanged). */
+	protected function http_cache_touch($url)
+	{
+		$key = competitor_http_cache_key($url);
+		if ($key === '') {
+			return;
+		}
+		$meta_f = $this->http_cache_dir() . $key . '.json';
+		$meta   = is_file($meta_f) ? json_decode((string) @file_get_contents($meta_f), true) : null;
+		if ( ! is_array($meta)) {
+			$meta = array('url' => $url);
+		}
+		$meta['ts'] = time();
+		@file_put_contents($meta_f, json_encode($meta, JSON_UNESCAPED_SLASHES));
 	}
 
 	/**
@@ -2253,6 +2919,27 @@ class CompetitorAnalysisService
 		if (empty($urls)) {
 			return $out;
 		}
+		// Cross-crawl cache: serve still-fresh URLs from disk (no network) and only fetch
+		// the rest — so a re-crawl doesn't re-hit the host with the whole batch.
+		$cached = array();   // url => cache entry (for conditional revalidation / 304 reuse)
+		$fetch  = array();
+		foreach ($urls as $u) {
+			$c = $this->http_cache_read($u);
+			if ($c !== null && competitor_http_cache_is_fresh($c['meta'], time(), $this->http_cache_ttl())) {
+				$out[$u] = $c['body'];
+				continue;
+			}
+			if ($c !== null) { $cached[$u] = $c; }
+			$fetch[] = $u;
+		}
+		if (empty($fetch)) {
+			return $out;
+		}
+		// Politeness: if any host in this batch is on a 429/503 cooldown, wait it out
+		// before firing the concurrent burst (a burst into a throttled host = more 429s).
+		foreach (array_unique(array_map(function ($u) { return (string) parse_url($u, PHP_URL_HOST); }, $fetch)) as $h) {
+			$this->await_host_cooldown($h);
+		}
 		$mh = curl_multi_init();
 		// Let same-host requests share one connection via HTTP/2 multiplexing instead
 		// of opening a socket per URL (with CURLOPT_SHARE this reuses TLS too).
@@ -2260,9 +2947,23 @@ class CompetitorAnalysisService
 			curl_multi_setopt($mh, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
 		}
 		$handles = array();
-		foreach ($urls as $u) {
-			$ch = curl_init();
-			curl_setopt_array($ch, $this->curl_opts($u));
+		$hdr     = array();   // url => ['etag'=>, 'lm'=>] captured from response headers
+		foreach ($fetch as $u) {
+			$ch   = curl_init();
+			$opts = $this->curl_opts($u);
+			if (isset($cached[$u])) {
+				$cond = competitor_http_cache_conditional($cached[$u]['meta']);
+				if ( ! empty($cond) && isset($opts[CURLOPT_HTTPHEADER])) {
+					$opts[CURLOPT_HTTPHEADER] = array_merge($opts[CURLOPT_HTTPHEADER], $cond);
+				}
+			}
+			$hdr[$u] = array('etag' => '', 'lm' => '');
+			$opts[CURLOPT_HEADERFUNCTION] = function ($c, $line) use (&$hdr, $u) {
+				if (stripos($line, 'etag:') === 0)              { $hdr[$u]['etag'] = trim(substr($line, 5)); }
+				elseif (stripos($line, 'last-modified:') === 0) { $hdr[$u]['lm'] = trim(substr($line, 14)); }
+				return strlen($line);
+			};
+			curl_setopt_array($ch, $opts);
 			curl_multi_add_handle($mh, $ch);
 			$handles[$u] = $ch;
 		}
@@ -2276,7 +2977,21 @@ class CompetitorAnalysisService
 		foreach ($handles as $u => $ch) {
 			$body = curl_multi_getcontent($ch);
 			$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-			$out[$u] = ($code >= 400 || ! is_string($body)) ? '' : $body;
+			// A throttled response in the burst → put that host on cooldown so the NEXT
+			// batch backs off (curl_multi can't read Retry-After cheaply here, so use a
+			// fixed exponential-ish backoff).
+			if ($code === 429 || $code === 503) {
+				$this->note_host_cooldown((string) parse_url($u, PHP_URL_HOST), competitor_backoff_seconds(1));
+			}
+			if ($code === 304 && isset($cached[$u])) {
+				$out[$u] = $cached[$u]['body'];   // unchanged — reuse cached copy
+				$this->http_cache_touch($u);
+			} elseif ($code >= 200 && $code < 400 && is_string($body) && $body !== '') {
+				$out[$u] = $body;
+				$this->http_cache_write($u, $body, $hdr[$u]['etag'], $hdr[$u]['lm']);
+			} else {
+				$out[$u] = '';
+			}
 			curl_multi_remove_handle($mh, $ch);
 			curl_close($ch);
 		}

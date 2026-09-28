@@ -29,6 +29,20 @@
 			return '<span data-toggle="tooltip" title="Total AI cost for this run">$' . number_format((float)$r->CostUsd, 4) . '</span>';
 		}
 	}
+	// The exact text handed to the AI. Chats / chat-file runs store the
+	// transcript — offer a "View" button that loads it on demand into a modal.
+	// PDF runs' input is the uploaded document itself (not re-stored as text).
+	if (!function_exists('faq_sugg_input_cell')) {
+		function faq_sugg_input_cell($r) {
+			if (strtolower((string)$r->Source) === 'pdf') {
+				return '<span class="text-muted" data-toggle="tooltip" title="' . htmlspecialchars((string)$r->FileName) . '"><i class="la la-file-pdf"></i> Document</span>';
+			}
+			if (!empty($r->HasInput)) {
+				return '<button type="button" class="btn btn-light-primary btn-sm font-weight-bold faq-input-btn" data-run-id="' . (int)$r->RunID . '" data-toggle="tooltip" title="View the transcript sent to the AI"><i class="la la-file-alt"></i> View</button>';
+			}
+			return '<span class="text-muted">—</span>';
+		}
+	}
 ?>
 
 <style>
@@ -95,6 +109,7 @@
 								<th style="text-align:center;">No.</th>
 								<th style="text-align:center;">Source</th>
 								<th style="text-align:center;">Scope</th>
+								<th style="text-align:center;">AI Input</th>
 								<th style="text-align:center;">Suggestions</th>
 								<th style="text-align:center;">AI Cost</th>
 								<th style="text-align:center;">Status</th>
@@ -104,7 +119,7 @@
 						</thead>
 						<tbody>
 							<?php if(empty($runs)) { ?>
-								<tr><td colspan="8" style="text-align:center; padding-top:10px; padding-bottom:10px;">No generation runs yet. Click <strong>Generate</strong>, <strong>From PDF</strong>, or <strong>From Chat File</strong> to create one.</td></tr>
+								<tr><td colspan="9" style="text-align:center; padding-top:10px; padding-bottom:10px;">No generation runs yet. Click <strong>Generate</strong>, <strong>From PDF</strong>, or <strong>From Chat File</strong> to create one.</td></tr>
 							<?php } else { $count = 1; foreach($runs as $r) {
 								$src = strtolower((string)$r->Source);
 								$src_label = ($src === 'pdf') ? 'PDF' : (($src === 'chatfile') ? 'Chat File' : 'Chats');
@@ -119,6 +134,7 @@
 									<td style="text-align:left;">
 										<a href="<?php echo $view_url; ?>"><strong><?php echo htmlspecialchars($r->Scope); ?></strong></a>
 									</td>
+									<td style="text-align:center;" class="faq-run-input"><?php echo faq_sugg_input_cell($r); ?></td>
 									<td style="text-align:center;" class="faq-run-count"><?php echo faq_sugg_count_cell($r); ?></td>
 									<td style="text-align:center;" class="faq-run-cost"><?php echo faq_sugg_cost_cell($r); ?></td>
 									<td style="text-align:center;" class="faq-run-status"><?php echo faq_sugg_status_cell($r); ?></td>
@@ -141,6 +157,25 @@
 						</tbody>
 					</table>
 				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- AI Input viewer (transcript sent to the AI for a run) -->
+<div class="modal fade" id="faq_input_modal" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title"><i class="la la-file-alt"></i> AI Input <span id="faq_input_scope" class="text-muted font-weight-normal ml-2"></span></h5>
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+			</div>
+			<div class="modal-body">
+				<p class="text-muted">This is the exact conversation transcript that was sent to the AI to generate this run's suggestions.</p>
+				<pre id="faq_input_body" style="white-space:pre-wrap; word-break:break-word; max-height:60vh; overflow:auto; background:#f7f9fc; border:1px solid #e4e6ef; border-radius:6px; padding:12px; font-size:13px;">Loading…</pre>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-light font-weight-bold" data-dismiss="modal">Close</button>
 			</div>
 		</div>
 	</div>
@@ -282,6 +317,11 @@
 		if (r.CostUsd === null || r.CostUsd === '') { return '<span class="text-muted">-</span>'; }
 		return '<span data-toggle="tooltip" title="Total AI cost for this run">$' + Number(r.CostUsd).toFixed(4) + '</span>';
 	}
+	function faqInputHtml(r) {
+		if (r.Source === 'pdf') { return '<span class="text-muted" data-toggle="tooltip" title="' + faqEsc(r.FileName) + '"><i class="la la-file-pdf"></i> Document</span>'; }
+		if (r.HasInput) { return '<button type="button" class="btn btn-light-primary btn-sm font-weight-bold faq-input-btn" data-run-id="' + r.RunID + '" data-toggle="tooltip" title="View the transcript sent to the AI"><i class="la la-file-alt"></i> View</button>'; }
+		return '<span class="text-muted">—</span>';
+	}
 
 	function faqRenderRuns(data) {
 		(data.runs || []).forEach(function(r) {
@@ -290,6 +330,7 @@
 			$tr.find('.faq-run-status').html(faqStatusHtml(r));
 			$tr.find('.faq-run-count').html(faqCountHtml(r));
 			$tr.find('.faq-run-cost').html(faqCostHtml(r));
+			$tr.find('.faq-run-input').html(faqInputHtml(r));
 		});
 		$('[data-toggle="tooltip"]').tooltip();
 
@@ -306,4 +347,22 @@
 
 	// Poll once on load; it self-schedules a 3s loop while anything is queued/running.
 	$(document).ready(faqPollRuns);
+
+	// --- AI Input viewer: load the transcript on demand into the modal ---------
+	$(document).on('click', '.faq-input-btn', function() {
+		var runId = $(this).data('run-id');
+		$('#faq_input_scope').text('');
+		$('#faq_input_body').text('Loading…');
+		$('#faq_input_modal').modal('show');
+		$.getJSON('<?php echo base_url('Faq_Suggestion/Input?id='); ?>' + runId)
+			.done(function(res) {
+				if (res && res.ok) {
+					$('#faq_input_scope').text(res.scope || '');
+					$('#faq_input_body').text((res.input && res.input.length) ? res.input : 'No input text was stored for this run.');
+				} else {
+					$('#faq_input_body').text('Could not load the AI input.');
+				}
+			})
+			.fail(function() { $('#faq_input_body').text('Could not load the AI input.'); });
+	});
 </script>

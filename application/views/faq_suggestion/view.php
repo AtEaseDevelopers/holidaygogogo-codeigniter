@@ -54,6 +54,18 @@
 							<dd class="col-7"><?php echo htmlspecialchars($run->Scope); ?></dd>
 							<dt class="col-5">Generated</dt>
 							<dd class="col-7"><?php echo htmlspecialchars($run->InsertDate ? date('j M Y, g:i A', strtotime($run->InsertDate)) : '-'); ?></dd>
+							<dt class="col-5">AI Input</dt>
+							<dd class="col-7">
+								<?php if($is_pdf) { ?>
+									<span class="text-muted"><i class="la la-file-pdf"></i> Uploaded document</span>
+								<?php } elseif(!empty($run->InputText)) { ?>
+									<button type="button" class="btn btn-light-primary btn-sm font-weight-bold" data-toggle="modal" data-target="#faq_input_modal" title="View the transcript sent to the AI">
+										<i class="la la-file-alt"></i> View input
+									</button>
+								<?php } else { ?>
+									<span class="text-muted">—</span>
+								<?php } ?>
+							</dd>
 						</dl>
 					</div>
 					<div class="col-md-6">
@@ -165,6 +177,27 @@
 		</div>
 	</div>
 </div>
+
+<?php if(!$is_pdf && !empty($run->InputText)) { ?>
+<!-- AI Input viewer (transcript sent to the AI for this run) -->
+<div class="modal fade" id="faq_input_modal" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title"><i class="la la-file-alt"></i> AI Input <span class="text-muted font-weight-normal ml-2"><?php echo htmlspecialchars($run->Scope); ?></span></h5>
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+			</div>
+			<div class="modal-body">
+				<p class="text-muted">This is the exact conversation transcript that was sent to the AI to generate this run's suggestions.</p>
+				<pre style="white-space:pre-wrap; word-break:break-word; max-height:60vh; overflow:auto; background:#f7f9fc; border:1px solid #e4e6ef; border-radius:6px; padding:12px; font-size:13px;"><?php echo htmlspecialchars($run->InputText); ?></pre>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-light font-weight-bold" data-dismiss="modal">Close</button>
+			</div>
+		</div>
+	</div>
+</div>
+<?php } ?>
 
 <script>
 	$('[data-toggle="tooltip"]').tooltip();

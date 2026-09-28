@@ -223,39 +223,15 @@ $FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
         <p style="font-size:12px; text-align:center;"><i>This Is A Computer Generated Quotation. No Signature Required.</i></p>
     </div>
 
-    <table style="width:100%;">
-        <tr>
-            <th style="width:65%;"><h3 class="text-right">Custom Quotation</h3></th>
-            <th style="width:35%; font-weight:700; text-align:right;">No : <?php echo html_escape($public_ref); ?></th>
-        </tr>
-    </table>
-
-    <table style="width:100%; font-size:12px;">
-        <tr>
-            <td style="width:14%;">Tour Package</td>
-            <td style="width:1%;"> : </td>
-            <td style="width:35%;"><b><?php echo html_escape($PackageName); ?></b></td>
-            <td style="width:16%;"><b>Travel Date</b></td>
-            <td style="width:1%;"> : </td>
-            <td style="width:25%;"><?php echo html_escape($TravelDate); ?></td>
-        </tr>
-        <tr>
-            <td>Duration</td>
-            <td> : </td>
-            <td><?php echo $DurationDays; ?> Days / <?php echo $DurationNights; ?> Nights</td>
-            <td><b>No. Of Pax</b></td>
-            <td> : </td>
-            <td><?php echo $TotalPax; ?></td>
-        </tr>
-        <tr>
-            <td>Date</td>
-            <td> : </td>
-            <td><?php echo html_escape($InsertDate); ?></td>
-            <td><b>Sales Person</b></td>
-            <td> : </td>
-            <td><?php echo html_escape($SalesPerson); ?></td>
-        </tr>
-    </table>
+    <?php
+    // Feedback 28 Sep 2026: the first-page "Custom Quotation" title row + the
+    // Tour Package / Duration / Date / Travel Date / No. Of Pax / Sales Person
+    // details table are NOT rendered — with the pricing breakdown gone they left a
+    // near-empty first page, and every one of those fields is repeated on the
+    // Hotel & Flight logistics page's key/value table below. The quotation now
+    // opens directly on that logistics page. $public_ref / $PackageName /
+    // $TravelDate / $InsertDate remain available for internal callers.
+    ?>
 
     <?php
     // Feedback 18 Sep 2026 (item 5): the per-item PRICING BREAKDOWN (the "Package
@@ -270,7 +246,7 @@ $FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
     <!-- EXTRA PAGE: Hotel pricing + flight schedule (screenshot layout). Appended
          only when the package carries this data — augments, never replaces. -->
     <?php if ($ShowLogisticsPage) { ?>
-    <div style="page-break-before: always;">
+    <div>
         <!-- Key / value details -->
         <table class="kv">
             <tr>

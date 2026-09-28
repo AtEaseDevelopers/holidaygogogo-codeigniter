@@ -118,12 +118,14 @@ class Competitor_Product extends MY_Controller
 			return;
 		}
 		$job_id = $this->queue_job(array(
-			'url'        => isset($status['url']) ? $status['url'] : '',
-			'mode'       => 'analyse',
-			'items_file' => $items_file,
-			'indices'    => $indices,
-			'src_job'    => $src_id,   // so the worker can mark these indices analysed
-			'created_by' => $this->session->admin_id,
+			'url'             => isset($status['url']) ? $status['url'] : '',
+			'mode'            => 'analyse',
+			'items_file'      => $items_file,
+			'indices'         => $indices,
+			'src_job'         => $src_id,   // so the worker can mark these indices analysed
+			// Carry the crawl's competitor name onto each analysed product row.
+			'competitor_name' => isset($status['competitor_name']) ? (string) $status['competitor_name'] : '',
+			'created_by'      => $this->session->admin_id,
 		));
 		echo json_encode($job_id !== ''
 			? array('success' => true, 'job' => $job_id)
@@ -230,6 +232,9 @@ class Competitor_Product extends MY_Controller
 
 		$url   = trim((string) $this->input->post('url'));
 		$paste = trim((string) $this->input->post('paste'));
+		// Optional competitor name the user keyed in — a label recorded + shown in
+		// the results table / detail only; it is NOT sent to the AI.
+		$name  = trim((string) $this->input->post('competitor_name'));
 
 		// Pasted text (notes + links) → BACKGROUND analyse job (non-blocking). We
 		// scrape each pasted link and browse JS pages with web_search, which can run
@@ -238,10 +243,11 @@ class Competitor_Product extends MY_Controller
 		// browser immediately; the row appears in Analysis Results when done.
 		if ( ! $has_file && $paste !== '') {
 			$job_id = $this->queue_job(array(
-				'url'        => competitor_paste_source_label($paste),
-				'mode'       => 'paste',
-				'paste_text' => $paste,
-				'created_by' => $this->session->admin_id,
+				'url'             => competitor_paste_source_label($paste),
+				'mode'            => 'paste',
+				'paste_text'      => $paste,
+				'competitor_name' => $name,
+				'created_by'      => $this->session->admin_id,
 			));
 			if ($job_id !== '') {
 				echo json_encode(array('success' => true, 'job' => $job_id));
@@ -257,19 +263,21 @@ class Competitor_Product extends MY_Controller
 				$record = $this->competitoranalysisservice->analyze_paste($paste, $our_products);
 			} catch (Exception $e) {
 				$this->Competitor_Analysis_Model->Create(array(
-					'url'           => competitor_paste_source_label($paste),
-					'source'        => 'paste',
-					'status'        => 'error',
-					'error_message' => $e->getMessage(),
-					'created_by'    => $this->session->admin_id,
+					'url'             => competitor_paste_source_label($paste),
+					'source'          => 'paste',
+					'status'          => 'error',
+					'error_message'   => $e->getMessage(),
+					'competitor_name' => $name,
+					'created_by'      => $this->session->admin_id,
 				));
 				echo json_encode(array('success' => false, 'message' => $e->getMessage()));
 				return;
 			}
-			$record['url']        = competitor_paste_source_label($paste);
-			$record['source']     = 'paste';
-			$record['status']     = 'done';
-			$record['created_by'] = $this->session->admin_id;
+			$record['url']             = competitor_paste_source_label($paste);
+			$record['source']          = 'paste';
+			$record['status']          = 'done';
+			$record['competitor_name'] = $name;
+			$record['created_by']      = $this->session->admin_id;
 			$id = $this->Competitor_Analysis_Model->Create($record);
 			echo json_encode(array('success' => true, 'id' => $id));
 			return;
@@ -283,9 +291,11 @@ class Competitor_Product extends MY_Controller
 		// URL → background crawl + auto-analyse job (non-blocking; polled in the
 		// history table). AI runs only when OPENAI_API_KEY is set.
 		if ( ! $has_file) {
+			// One crawl at a time, but DON'T reject — the job is accepted and QUEUES; its
+			// background worker waits for the current crawl to finish, then runs.
 			$keyword  = trim((string) $this->input->post('keyword'));
 			$ai_crawl = (string) $this->input->post('ai_crawl') === '1';
-			$job_id = $this->start_crawl_job($url, $keyword, $ai_crawl);
+			$job_id = $this->start_crawl_job($url, $keyword, $ai_crawl, $name);
 			if ($job_id !== '') {
 				echo json_encode(array('success' => true, 'job' => $job_id));
 			} else {
@@ -307,11 +317,12 @@ class Competitor_Product extends MY_Controller
 		}
 		$source_label = $upload['orig_name'] !== '' ? $upload['orig_name'] : 'uploaded file';
 		$job_id = $this->queue_job(array(
-			'url'        => $source_label,
-			'mode'       => 'upload',
-			'file_path'  => $upload['full_path'],
-			'file_ext'   => $upload['file_ext'],
-			'created_by' => $this->session->admin_id,
+			'url'             => $source_label,
+			'mode'            => 'upload',
+			'file_path'       => $upload['full_path'],
+			'file_ext'        => $upload['file_ext'],
+			'competitor_name' => $name,
+			'created_by'      => $this->session->admin_id,
 		));
 		if ($job_id !== '') {
 			echo json_encode(array('success' => true, 'job' => $job_id));
@@ -329,21 +340,23 @@ class Competitor_Product extends MY_Controller
 		} catch (Exception $e) {
 			@unlink($upload['full_path']);
 			$this->Competitor_Analysis_Model->Create(array(
-				'url'           => $source_label,
-				'source'        => 'upload',
-				'status'        => 'error',
-				'error_message' => $e->getMessage(),
-				'created_by'    => $this->session->admin_id,
+				'url'             => $source_label,
+				'source'          => 'upload',
+				'status'          => 'error',
+				'error_message'   => $e->getMessage(),
+				'competitor_name' => $name,
+				'created_by'      => $this->session->admin_id,
 			));
 			echo json_encode(array('success' => false, 'message' => $e->getMessage()));
 			return;
 		}
 		@unlink($upload['full_path']);
 
-		$record['url']        = $source_label;
-		$record['source']     = 'upload';
-		$record['status']     = 'done';
-		$record['created_by'] = $this->session->admin_id;
+		$record['url']             = $source_label;
+		$record['source']          = 'upload';
+		$record['status']          = 'done';
+		$record['competitor_name'] = $name;
+		$record['created_by']      = $this->session->admin_id;
 		$id = $this->Competitor_Analysis_Model->Create($record);
 
 		echo json_encode(array('success' => true, 'id' => $id));
@@ -370,12 +383,31 @@ class Competitor_Product extends MY_Controller
 				@unlink($path);
 				@unlink(preg_replace('/\.json$/', '.out', $path));
 				@unlink(preg_replace('/\.json$/', '.items.json', $path));
+				@unlink(preg_replace('/\.json$/', '.items.json.tmp', $path));
+				@unlink(preg_replace('/\.json$/', '.urls.txt', $path));
+				@unlink(preg_replace('/\.json$/', '.done.txt', $path));
 				@unlink(preg_replace('/\.json$/', '.pid', $path));
 				continue;
 			}
 			$s = json_decode((string) file_get_contents($path), true);
 			if ( ! is_array($s)) {
 				continue;
+			}
+			// WATCHDOG: a job still claiming queued/running whose worker PID is dead (past a
+			// grace window) has crashed — flip it to error so the UI stops spinning forever,
+			// drop its pid file, and reap any orphaned headless browsers it left behind.
+			$state = isset($s['state']) ? $s['state'] : '';
+			if (in_array($state, array('queued', 'running'), true)) {
+				$pidfile = preg_replace('/\.json$/', '.pid', $path);
+				$pid   = is_file($pidfile) ? (int) @file_get_contents($pidfile) : 0;
+				$alive = $pid > 0 && $this->pid_alive($pid);
+				if (competitor_job_looks_crashed($state, $alive, time() - filemtime($path))) {
+					$s['state']   = 'error';
+					$s['message'] = 'Crawl stopped unexpectedly (the worker ended before finishing). Please run it again.';
+					@file_put_contents($path, json_encode($s, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+					@unlink($pidfile);
+					$this->reap_orphan_browsers();
+				}
 			}
 			$mode = isset($s['mode']) ? $s['mode'] : 'crawl';
 			// Analyse jobs are transient (driven from the Review page), and translate
@@ -394,6 +426,17 @@ class Competitor_Product extends MY_Controller
 			$view['_sort'] = filemtime($path);
 			if (in_array($view['state'], array('queued', 'running'), true)) {
 				$running = true;
+				// Live progress for a (possibly multi-chunk) crawl: total discovered URLs
+				// (.urls.txt) vs read-so-far. Read-so-far = URLs from COMPLETED chunks
+				// (.done.txt) PLUS the current chunk's in-progress page count (status 'done')
+				// — so the bar moves per page, not only per 500-chunk. Capped at the total.
+				if ($view['mode'] === 'crawl') {
+					$stem  = preg_replace('/\.json$/', '', $path);
+					$total = competitor_file_line_count($stem . '.urls.txt');
+					$done  = competitor_file_line_count($stem . '.done.txt') + (int) (isset($s['done']) ? $s['done'] : 0);
+					$view['read_total'] = $total;
+					$view['read_done']  = ($total > 0) ? min($total, $done) : $done;
+				}
 			}
 			if ($view['mode'] === 'crawl') {
 				$crawls[] = $view;
@@ -456,6 +499,8 @@ class Competitor_Product extends MY_Controller
 				'analysis_id'  => (int) $u->id,
 				'url'          => (string) $u->url,                 // file name, or the pasted source label
 				'title'        => (string) $u->product_name,
+				'name'         => (string) $u->competitor_name,     // user-supplied competitor label
+
 				'state'        => ($u->status === 'error') ? 'error' : 'done',
 				'message'      => $is_paste ? 'Analysed' : 'Uploaded',
 				'count'        => 1,
@@ -573,23 +618,67 @@ class Competitor_Product extends MY_Controller
 		if (is_array($s) && ! empty($s['file_path']) && is_file($s['file_path'])) {
 			@unlink($s['file_path']);
 		}
-		foreach (array('.json', '.out', '.items.json', '.pid') as $ext) {
+		foreach (array('.json', '.out', '.items.json', '.items.json.tmp', '.urls.txt', '.done.txt', '.pid') as $ext) {
 			@unlink($dir . $job_id . $ext);
 		}
 		echo json_encode(array('success' => true));
+	}
+
+	/** True when process $pid is currently alive (same-user). posix if available, else ps. */
+	private function pid_alive($pid)
+	{
+		$pid = (int) $pid;
+		if ($pid <= 0) {
+			return false;
+		}
+		if (function_exists('posix_kill')) {
+			// true = signalable (exists); EPERM (1) also means it exists but is another user.
+			return @posix_kill($pid, 0)
+				|| (function_exists('posix_get_last_error') && posix_get_last_error() === 1);
+		}
+		$out = array();
+		@exec('ps -p ' . escapeshellarg((string) $pid) . ' -o pid=', $out);
+		return ! empty(array_filter($out));
+	}
+
+	/**
+	 * Kill orphaned headless browsers left by a crashed crawl — but ONLY when no crawl is
+	 * currently running. "Running" is tested via the same MySQL named lock the worker holds
+	 * (GET_LOCK): if we can grab it, no crawl holds it, so every lingering headless process
+	 * is an orphan and safe to kill; if we can't, a crawl is live — leave its browser alone.
+	 * No-op (safe) when we can't tell. Best-effort.
+	 */
+	private function reap_orphan_browsers()
+	{
+		if ( ! function_exists('exec')) {
+			return;
+		}
+		if ( ! isset($this->db)) { @$this->load->database(); }
+		if ( ! isset($this->db)) {
+			return;   // can't tell if a crawl is running → don't risk killing a live one
+		}
+		$row = @$this->db->query("SELECT GET_LOCK('competitor_crawl', 0) AS g")->row();
+		if ( ! $row || (int) $row->g !== 1) {
+			return;   // a crawl holds the lock (or error) → leave browsers alone
+		}
+		@$this->db->query("SELECT RELEASE_LOCK('competitor_crawl')");   // free → release our probe
+		@exec('pkill -9 -f chrome-headless-shell 2>/dev/null');
+		@exec('pkill -9 -f ms-playwright 2>/dev/null');
+		@exec('pkill -9 -f "competitor_render/render.js" 2>/dev/null');
 	}
 
 	/**
 	 * Queue a crawl and spawn the detached CLI worker. Returns the job id or ''
 	 * when it can't be spawned.
 	 */
-	private function start_crawl_job($url, $keyword = '', $ai_crawl = false)
+	private function start_crawl_job($url, $keyword = '', $ai_crawl = false, $name = '')
 	{
 		return $this->queue_job(array(
-			'url'          => $url,
-			'keyword'      => trim((string) $keyword),
-			'ai_crawl'     => $ai_crawl ? 1 : 0,
-			'created_by'   => $this->session->admin_id,
+			'url'             => $url,
+			'keyword'         => trim((string) $keyword),
+			'ai_crawl'        => $ai_crawl ? 1 : 0,
+			'competitor_name' => trim((string) $name),
+			'created_by'      => $this->session->admin_id,
 		));
 	}
 

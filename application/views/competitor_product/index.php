@@ -11,6 +11,21 @@
                 </div>
             </div>
             <div class="card-body">
+                <!-- Competitor name — a label the user keys in; recorded + shown in the
+                     results table only. It is NOT sent to the AI. Applies to whichever
+                     input below is submitted (crawl / upload / paste). -->
+                <div class="form-group mb-3">
+                    <label style="font-size:13px;"><strong>Competitor name</strong> <span class="text-muted font-weight-normal">(optional)</span></label>
+                    <div class="input-group">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text"><i class="la la-building"></i></span>
+                        </div>
+                        <input type="text" id="competitor_name" class="form-control" autocomplete="off"
+                               placeholder="e.g. Apple Vacations" style="font-size:14px;" maxlength="255">
+                    </div>
+                    <span class="form-text text-muted" style="font-size:12px;">Just a label to identify this competitor in the results — not sent to the AI.</span>
+                </div>
+
                 <!-- Section 1: Crawl a competitor website (URL + keyword in one row) -->
                 <div class="row align-items-start">
                     <div class="col-md-6">
@@ -169,7 +184,16 @@
     }
     function jobStatusBadge(j) {
         if(j.state === 'error') return '<span class="label label-light-danger label-inline font-weight-bold">Error</span>';
+        // Queued behind a running crawl (one crawl at a time) — pause icon, black text on grey.
+        if(j.state === 'queued') {
+            return '<span class="label label-inline font-weight-bold" style="background-color:#eeeeee; color:#000;" title="' + $('<div>').text(j.message || 'Queued').html() + '"><i class="la la-pause-circle mr-1" style="color:#000;"></i>Queued</span>';
+        }
         if(j.state !== 'done') {
+            // Multi-chunk crawl: show read X / Y (+ %) from discovered vs done counts.
+            if(j.read_total > 0) {
+                var pct = Math.min(100, Math.round((j.read_done || 0) * 100 / j.read_total));
+                return '<span class="label label-light-warning label-inline font-weight-bold"><i class="la la-spinner la-spin mr-1"></i>Reading ' + (j.read_done||0).toLocaleString() + ' / ' + j.read_total.toLocaleString() + ' (' + pct + '%)</span>';
+            }
             var badge = '<span class="label label-light-warning label-inline font-weight-bold"><i class="la la-spinner la-spin mr-1"></i>' + $('<div>').text(j.message || 'Working…').html() + '</span>';
             var eta = jobEta(j);
             return badge + (eta ? '<br><span style="font-size:10px; color:#8ba0c4;">' + $('<div>').text(eta).html() + '</span>' : '');
@@ -285,9 +309,11 @@
                         + ' <span class="label label-light-info label-inline font-weight-bold" style="font-size:10px;">File</span>'
                         + (j.title ? '<div class="text-muted" style="font-size:11px;">' + esc(j.title) + '</div>' : '')
                     : '<a href="' + esc(j.url) + '" target="_blank" rel="noopener" style="font-size:12px;">' + esc(j.url) + '</a>' + kwChip + aiChip;
+                // User-supplied competitor name (label only) shown above the source.
+                var nameChip = j.name ? '<div class="mb-1"><span class="label label-light-success label-inline font-weight-bold" style="font-size:11px;"><i class="la la-building mr-1"></i>' + esc(j.name) + '</span></div>' : '';
                 return '<tr>'
                     + '<td style="text-align:center; padding:12px 8px;">' + no + '</td>'
-                    + '<td style="max-width:260px; word-break:break-all;">' + source + '</td>'
+                    + '<td style="max-width:260px; word-break:break-all;">' + nameChip + source + '</td>'
                     + '<td style="text-align:center; font-size:12px;">' + products + '</td>'
                     + '<td style="text-align:center; font-size:12px;">' + cost + '</td>'
                     + '<td style="text-align:center;">' + jobStatusBadge(j) + '</td>'
@@ -329,6 +355,7 @@
                     $('#competitor_url').val('');
                     $('#competitor_file').val('');
                     $('#competitor_file_label').text('Choose a PDF or image…');
+                    $('#competitor_name').val('');
                     Swal.fire({ toast: true, position: 'top-end', icon: 'success',
                         title: 'Started in the background',
                         text: 'It appears at the top of Analysis Results — you can keep working.',
@@ -368,6 +395,9 @@
         var hasFile = fileInput && fileInput.files && fileInput.files.length > 0;
         var pasteVal = $.trim($('#competitor_paste').val());
         var form = new FormData(), title;
+        // Optional competitor name — a label only, attached to whichever input runs.
+        var compName = $.trim($('#competitor_name').val());
+        if(compName !== '') { form.append('competitor_name', compName); }
         if(hasFile) {
             form.append('file', fileInput.files[0]);
             title = 'Reading file &amp; analysing with AI…';

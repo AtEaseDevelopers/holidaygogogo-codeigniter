@@ -330,4 +330,20 @@ assert_eq('mem rejects garbage',      '1024M', faq_suggestion_memory_limit('lots
 assert_eq('mem rejects bad suffix',   '1024M', faq_suggestion_memory_limit('512MB'));
 assert_eq('mem custom default',       '2048M', faq_suggestion_memory_limit('', '2048M'));
 
+// ---- input_preview (AI-input column hint) ----------------------------------
+assert_eq('preview blank -> empty',      '', faq_suggestion_input_preview(''));
+assert_eq('preview null -> empty',       '', faq_suggestion_input_preview(null));
+assert_eq('preview collapses whitespace',
+	'Customer: hi Agent: yo',
+	faq_suggestion_input_preview("Customer: hi\nAgent:   yo"));
+assert_eq('preview passes short through',
+	'Short line',
+	faq_suggestion_input_preview('  Short line  '));
+assert_eq('preview truncates with ellipsis',
+	str_repeat('a', 10) . '…',
+	faq_suggestion_input_preview(str_repeat('a', 300), 10));
+assert_eq('preview keeps exactly max',
+	str_repeat('b', 10),
+	faq_suggestion_input_preview(str_repeat('b', 10), 10));
+
 echo "\nAll FaqSuggestionHelper tests passed.\n";

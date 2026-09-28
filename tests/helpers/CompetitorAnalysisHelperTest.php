@@ -180,6 +180,46 @@ check('embedded_json empty on non-string', '', competitor_extract_embedded_json(
 check('embedded_json empty when nothing embedded', '',
     competitor_extract_embedded_json('<html><body>hi there</body></html>'));
 
+// ---- competitor_urls_from_embedded_json (SPA discovery without headless) ------
+// Mine product URLs from the JSON a SPA ships in its HTML (Next.js/Nuxt hydration,
+// application/json data islands) — so many SPAs are discovered from the plain HTML
+// instead of a slow per-page headless render.
+$nextList = '<html><body><div id="root"></div>'
+    . '<script id="__NEXT_DATA__" type="application/json">'
+    . '{"props":{"pageProps":{"tours":['
+    . '{"slug":"5d4n-bali-tour","url":"/tour-package/5d4n-bali-tour"},'
+    . '{"url":"/tour-package/7d6n-japan-holiday"},'
+    . '{"url":"https:\/\/cdn.other.com/tour-package/x-offsite"},'   // other host -> excluded
+    . '{"url":"/about-us"}'                                          // not a product -> excluded
+    . ']}}}</script></body></html>';
+$eu = competitor_urls_from_embedded_json($nextList, 'https://comp.com');
+check('urls_from_embedded_json count (same-host products only)', 2, count($eu));
+check_true('urls_from_embedded_json resolves relative product url',
+    in_array('https://comp.com/tour-package/5d4n-bali-tour', $eu, true));
+check_true('urls_from_embedded_json handles escaped-slash url',
+    in_array('https://comp.com/tour-package/7d6n-japan-holiday', $eu, true));
+check('urls_from_embedded_json excludes other host', false,
+    in_array('https://cdn.other.com/tour-package/x-offsite', $eu, true));
+// Nuxt window.__NUXT__ blob + application/json island both mined.
+$nuxt = '<script>window.__NUXT__={data:{list:["/holiday/9d8n-korea-tour"]}}</script>';
+check_true('urls_from_embedded_json reads window.__NUXT__',
+    in_array('https://comp.com/holiday/9d8n-korea-tour', competitor_urls_from_embedded_json($nuxt, 'https://comp.com'), true));
+// Next.js App Router (RSC): slugs live in self.__next_f.push with double-escaped quotes.
+$appRouter = '<script>self.__next_f.push([1,"...\\"/group-tour/5d4n-awesome-guilin\\"...\\"/group-tour/274\\"..."])</script>';
+$ar = competitor_urls_from_embedded_json($appRouter, 'https://lovelyvacation.com.my');
+check_true('urls_from_embedded_json reads App-Router __next_f slug',
+    in_array('https://lovelyvacation.com.my/group-tour/5d4n-awesome-guilin', $ar, true));
+check('urls_from_embedded_json App-Router excludes numeric-id (not a product slug)', false,
+    in_array('https://lovelyvacation.com.my/group-tour/274', $ar, true));
+check('urls_from_embedded_json excludes media asset with product-ish name', array(),
+    competitor_urls_from_embedded_json(
+        '<script id="__NEXT_DATA__" type="application/json">{"a":"/assets/tour-package-banner.webp"}</script>',
+        'https://comp.com'));
+check('urls_from_embedded_json empty on plain html', array(),
+    competitor_urls_from_embedded_json('<html><body>hi</body></html>', 'https://comp.com'));
+check('urls_from_embedded_json empty on non-string', array(),
+    competitor_urls_from_embedded_json(null, 'https://comp.com'));
+
 // ---- competitor_websearch_cap -----------------------------------------------
 check('websearch_cap default when unset', 15, competitor_websearch_cap(false));
 check('websearch_cap default when empty', 15, competitor_websearch_cap(''));
@@ -189,12 +229,42 @@ check('websearch_cap negative -> default', 15, competitor_websearch_cap('-5'));
 check('websearch_cap custom default', 5, competitor_websearch_cap(false, 5));
 
 // ---- competitor_headless_cap ------------------------------------------------
-check('headless_cap default when unset', 60, competitor_headless_cap(false));
-check('headless_cap default when empty', 60, competitor_headless_cap(''));
+check('headless_cap default when unset', 500, competitor_headless_cap(false));
+check('headless_cap default when empty', 500, competitor_headless_cap(''));
 check('headless_cap honours value', 8, competitor_headless_cap('8'));
 check('headless_cap explicit 0 = unlimited', 0, competitor_headless_cap('0'));
-check('headless_cap negative -> default', 60, competitor_headless_cap('-2'));
+check('headless_cap negative -> default', 500, competitor_headless_cap('-2'));
 check('headless_cap custom default', 5, competitor_headless_cap(false, 5));
+
+// ---- competitor_next_chunk (resumable chunked reading) ----------------------
+$q5 = array('a','b','c','d','e');
+$r = competitor_next_chunk($q5, array('a','b'), 2);
+check('next_chunk picks next 2 unread', array('c','d'), $r['chunk']);
+check_true('next_chunk has_more when more remain', $r['has_more']);
+check('next_chunk remaining counts all unread', 3, $r['remaining']);
+$r2 = competitor_next_chunk($q5, array('a','b'), 5);
+check('next_chunk returns all when chunk >= unread', array('c','d','e'), $r2['chunk']);
+check('next_chunk has_more false when chunk covers rest', false, $r2['has_more']);
+$r3 = competitor_next_chunk($q5, array(), 0);
+check('next_chunk 0 = no chunking (all)', array('a','b','c','d','e'), $r3['chunk']);
+check('next_chunk 0 has_more false', false, $r3['has_more']);
+// done accepted as a SET (url=>true), same as a flat list
+$rset = competitor_next_chunk($q5, array('a'=>true,'b'=>true), 2);
+check('next_chunk accepts a done SET', array('c','d'), $rset['chunk']);
+// duplicates + blanks ignored
+$rdup = competitor_next_chunk(array('a','a','','b','a'), array(), 10);
+check('next_chunk dedupes + drops blanks', array('a','b'), $rdup['chunk']);
+$rnone = competitor_next_chunk(array('a','b'), array('a','b'), 5);
+check('next_chunk empty when all done', array(), $rnone['chunk']);
+check('next_chunk has_more false when nothing left', false, $rnone['has_more']);
+
+// ---- competitor_job_looks_crashed (worker-crash watchdog) -------------------
+check_true('crashed: running + dead worker + past grace', competitor_job_looks_crashed('running', false, 120, 60));
+check('crashed: running + worker alive => no', false, competitor_job_looks_crashed('running', true, 120, 60));
+check('crashed: running + dead + within grace => no', false, competitor_job_looks_crashed('running', false, 30, 60));
+check_true('crashed: queued + dead + past grace', competitor_job_looks_crashed('queued', false, 999, 60));
+check('crashed: done never crashes', false, competitor_job_looks_crashed('done', false, 999, 60));
+check('crashed: error never crashes', false, competitor_job_looks_crashed('error', false, 999, 60));
 
 // ---- competitor_job_progress_message ----------------------------------------
 check('job_progress queued', 'Queued…', competitor_job_progress_message(array('state' => 'queued')));
@@ -279,6 +349,9 @@ check('job_view is_upload true for upload mode', true,
     competitor_job_public_view(array('state' => 'running', 'mode' => 'upload'))['is_upload']);
 check('job_view is_paste false for upload mode', false,
     competitor_job_public_view(array('state' => 'running', 'mode' => 'upload'))['is_paste']);
+check('job_view name blank by default', '', $pv['name']);
+check('job_view exposes competitor_name as name', 'Apple Vacations',
+    competitor_job_public_view(array('state' => 'done', 'competitor_name' => 'Apple Vacations'))['name']);
 
 // ---- competitor_job_host ----------------------------------------------------
 check('job_host lowercases + strips www', 'example.com',
@@ -325,6 +398,27 @@ check('group_crawls one host', 1, count($cg_run));
 check('group_crawls surfaces running state', 'running', $cg_run[0]['state']);
 check('group_crawls running flag true', true, $cg_run[0]['running']);
 check('group_crawls ignores empty input', array(), competitor_group_crawl_jobs(array()));
+// 1 running + 1 queued for the same host: the merged row must show RUNNING, even though
+// the queued run is newer (running work is what the user cares about).
+$cg_rq = competitor_group_crawl_jobs(array(
+    competitor_job_public_view(array('job' => 'q1', 'url' => 'https://ibctours.com/x', 'state' => 'queued',
+        'ts' => '2026-09-06 10:05:00')),
+    competitor_job_public_view(array('job' => 'run1', 'url' => 'https://ibctours.com/y', 'state' => 'running',
+        'ts' => '2026-09-06 10:00:00')),
+));
+check('group_crawls prefers running over newer queued', 'running', $cg_rq[0]['state']);
+// only queued (no running) still shows queued
+$cg_q = competitor_group_crawl_jobs(array(
+    competitor_job_public_view(array('job' => 'q2', 'url' => 'https://ibctours.com/z', 'state' => 'queued',
+        'ts' => '2026-09-06 10:00:00')),
+));
+check('group_crawls shows queued when nothing running', 'queued', $cg_q[0]['state']);
+// The competitor name from the latest run surfaces on the merged host row.
+$cg_name = competitor_group_crawl_jobs(array(
+    competitor_job_public_view(array('job' => 'n1', 'url' => 'https://named.com/a', 'state' => 'done',
+        'count' => 1, 'competitor_name' => 'Apple Vacations', 'ts' => '2026-09-05 10:00:00')),
+));
+check('group_crawls carries competitor name', 'Apple Vacations', $cg_name[0]['name']);
 
 // ---- competitor_model_supports_temperature ----------------------------------
 check('temp: gpt-4o-mini yes', true, competitor_model_supports_temperature('gpt-4o-mini'));
@@ -405,6 +499,8 @@ check('post_packages empty when no attach tables', array(),
 // ---- competitor_ice_api_kind ------------------------------------------------
 check('ice_api_kind series', 'series', competitor_ice_api_kind('https://www.gd.my/api/v1/series/6618'));
 check('ice_api_kind posts', 'posts', competitor_ice_api_kind('https://www.gd.my/api/v1/posts/65'));
+check('ice_api_kind land_tour', 'land_tour', competitor_ice_api_kind('https://www.gd.my/b2c2b/api/v1/land_tours/543'));
+check('ice_api_kind cruise detail classifies as series', 'series', competitor_ice_api_kind('https://www.gd.my/api/v1/series/6209?type=cruise'));
 check('ice_api_kind none', '', competitor_ice_api_kind('https://www.gd.my/web/posts/domestic/65'));
 
 // ---- competitor_ice_series_items --------------------------------------------
@@ -421,6 +517,133 @@ check('ice_series_items label with price trimmed', '4D3N Hainan Together · CHIN
 check('ice_series_items label falls back to code', 'FS-XYZ · CHINA · MYR 999.5', $items[1]['label']);
 check('ice_series_items respects limit', 1, count(competitor_ice_series_items($seriesList, 'https://www.gd.my', 1)));
 check('ice_series_items empty on junk', array(), competitor_ice_series_items('nope', 'https://x.com'));
+
+// ---- competitor_ice_code_list_items -----------------------------------------
+// itinerary_list / cruise_itinerary_list ship a flat {codes:[[id,code],…]} list —
+// the authoritative full catalogue (no 25-per-query cap). Turn it into detail-URL picks.
+$codeList = json_encode(array('codes' => array(
+    array(4068, '7SJNGO'),
+    array(4911, 'VDF-10U'),
+    array(4068, 'DUP'),   // duplicate id -> deduped
+    array(0, 'ZEROID'),   // non-positive id -> skipped
+    array('x'),           // malformed -> skipped
+)));
+$seriesItems = competitor_ice_code_list_items($codeList, 'https://www.gd.my/', 'series');
+check('code_list_items count (dedup + skip bad)', 2, count($seriesItems));
+check('code_list_items series url is detail api', 'https://www.gd.my/api/v1/series/4068', $seriesItems[0]['url']);
+check('code_list_items label is the code', '7SJNGO', $seriesItems[0]['label']);
+$cruiseItems = competitor_ice_code_list_items($codeList, 'https://www.gd.my', 'cruise');
+check('code_list_items cruise url carries ?type=cruise', 'https://www.gd.my/api/v1/series/4068?type=cruise', $cruiseItems[0]['url']);
+check('code_list_items empty on junk', array(), competitor_ice_code_list_items('nope', 'https://x.com', 'series'));
+
+// ---- competitor_ice_list_total_pages ----------------------------------------
+check('list_total_pages reads meta', 12, competitor_ice_list_total_pages(json_encode(array('meta' => array('total_pages' => 12)))));
+check('list_total_pages defaults to 1 (no meta)', 1, competitor_ice_list_total_pages(json_encode(array('data' => array()))));
+check('list_total_pages defaults to 1 on junk', 1, competitor_ice_list_total_pages('nope'));
+
+// ---- competitor_ice_land_tour_items -----------------------------------------
+// /b2c2b/api/v1/land_tours page -> [{url,label}] with the per-id detail URL.
+$landPage = json_encode(array('meta' => array('total_pages' => 12), 'data' => array(
+    array('id' => 543, 'attributes' => array('code' => 'LPK-MVASH', 'title' => '4D3N Maldives Adaaran', 'country' => 'Maldives', 'price' => 6148)),
+    array('id' => 544, 'attributes' => array('code' => 'X', 'title' => '', 'country' => 'Japan', 'price' => '1000.0')),
+    array('attributes' => array('code' => 'NOID')),   // no id -> skipped
+)));
+$landItems = competitor_ice_land_tour_items($landPage, 'https://www.gd.my/');
+check('land_tour_items count (skip no-id)', 2, count($landItems));
+check('land_tour_items url is b2c2b detail', 'https://www.gd.my/b2c2b/api/v1/land_tours/543', $landItems[0]['url']);
+check('land_tour_items label', '4D3N Maldives Adaaran · Maldives · MYR 6148 · LPK-MVASH', $landItems[0]['label']);
+check('land_tour_items label falls back to code, price trimmed', 'X · Japan · MYR 1000', $landItems[1]['label']);
+check('land_tour_items empty on junk', array(), competitor_ice_land_tour_items('nope', 'https://x.com'));
+
+// ---- competitor_interleave_unique -------------------------------------------
+$ilA = array(array('url' => 'a'), array('url' => 'b'));
+$ilB = array(array('url' => 'c'), array('url' => 'a'));   // 'a' duplicates across lists
+$merged = competitor_interleave_unique(array($ilA, $ilB));
+check('interleave round-robin order + dedupe', array('a', 'c', 'b'), array_map(function ($x) { return $x['url']; }, $merged));
+check('interleave handles empty lists', array(), competitor_interleave_unique(array(array(), array())));
+
+// ---- competitor_ice_land_tour_to_text ---------------------------------------
+$landDetail = json_encode(array(
+    'code' => 'LPK-MVASH', 'title' => '4D3N Maldives Adaaran', 'country' => 'Maldives',
+    'days' => 4, 'nights' => 3,
+    'highlight' => "1. Meet and greet\r\n2. Speedboat transfer",
+    'description' => 'Please note: beverages one glass at a time.',
+    'inc_hotel' => true, 'inc_flight' => false, 'inc_full_board_meals' => true,
+    'itinerary' => array(
+        array('day_no' => 'Day 1', 'title' => ' Arrival Male ', 'description' => 'Arrive, speedboat to resort.'),
+        array('day_no' => 'Day 2', 'title' => 'Free & easy', 'description' => 'Relax at the beach.'),
+    ),
+    'pricing_categories' => array(array('category' => 'Garden Villa', 'price_dates' => array(array('price' => '6148.0')))),
+));
+$landText = competitor_ice_land_tour_to_text($landDetail);
+check_true('land_tour_to_text has product title', strpos($landText, 'Product: 4D3N Maldives Adaaran') !== false);
+check_true('land_tour_to_text has code + country', strpos($landText, 'LPK-MVASH') !== false && strpos($landText, 'Maldives') !== false);
+check_true('land_tour_to_text has duration', strpos($landText, '4D3N') !== false);
+check_true('land_tour_to_text has description', strpos($landText, 'beverages one glass') !== false);
+check_true('land_tour_to_text lists true inclusions only', strpos($landText, 'Hotel') !== false && strpos($landText, 'Full-board meals') !== false && strpos($landText, 'Flight') === false);
+check_true('land_tour_to_text has itinerary day', strpos($landText, 'Day 1') !== false && strpos($landText, 'Arrival Male') !== false);
+check_true('land_tour_to_text has pricing', strpos($landText, 'Garden Villa') !== false && strpos($landText, '6148') !== false);
+check('land_tour_to_text empty on junk', '', competitor_ice_land_tour_to_text('nope'));
+
+// ---- competitor_result_count_hint -------------------------------------------
+// A listing's declared product total ("the correct count") — drives self-healing coverage.
+check('result_count_hint "X of Y" range', 234, competitor_result_count_hint('Showing 1-20 of 234 results'));
+check('result_count_hint "X of Y" en-dash', 234, competitor_result_count_hint('Showing 1–20 of 234'));
+check('result_count_hint "N results"', 234, competitor_result_count_hint('234 results found'));
+check('result_count_hint "N tours found"', 88, competitor_result_count_hint('88 tours found'));
+check('result_count_hint "N packages"', 57, competitor_result_count_hint('57 packages'));
+check('result_count_hint strips thousands separator', 1234, competitor_result_count_hint('1,234 tours found'));
+check('result_count_hint takes the largest hint', 300, competitor_result_count_hint('Showing 1-20 of 300 · 12 destinations'));
+check('result_count_hint 0 on no signal', 0, competitor_result_count_hint('Welcome to our travel agency'));
+check('result_count_hint 0 on junk', 0, competitor_result_count_hint(''));
+// Multilingual declared totals — so a CN/BM listing triggers self-healing coverage too.
+check('result_count_hint cn 共N个产品', 681, competitor_result_count_hint('共681个产品'));
+check('result_count_hint cn 找到 N 个行程', 88, competitor_result_count_hint('找到 88 个行程'));
+check('result_count_hint cn N个结果', 234, competitor_result_count_hint('234 个结果'));
+check('result_count_hint cn N条线路', 57, competitor_result_count_hint('共 57 条线路'));
+check('result_count_hint bm N hasil', 681, competitor_result_count_hint('681 hasil ditemui'));
+check('result_count_hint bm daripada range', 234, competitor_result_count_hint('menunjukkan 1-20 daripada 234'));
+check('result_count_hint cn ignores stray small number', 681,
+    competitor_result_count_hint('3个晚上的行程 · 共681个产品'));
+
+// ---- competitor_url_path_template (structural clustering) --------------------
+check('path_template numeric id last', '/tour-package/#',
+    competitor_url_path_template('https://x.com/tour-package/1077'));
+check('path_template deep numeric api', '/api/*/series/#',
+    competitor_url_path_template('https://x.com/api/v1/series/6618'));
+check('path_template slug last', '/*',
+    competitor_url_path_template('https://x.com/3d2n-genting-tour/'));
+check('path_template literal words kept', '/tour/japan',
+    competitor_url_path_template('https://x.com/tour/japan'));
+check('path_template empty for homepage', '', competitor_url_path_template('https://x.com/'));
+
+// ---- competitor_dominant_path_cluster (product-namespace estimate) -----------
+$mixed = array(
+    'https://x.com/api/v1/series/6618', 'https://x.com/api/v1/series/6620',
+    'https://x.com/api/v1/series/6700', 'https://x.com/about-us', 'https://x.com/contact-us',
+);
+$dom = competitor_dominant_path_cluster($mixed);
+check('dominant_cluster size', 3, count($dom));
+check('dominant_cluster keeps the series urls', 'https://x.com/api/v1/series/6618', $dom[0]);
+check('dominant_cluster empty below min', array(),
+    competitor_dominant_path_cluster(array('https://x.com/a/1', 'https://x.com/b-c'), 3));
+check('dominant_cluster empty on empty input', array(), competitor_dominant_path_cluster(array()));
+
+// ---- competitor_paginator_total ---------------------------------------------
+check('paginator_total meta.total', 230, competitor_paginator_total(json_encode(array('data' => array(), 'meta' => array('total' => 230)))));
+check('paginator_total meta.total_count', 277, competitor_paginator_total(json_encode(array('meta' => array('total_count' => 277)))));
+check('paginator_total top-level total', 69, competitor_paginator_total(json_encode(array('total' => 69, 'data' => array()))));
+check('paginator_total accepts decoded array', 42, competitor_paginator_total(array('meta' => array('total' => 42))));
+check('paginator_total 0 when absent', 0, competitor_paginator_total(json_encode(array('data' => array(array('id' => 1))))));
+check('paginator_total 0 on junk', 0, competitor_paginator_total('nope'));
+
+// ---- competitor_coverage_short ----------------------------------------------
+// The recrawl gate: discovered < target*(1-tol) AND target known.
+check_true('coverage_short: 40 of 234 is short', competitor_coverage_short(40, 234, 0.1));
+check('coverage_short: 230 of 234 within tolerance', false, competitor_coverage_short(230, 234, 0.1));
+check('coverage_short: exact is not short', false, competitor_coverage_short(234, 234, 0.1));
+check('coverage_short: over-discovered is not short', false, competitor_coverage_short(300, 234, 0.1));
+check('coverage_short: no target (0) never short', false, competitor_coverage_short(0, 0, 0.1));
 
 // ---- competitor_ice_series_web_url ------------------------------------------
 $webSeries = json_encode(array('code' => 'FS-4VSIT', 'caption' => '4D3N NHA TRANG',
@@ -537,6 +760,21 @@ check_true('scrape_is_thin true for empty', competitor_scrape_is_thin(''));
 check_true('scrape_is_thin true for JS skeleton', competitor_scrape_is_thin('Loading...'));
 check('scrape_is_thin false for rich text', false,
     competitor_scrape_is_thin(str_repeat('Bali tour itinerary day. ', 60)));
+// CJK is information-dense: ~200 hanzi is a COMPLETE tour page, but an English-
+// calibrated 500-char floor wrongly drops it. Weight CJK so the floor means the
+// same amount of CONTENT regardless of script (Latin-only text is unaffected).
+$cnItin = "北海道温泉美食之旅六天五夜行程安排详情如下\n"
+    . "第一天抵达札幌新千岁机场专车接机前往入住温泉酒店晚餐享用道地会席料理\n"
+    . "第二天前往小樽游览浪漫运河与北一硝子音乐盒堂午餐品尝新鲜海鲜丼饭\n"
+    . "第三天登别地狱谷观赏火山地貌参观熊牧场近距离欣赏棕熊\n"
+    . "第四天洞爷湖乘坐游船欣赏湖光山色前往昭和新山了解火山历史\n"
+    . "第五天全日自由活动可前往狸小路商店街尽情购物并品尝当地著名的札幌味噌拉面与螃蟹料理\n"
+    . "第六天享用早餐后专车前往新千岁机场办理登机手续结束这趟愉快难忘的北海道旅程\n"
+    . "费用包含五晚温泉酒店住宿每日酒店内自助早餐及三顿正餐全程冷气旅游巴士专业中文领队导游服务";   // ~270 CJK, real page
+check_true('scrape_is_thin sanity: CJK fixture is under the raw 500-char floor',
+    mb_strlen($cnItin, 'UTF-8') < 500);
+check('scrape_is_thin false for dense CJK itinerary', false, competitor_scrape_is_thin($cnItin));
+check_true('scrape_is_thin still true for short CJK shell', competitor_scrape_is_thin('加载中'));
 
 // ---- competitor_resolve_url (crawler) ---------------------------------------
 $B = 'https://comp.com/tours/asia';
@@ -547,7 +785,30 @@ check('resolve_url dir-relative', 'https://comp.com/tours/bali-5d', competitor_r
 check('resolve_url strips fragment', 'https://comp.com/tours/x', competitor_resolve_url($B, 'x#top'));
 check('resolve_url drops mailto', '', competitor_resolve_url($B, 'mailto:a@b.com'));
 check('resolve_url drops javascript', '', competitor_resolve_url($B, 'javascript:void(0)'));
+check('resolve_url drops whatsapp scheme', '', competitor_resolve_url($B, 'whatsapp:60176969253'));
 check('resolve_url empty on blank', '', competitor_resolve_url($B, '   '));
+// Dot-segments MUST collapse (RFC 3986) — else "../" links breed infinite distinct
+// garbage URLs and the BFS visited-set never dedups them (ibctours hung on this).
+check('resolve_url collapses ../ dir-relative', 'https://comp.com/x',
+    competitor_resolve_url('https://comp.com/a/b/', '../../../../x'));
+check('resolve_url collapses ../ over-popped to root', 'https://comp.com/foo',
+    competitor_resolve_url('https://comp.com/', '../../../foo'));
+check('resolve_url collapses ../ keeping trailing slash', 'https://comp.com/traveldez/agents/',
+    competitor_resolve_url('https://comp.com/traveldez/articles/', '../agents/'));
+check('resolve_url collapses ./ single-dot', 'https://comp.com/tours/bali',
+    competitor_resolve_url('https://comp.com/tours/', './bali'));
+check('resolve_url collapses ../ inside absolute href', 'https://comp.com/x',
+    competitor_resolve_url($B, 'https://comp.com/a/b/../../x'));
+check('resolve_url keeps query after collapse', 'https://comp.com/list?cat=x',
+    competitor_resolve_url('https://comp.com/a/', '../list?cat=x'));
+
+// ---- competitor_normalize_url_dots ------------------------------------------
+check('normalize_dots collapses ..', 'https://comp.com/x',
+    competitor_normalize_url_dots('https://comp.com/a/b/../../x'));
+check('normalize_dots clamps at root', 'https://comp.com/foo',
+    competitor_normalize_url_dots('https://comp.com/../../foo'));
+check('normalize_dots leaves clean url untouched', 'https://comp.com/a/b',
+    competitor_normalize_url_dots('https://comp.com/a/b'));
 
 // ---- competitor_extract_links -----------------------------------------------
 $page = '<a href="/tours/bali-5d4n">Bali</a> <a href="tours/japan-6d">JP</a>'
@@ -561,6 +822,21 @@ check('extract_links same-host only + deduped + no assets', array(
     'https://comp.com/about',
 ), $links);
 check('extract_links empty on junk', array(), competitor_extract_links('nope', 'https://comp.com/'));
+
+// ---- competitor_host_url_is_product (host-scoped overrides) ------------------
+// TourRadar inverts the general rule: tours at /t/<id>, hubs at keyword-rich slugs.
+check_true('tourradar /t/ numeric id is a product', competitor_is_product_url('https://www.tourradar.com/t/102207'));
+check_true('tourradar /t/ slug is a product', competitor_is_product_url('https://www.tourradar.com/t/bali-beyond-trutravels'));
+check('tourradar /o/ operator hub not a product', false, competitor_is_product_url('https://www.tourradar.com/o/holiday-in-egypt'));
+check('tourradar /f/ facet not a product', false, competitor_is_product_url('https://www.tourradar.com/f/river-cruise'));
+check('tourradar /deals/ not a product', false, competitor_is_product_url('https://www.tourradar.com/deals/river-cruise'));
+check('tourradar /mlp/ marketing not a product', false, competitor_is_product_url('https://www.tourradar.com/mlp/tourradar-benefits'));
+check('tourradar /d/ destination hub not a product', false, competitor_is_product_url('https://www.tourradar.com/d/japan'));
+check('tourradar homepage not a product', false, competitor_is_product_url('https://www.tourradar.com/'));
+check('host override null for other hosts', null, competitor_host_url_is_product('https://comp.com/tours/bali-5d4n'));
+// REGRESSION GUARD: a non-tourradar site with a /t/<id> path still uses the GENERAL rule
+// (no keyword, numeric last segment) → NOT a product. Other sites are unaffected.
+check('other host /t/<id> still general-ruled (not product)', false, competitor_is_product_url('https://othersite.com/t/102207'));
 
 // ---- competitor_is_product_url ----------------------------------------------
 check_true('is_product_url tour slug', competitor_is_product_url('https://comp.com/tours/bali-5d4n'));
@@ -650,6 +926,7 @@ check('item_kind price SGD with space -> package', 'package', competitor_item_ki
 check('item_kind price $ symbol -> package', 'package', competitor_item_kind('Book now for $1,200'));
 check('item_kind no price -> itinerary', 'itinerary', competitor_item_kind("Day 1 Kunming\nDay 2 Dali\nDay 3 return"));
 check('item_kind bare number (no currency) -> itinerary', 'itinerary', competitor_item_kind('Visit 1899 heritage sites over 5 days'));
+check('item_kind cn price -> package', 'package', competitor_item_kind('云南深度游 人民币3,999元起'));
 check('item_kind empty -> itinerary', 'itinerary', competitor_item_kind(''));
 check('is_product_url skips WP /tag/ taxonomy', false, competitor_is_product_url('https://www.holidaygogogo.com/tag/china-tour-packages/'));
 check('is_product_url skips WP /author/ archive', false, competitor_is_product_url('https://www.holidaygogogo.com/author/holiday-tour-admin/'));
@@ -781,6 +1058,20 @@ check_true('product_signal on duration code', competitor_has_product_signal('Bal
 check_true('product_signal on itinerary', competitor_has_product_signal('Day 1 arrival\nDay 2 city tour'));
 check('product_signal false on pure prose', false,
     competitor_has_product_signal('We visited the spice garden and enjoyed the fragrant herbs and lovely weather.'));
+// Multilingual: shares the language-neutral primitives, so CN/BM product signals count
+// (else a long 中文/Malay tour page is wrongly dropped as a prose article).
+check_true('product_signal cn price', competitor_has_product_signal('云南深度游 人民币3,999元起'));
+check_true('product_signal cn duration', competitor_has_product_signal('云南深度游 6天5夜'));
+check_true('product_signal cn day marker', competitor_has_product_signal('第1天 抵达昆明'));
+check_true('product_signal bm duration', competitor_has_product_signal('Percutian 5 Hari 4 Malam'));
+check('product_signal false on cn prose', false,
+    competitor_has_product_signal('我们参观了香料园，享受芬芳的香草和宜人的天气。'));
+$cn_long = str_repeat('我们参观了美丽的香料园，在芬芳的香草之间度过愉快的下午时光。', 50);
+check_true('looks_like_article sanity: cn prose over the 1200-char floor',
+    mb_strlen($cn_long, 'UTF-8') >= 1200);
+check_true('looks_like_article true for long cn prose w/o signal', competitor_looks_like_article($cn_long));
+check('looks_like_article false for long cn tour (has cn price+duration)', false,
+    competitor_looks_like_article($cn_long . ' 云南6天5夜之旅 人民币3,999元起'));
 $prose = str_repeat('The spice garden in Penang is a lovely place to spend an afternoon among fragrant herbs. ', 20);
 check_true('looks_like_article true for long prose w/o signal', competitor_looks_like_article($prose));
 check('looks_like_article false when it has a price', false,
@@ -838,6 +1129,116 @@ check('tour_page false: price but no duration', false,
 check('tour_page false: plain article', false,
     competitor_is_tour_page('The best noodle shops in Taipei and where to find them.'));
 check('tour_page false on empty', false, competitor_is_tour_page(''));
+
+// ---- multilingual gate primitives (CN / BM tour pages) -----------------------
+// The keep-gate was English-only ("Day 1", "days/nights", "includes"), so a
+// Chinese or Malay tour page passed none of it and was dropped as "thin". These
+// lock the language-neutral detection: Chinese 第N天/第N日 + 5天4夜, Malay Hari N +
+// 5 Hari 4 Malam, plus structured JSON-LD product signals.
+check('day_marker_count english two days', 2,
+    competitor_day_marker_count("Day 1 arrival\nDay 2 city tour"));
+check('day_marker_count chinese arabic digits', 2,
+    competitor_day_marker_count("第1天 抵达\n第2天 游览"));
+check('day_marker_count chinese numerals', 3,
+    competitor_day_marker_count("第一天 抵达\n第二天 乌布\n第三天 返程"));
+check('day_marker_count chinese 日 variant', 2,
+    competitor_day_marker_count("第1日 出发\n第2日 观光"));
+check('day_marker_count malay hari', 2,
+    competitor_day_marker_count("Hari 1 Ketibaan\nHari 2 Ubud"));
+check('day_marker_count ignores repeated same day', 1,
+    competitor_day_marker_count("Day 1 morning. Day 1 afternoon. Day 1 night."));
+check('day_marker_count zero when none', 0, competitor_day_marker_count("A lovely holiday."));
+
+check_true('has_duration english DnN', competitor_has_duration('Genting 5D4N package'));
+check_true('has_duration english days', competitor_has_duration('a relaxing 7 days trip'));
+check_true('has_duration chinese 天夜', competitor_has_duration('云南5天4夜'));
+check_true('has_duration chinese 天晚', competitor_has_duration('大理6天5晚'));
+check_true('has_duration malay hari malam', competitor_has_duration('Percutian 5 Hari 4 Malam'));
+check('has_duration false plain prose', false, competitor_has_duration('the best noodle shops in Taipei'));
+
+check_true('has_price rm', competitor_has_price('from RM899 per pax'));
+check_true('has_price sgd', competitor_has_price('From S$1,488'));
+check_true('has_price chinese yuan suffix', competitor_has_price('3999元起'));
+check_true('has_price chinese rmb', competitor_has_price('人民币 3,999'));
+check('has_price false plain prose', false, competitor_has_price('a wonderful trip for everyone'));
+
+check_true('has_inclusions english', competitor_has_inclusions('Inclusions: hotel, meals'));
+check_true('has_inclusions chinese 费用包含', competitor_has_inclusions('费用包含：4晚酒店住宿、每日早餐'));
+check_true('has_inclusions chinese 包括', competitor_has_inclusions('包括：机票、酒店'));
+check_true('has_inclusions malay termasuk', competitor_has_inclusions('Harga termasuk: penginapan hotel'));
+check('has_inclusions false none', false, competitor_has_inclusions('our highlights are amazing'));
+
+// ---- multilingual itinerary + tour-page gate ---------------------------------
+$cnTour = "巴厘岛5天4夜文化之旅\n第1天 抵达登巴萨，入住酒店\n第2天 乌布艺术村与梯田";
+$cnNumeral = "第一天 抵达\n第二天 游览乌布";
+$bmTour = "Percutian Bali 5 Hari 4 Malam\nHari 1 Ketibaan di Denpasar\nHari 2 Ubud dan sawah padi";
+check_true('tour_itinerary cn two days', competitor_has_tour_itinerary($cnTour));
+check_true('tour_itinerary cn chinese numerals', competitor_has_tour_itinerary($cnNumeral));
+check_true('tour_itinerary bm two days', competitor_has_tour_itinerary($bmTour));
+check_true('tour_itinerary cn single day + duration',
+    competitor_has_tour_itinerary("云南5天4夜\n第1天 抵达昆明"));
+check('tour_itinerary cn lone day, no duration', false,
+    competitor_has_tour_itinerary("第1天 精彩行程即将开始，立即预订"));
+
+check_true('tour_page cn itinerary', competitor_is_tour_page($cnTour));
+check_true('tour_page bm itinerary', competitor_is_tour_page($bmTour));
+check_true('tour_page cn duration + price (no day-by-day)',
+    competitor_is_tour_page('云南深度游 6天5夜 人民币3,999起'));
+// Structured JSON-LD product verdict keeps a page even when the text regex misses.
+check_true('tour_page structured product override',
+    competitor_is_tour_page('Sparse SPA shell, itinerary loaded later.', true));
+check('tour_page structured flag does not rescue empty', false,
+    competitor_is_tour_page('', true));
+// Vetted PRODUCT URL + duration keeps a bookable product whose price sits behind a
+// booking widget (cruises / free-&-easy have no day-by-day and no in-text price) —
+// discovery already confirmed the URL is a product, so don't require price too.
+$cruise = "2D1N Port Klang to Singapore Cruise Experience\n"
+    . "Overview: enjoy a relaxing cruise with onboard activities and comfortable sailing.\n"
+    . "Cruise Details\nDuration 2 Days\nDeparts Port Klang to Singapore.\nBook your cabin for secure checkout.";
+check_true('tour_page: product URL + duration (price behind booking widget)',
+    competitor_is_tour_page($cruise, false, true));
+check('tour_page: same page WITHOUT product-url signal stays dropped', false,
+    competitor_is_tour_page($cruise, false, false));
+check('tour_page: product url but NO duration is not a tour', false,
+    competitor_is_tour_page('Our agency was founded in 2001 and we love to travel.', false, true));
+
+// ---- multilingual listing / card detection -----------------------------------
+check_true('text_looks_like_listing cn many 第1天',
+    competitor_text_looks_like_listing("第1天 昆明\n第1天 大理\n第1天 丽江"));
+check_true('text_looks_like_listing bm many Hari 1',
+    competitor_text_looks_like_listing("Hari 1 A\nHari 1 B\nHari 1 C"));
+check('count_tour_cards cn distinct durations', 3,
+    competitor_count_tour_cards('5天4夜昆明 6天5夜大理 4天3晚丽江'));
+
+// ---- competitor_jsonld_is_product (structured keep-signal) --------------------
+check_true('jsonld_is_product TouristTrip', competitor_jsonld_is_product(array('touristtrip')));
+check_true('jsonld_is_product Product + breadcrumb',
+    competitor_jsonld_is_product(array('product', 'breadcrumblist')));
+check('jsonld_is_product false for listing-only', false,
+    competitor_jsonld_is_product(array('collectionpage', 'itemlist')));
+check('jsonld_is_product false when no evidence', false, competitor_jsonld_is_product(array()));
+
+// ---- competitor_tripfez_cruise_items (tripfez SPA public-API adapter) --------
+// tripfez.com is a React SPA (no crawlable product pages); its cruise catalogue is a
+// clean public JSON API. This turns each API object into a ready-to-analyse item so we
+// skip per-page headless rendering. Isolated per-site by design.
+$tf = json_encode(array('totalData' => 2, 'data' => array(
+    array('slug' => '2d1n-melaka-singapore-cruise', 'name' => '2D1N MELAKA SINGAPORE CRUISE',
+        'durationDays' => 2, 'durationNights' => 1, 'ship' => 'Genting Dream',
+        'route' => 'Melaka > Singapore', 'seawareFromPriceCents' => 39900,
+        'description' => '<p>Enjoy a relaxing cruise.</p>'),
+    array('name' => 'no slug -> skipped'),
+)));
+$ci = competitor_tripfez_cruise_items($tf, 'https://tripfez.com');
+check('tripfez_cruise_items count (slugless skipped)', 1, count($ci));
+check('tripfez_cruise_items url from slug', 'https://tripfez.com/cruise/2d1n-melaka-singapore-cruise', $ci[0]['url']);
+check('tripfez_cruise_items title', '2D1N MELAKA SINGAPORE CRUISE', $ci[0]['title']);
+check_true('tripfez_cruise_items text has duration', strpos($ci[0]['text'], '2D1N') !== false);
+check_true('tripfez_cruise_items text has RM price from cents', strpos($ci[0]['text'], 'RM399') !== false);
+check_true('tripfez_cruise_items text strips html', strpos($ci[0]['text'], '<p>') === false);
+check('tripfez_cruise_items empty on junk', array(), competitor_tripfez_cruise_items('nope', 'https://tripfez.com'));
+check('tripfez_cruise_items empty on no data', array(), competitor_tripfez_cruise_items('{"data":[]}', 'https://tripfez.com'));
+check_true('tripfez_cruise_items item passes tour gate', competitor_is_tour_page($ci[0]['text'], false, true));
 
 // ---- competitor_needs_more_content (reading escalation trigger) --------------
 $fullPage = "Bali 5D4N Cultural Escape\n"
@@ -1005,6 +1406,48 @@ check('crawl_delay: takes the max across groups', 2.0,
 check('crawl_delay: none -> 0.0', 0.0, competitor_robots_crawl_delay("User-agent: *\nAllow: /"));
 check('crawl_delay: capped at 10', 10.0, competitor_robots_crawl_delay("Crawl-delay: 3600"));
 check('crawl_delay: empty -> 0.0', 0.0, competitor_robots_crawl_delay(''));
+
+// ---- competitor_retry_after_seconds (429/503 politeness) ---------------------
+check('retry_after: plain seconds', 5, competitor_retry_after_seconds('5'));
+check('retry_after: trims whitespace', 30, competitor_retry_after_seconds('  30 '));
+check('retry_after: zero', 0, competitor_retry_after_seconds('0'));
+check('retry_after: negative -> 0', 0, competitor_retry_after_seconds('-3'));
+check('retry_after: empty -> 0', 0, competitor_retry_after_seconds(''));
+check('retry_after: junk -> 0', 0, competitor_retry_after_seconds('soon'));
+check('retry_after: caps at 120 by default', 120, competitor_retry_after_seconds('9999'));
+check('retry_after: custom cap', 45, competitor_retry_after_seconds('9999', 0, 45));
+// HTTP-date form (deterministic via injected now)
+$now = 1700000000;
+$future = gmdate('D, d M Y H:i:s', $now + 20) . ' GMT';
+check('retry_after: http-date in future', 20, competitor_retry_after_seconds($future, $now));
+$past = gmdate('D, d M Y H:i:s', $now - 60) . ' GMT';
+check('retry_after: http-date in past -> 0', 0, competitor_retry_after_seconds($past, $now));
+
+// ---- competitor_backoff_seconds (exponential backoff) -----------------------
+check('backoff: attempt 0 = base', 0.5, competitor_backoff_seconds(0));
+check('backoff: attempt 1 doubles', 1.0, competitor_backoff_seconds(1));
+check('backoff: attempt 2', 2.0, competitor_backoff_seconds(2));
+check('backoff: caps at 30', 30.0, competitor_backoff_seconds(10));
+check('backoff: custom base', 2.0, competitor_backoff_seconds(0, 2.0));
+check('backoff: negative attempt treated as 0', 0.5, competitor_backoff_seconds(-1));
+
+// ---- competitor_http_cache_* (cross-crawl 304 cache) ------------------------
+check_true('http_cache_key stable + dedups equivalent urls',
+    competitor_http_cache_key('https://c.com/a/b/../x') === competitor_http_cache_key('https://c.com/a/x'));
+check_true('http_cache_key ignores fragment',
+    competitor_http_cache_key('https://c.com/x#top') === competitor_http_cache_key('https://c.com/x'));
+check('http_cache_key empty on blank', '', competitor_http_cache_key('   '));
+$m = array('ts' => 1000, 'etag' => 'W/"abc"', 'last_modified' => 'Wed, 21 Oct 2015 07:28:00 GMT');
+check_true('http_cache_is_fresh within ttl', competitor_http_cache_is_fresh($m, 1300, 3600));
+check('http_cache_is_fresh beyond ttl', false, competitor_http_cache_is_fresh($m, 5000, 3600));
+check('http_cache_is_fresh ttl 0 disables', false, competitor_http_cache_is_fresh($m, 1001, 0));
+check('http_cache_is_fresh no ts', false, competitor_http_cache_is_fresh(array('etag' => 'x'), 1001, 3600));
+check('http_cache_conditional builds both validators',
+    array('If-None-Match: W/"abc"', 'If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT'),
+    competitor_http_cache_conditional($m));
+check('http_cache_conditional empty when no validators', array(),
+    competitor_http_cache_conditional(array('ts' => 1)));
+
 check_true('candidate: no base_host given still accepts a content page',
     competitor_is_candidate_url('https://comp.com/x/y'));
 
@@ -1094,6 +1537,15 @@ $robots = "User-agent: *\nDisallow: /admin\nSitemap: https://comp.com/sitemap.xm
 check('robots_sitemaps extracts both', array('https://comp.com/sitemap.xml', 'https://comp.com/tours-sitemap.xml'),
     competitor_robots_sitemaps($robots));
 check('robots_sitemaps empty when none', array(), competitor_robots_sitemaps("User-agent: *\nDisallow: /"));
+
+// ---- competitor_sitemap_candidates (fallback probe when robots declares none) -
+$cands = competitor_sitemap_candidates('https://comp.com');
+check('sitemap_candidates default first', 'https://comp.com/sitemap.xml', $cands[0]);
+check_true('sitemap_candidates includes wp-sitemap', in_array('https://comp.com/wp-sitemap.xml', $cands, true));
+check_true('sitemap_candidates includes yoast index', in_array('https://comp.com/sitemap_index.xml', $cands, true));
+check('sitemap_candidates strips trailing slash on origin', 'https://comp.com/sitemap.xml',
+    competitor_sitemap_candidates('https://comp.com/')[0]);
+check('sitemap_candidates empty on blank origin', array(), competitor_sitemap_candidates(''));
 
 // ---- competitor_parse_sitemap -----------------------------------------------
 $idx = '<?xml version="1.0"?><sitemapindex><sitemap><loc>https://comp.com/s1.xml</loc></sitemap><sitemap><loc>https://comp.com/s2.xml</loc></sitemap></sitemapindex>';
@@ -1698,6 +2150,12 @@ check('orphan error row state', 'error', $host_rows[0]['state']);
 $all_rows = competitor_orphan_crawl_rows($orphan_db, array(), 'host');
 check('orphan none-covered folds all', 3, count($all_rows));
 check('orphan carries cost', 0.12, $all_rows[0]['cost_total']);
+// Competitor name (when stored on the DB row) surfaces on the orphan row.
+$named_orphan = competitor_orphan_crawl_rows(
+    array((object) array('id' => 3, 'url' => 'https://named.com/x', 'product_name' => 'P', 'competitor_name' => 'Apple Vacations', 'cost_usd' => 0.1, 'status' => 'done', 'created_at' => '2026-09-20 10:00:00')),
+    array(), 'host');
+check('orphan carries competitor name', 'Apple Vacations', $named_orphan[0]['name']);
+check('orphan name blank when absent', '', $all_rows[0]['name']);
 // URL mode (Our Product): only the matching URL is hidden.
 $url_rows = competitor_orphan_crawl_rows($orphan_db, array('https://easyeurope.com.my/golden-egypt/'), 'url');
 check('orphan url-mode hides only matching url', 2, count($url_rows));

@@ -45,7 +45,9 @@ class Competitor_Product_Job extends CI_Controller
 				'mode'         => isset($job['mode']) ? $job['mode'] : 'crawl',
 				'keyword'      => isset($job['keyword']) ? $job['keyword'] : '',          // persist chips
 				'ai_crawl'     => ! empty($job['ai_crawl']) ? 1 : 0,
+				'competitor_name' => isset($job['competitor_name']) ? $job['competitor_name'] : '', // user label (persist across writes)
 				'created'      => isset($job['created']) ? $job['created'] : date('Y-m-d H:i:s'),   // fixed submit time
+				'src'          => isset($job['src']) ? $job['src'] : '',   // discovery source (persist for resume headless gating)
 				'ts'           => date('Y-m-d H:i:s'),
 			);
 			@file_put_contents($status_file, json_encode(array_merge($base, $data), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -91,10 +93,11 @@ class Competitor_Product_Job extends CI_Controller
 			}
 			$our    = competitor_format_our_products($this->Product_Model->Read_For_Comparison());
 			$record = $this->competitoranalysisservice->analyze_file($file, $ext, $our);
-			$record['url']        = $label;
-			$record['source']     = 'upload';
-			$record['status']     = 'done';
-			$record['created_by'] = isset($job['created_by']) ? $job['created_by'] : null;
+			$record['url']             = $label;
+			$record['source']          = 'upload';
+			$record['status']          = 'done';
+			$record['competitor_name'] = isset($job['competitor_name']) ? $job['competitor_name'] : null;
+			$record['created_by']      = isset($job['created_by']) ? $job['created_by'] : null;
 			$id = (int) $this->Competitor_Analysis_Model->Create($record);
 			@unlink($file);
 			$write(array('state' => 'done', 'phase' => 'analysing', 'done' => 1, 'total' => 1,
@@ -127,10 +130,11 @@ class Competitor_Product_Job extends CI_Controller
 			}
 			$our    = competitor_format_our_products($this->Product_Model->Read_For_Comparison());
 			$record = $this->competitoranalysisservice->analyze_paste($paste, $our);
-			$record['url']        = competitor_paste_source_label($paste);
-			$record['source']     = 'paste';
-			$record['status']     = 'done';
-			$record['created_by'] = isset($job['created_by']) ? $job['created_by'] : null;
+			$record['url']             = competitor_paste_source_label($paste);
+			$record['source']          = 'paste';
+			$record['status']          = 'done';
+			$record['competitor_name'] = isset($job['competitor_name']) ? $job['competitor_name'] : null;
+			$record['created_by']      = isset($job['created_by']) ? $job['created_by'] : null;
 			$id = (int) $this->Competitor_Analysis_Model->Create($record);
 			$write(array('state' => 'done', 'phase' => 'analysing', 'done' => 1, 'total' => 1,
 				'count' => 1, 'analysis_id' => $id, 'cost_total' => (float) $record['cost_usd']));
@@ -182,6 +186,22 @@ class Competitor_Product_Job extends CI_Controller
 		if ($url === '') {
 			return;
 		}
+		// Pace between chunks: on a CONTINUATION run (a .done.txt already exists), pause briefly
+		// BEFORE taking the lock so a big site gets a breather between chunks and is less likely
+		// to rate-limit/block us. First run has no done-file → no pause. Sleep before the lock so
+		// we don't hold up any other queued crawl while waiting.
+		$done_file = APPPATH . 'logs/competitor_crawl/jobs/' . $job['job'] . '.done.txt';
+		if (is_file($done_file) && filesize($done_file) > 0) {
+			$pause = get_env('COMPETITOR_CHUNK_PAUSE');
+			$pause = ($pause === '' || $pause === null) ? 2 : (int) $pause;
+			if ($pause > 0) { sleep(min($pause, 60)); }
+		}
+		// ONE crawl at a time. A crawl spawns heavy work (discovery + headless renders);
+		// running several at once exhausts the machine. So a second crawl QUEUES here and
+		// WAITS for the current one to finish, then runs. flock auto-releases if the holder
+		// dies, so a crashed crawl can't wedge the queue. (Waiting workers just sleep — no
+		// heavy work runs until the lock is theirs.)
+		$lock = $this->acquire_crawl_lock($write);
 		$write(array('state' => 'running', 'phase' => 'discovering', 'done' => 0, 'total' => 0));
 		try {
 			// Stamp when the READING phase begins so the UI can show a live ETA
@@ -203,8 +223,24 @@ class Competitor_Product_Job extends CI_Controller
 			// a caller run a fast bounded crawl (e.g. batch verification) without reading
 			// an entire large catalogue.
 			$limit = isset($job['limit']) ? (int) $job['limit'] : 0;
-			$items = $this->competitoranalysisservice->crawl_to_text($url, $limit, $progress, $keyword, $ai_crawl);
+			// Persist the discovered URL list to a per-crawl file (truncated here, so each new
+			// crawl starts clean). Bounds discovery memory + gives an inspectable record.
+			$this->competitoranalysisservice->set_discovery_url_file(
+				APPPATH . 'logs/competitor_crawl/jobs/' . $job['job'] . '.urls.txt');
+			// Checkpoint read progress to the items file every chunk, so a crash/kill/block
+			// mid-read keeps everything read so far (not all-or-nothing).
 			$items_file = APPPATH . 'logs/competitor_crawl/jobs/' . $job['job'] . '.items.json';
+			$this->competitoranalysisservice->set_items_checkpoint_file($items_file);
+			// Resumable chunking: track attempted URLs so each run reads only the next chunk and
+			// carries prior progress. When a chunk finishes with more remaining, we re-spawn.
+			$this->competitoranalysisservice->set_done_file(
+				APPPATH . 'logs/competitor_crawl/jobs/' . $job['job'] . '.done.txt');
+			// Restore the discovery source recorded on the first run so a continuation keeps the
+			// same headless gating (an ICE/sitemap site must not headless-render on resume).
+			if ( ! empty($job['src'])) {
+				$this->competitoranalysisservice->set_forced_source((string) $job['src']);
+			}
+			$items = $this->competitoranalysisservice->crawl_to_text($url, $limit, $progress, $keyword, $ai_crawl);
 			@file_put_contents($items_file, json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
 			// AI-crawl discovery (web_search) spends tokens that aren't tied to any saved
@@ -212,10 +248,87 @@ class Competitor_Product_Job extends CI_Controller
 			// it (later analyses add on top via merge_crawl_analysed).
 			$crawl_cost = (float) $this->competitoranalysisservice->last_run_cost();
 			$n = count($items);
-			$write(array('state' => 'done', 'phase' => 'reading', 'done' => $n, 'total' => $n,
-				'count' => $n, 'items_file' => $items_file, 'cost_total' => round($crawl_cost, 6)));
+			if ($this->competitoranalysisservice->crawl_has_more()) {
+				// More discovered URLs remain unread — keep the job visible as running and
+				// RE-SPAWN it to read the next chunk. The re-spawn writes the new worker's PID
+				// (so the crash-watchdog sees a live worker), then this run releases the lock so
+				// the continuation can acquire it. Progress (.done.txt + .items.json) persists.
+				$write(array('state' => 'running', 'phase' => 'reading', 'done' => $n, 'total' => $n,
+					'count' => $n, 'items_file' => $items_file, 'cost_total' => round($crawl_cost, 6),
+					'src' => $this->competitoranalysisservice->discovery_source(),   // persist for the next chunk
+					'label' => 'Read ' . $n . ' so far — continuing next chunk…'));
+				$this->respawn_continuation($job['job']);
+			} else {
+				$write(array('state' => 'done', 'phase' => 'reading', 'done' => $n, 'total' => $n,
+					'count' => $n, 'items_file' => $items_file, 'cost_total' => round($crawl_cost, 6)));
+			}
 		} catch (Exception $e) {
 			$write(array('state' => 'error', 'message' => $e->getMessage()));
+		} finally {
+			$this->release_crawl_lock($lock);   // let the next queued crawl proceed
+		}
+	}
+
+	/**
+	 * Acquire the global single-crawl lock, WAITING until it's free so crawls run strictly
+	 * one at a time. Uses a MySQL NAMED lock (GET_LOCK) rather than a file: it is held by
+	 * this DB connection, released automatically if the worker dies (connection drops), and
+	 * — unlike a lock file — cannot be broken by clearing the logs directory. Each GET_LOCK
+	 * call waits up to 3s; between waits it heartbeats a 'queued' status so the UI shows the
+	 * job is queued behind the running crawl. Returns true when held (release via
+	 * release_crawl_lock), or null if there's no DB (fail-open — don't block crawling).
+	 */
+	private function acquire_crawl_lock($write)
+	{
+		if ( ! isset($this->db)) { @$this->load->database(); }
+		if ( ! isset($this->db)) {
+			return null;   // no DB → don't block crawling
+		}
+		$start = time();
+		while (true) {
+			$row = $this->db->query("SELECT GET_LOCK('competitor_crawl', 3) AS g")->row();
+			if ($row && (int) $row->g === 1) {
+				return true;   // lock held on this connection
+			}
+			// Another crawl holds it — heartbeat 'queued' (keeps the watchdog happy too), retry.
+			$write(array('state' => 'queued', 'phase' => 'queued', 'done' => 0, 'total' => 0,
+				'label' => 'Queued — waiting for the current crawl to finish…'));
+			if (time() - $start > 7200) {
+				return true;   // 2h safety valve — proceed rather than wait forever
+			}
+		}
+	}
+
+	/**
+	 * Re-spawn THIS crawl job (same id) as a detached worker to read the next chunk. The child
+	 * queues on the single-crawl lock until this run exits and releases it, then continues from
+	 * the persisted .done.txt / .items.json. Writes the child's PID so the crash-watchdog sees a
+	 * live worker (not a dead one). Best-effort — if it can't spawn, the job just stops with its
+	 * partial progress saved (a manual re-run would resume it).
+	 */
+	private function respawn_continuation($job_id)
+	{
+		if ( ! function_exists('exec')) {
+			return;
+		}
+		$dir   = APPPATH . 'logs/competitor_crawl/jobs/';
+		$php   = (defined('PHP_BINARY') && PHP_BINARY) ? PHP_BINARY : 'php';
+		$index = FCPATH . 'index.php';
+		$out   = $dir . $job_id . '.out';
+		$cmd = escapeshellarg($php) . ' -d pcre.jit=0 -d memory_limit=768M ' . escapeshellarg($index)
+			. ' Competitor_Product_Job run ' . escapeshellarg($job_id)
+			. ' > ' . escapeshellarg($out) . ' 2>&1 & echo $!';
+		$pid = (int) @exec($cmd);
+		if ($pid > 0) {
+			@file_put_contents($dir . $job_id . '.pid', $pid);
+		}
+	}
+
+	/** Release the single-crawl lock so the next queued crawl can start. */
+	private function release_crawl_lock($held)
+	{
+		if ($held === true && isset($this->db)) {
+			@$this->db->query("SELECT RELEASE_LOCK('competitor_crawl')");
 		}
 	}
 
@@ -257,8 +370,9 @@ class Competitor_Product_Job extends CI_Controller
 					$site = $this->competitoranalysisservice->analyze_texts(array($item), $our);
 					if ( ! empty($site['products'])) {
 						$rec = $site['products'][0];
-						$rec['status']     = 'done';
-						$rec['created_by'] = isset($job['created_by']) ? $job['created_by'] : null;
+						$rec['status']          = 'done';
+						$rec['competitor_name'] = isset($job['competitor_name']) ? $job['competitor_name'] : null;
+						$rec['created_by']      = isset($job['created_by']) ? $job['created_by'] : null;
 						$id = (int) $this->Competitor_Analysis_Model->Create($rec);
 						$results[(string) $i] = array('id' => $id, 'cost' => (float) $site['cost_usd'], 'at' => date('Y-m-d H:i:s'));
 						$total_cost += (float) $site['cost_usd'];

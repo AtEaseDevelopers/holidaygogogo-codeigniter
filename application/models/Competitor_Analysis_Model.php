@@ -54,6 +54,8 @@ class Competitor_Analysis_Model extends CI_Model
 			'url'           => (string) (isset($data['url']) ? $data['url'] : ''),
 			'page_title'    => isset($data['page_title']) ? $data['page_title'] : null,
 			'product_name'  => isset($data['product_name']) ? $data['product_name'] : null,
+			// User-supplied competitor name (label only — never sent to the AI); NULL when blank.
+			'competitor_name' => (isset($data['competitor_name']) && $data['competitor_name'] !== '') ? $data['competitor_name'] : null,
 			'tour_code'     => isset($data['tour_code']) ? $data['tour_code'] : null,
 			'price'         => isset($data['price']) ? $data['price'] : null,
 			'currency'      => isset($data['currency']) ? $data['currency'] : null,
@@ -85,7 +87,7 @@ class Competitor_Analysis_Model extends CI_Model
 	/** Listing rows, newest first. */
 	function Read_All()
 	{
-		$this->db->select('id, url, page_title, product_name, tour_code, price, currency, destination, duration, cost_usd, product_count, status, created_at');
+		$this->db->select('id, url, page_title, product_name, competitor_name, tour_code, price, currency, destination, duration, cost_usd, product_count, status, created_at');
 		$this->db->where('feature', $this->feature);
 		$this->db->order_by('id', 'DESC');
 		return $this->db->get('competitor_analyses')->result();
@@ -100,7 +102,7 @@ class Competitor_Analysis_Model extends CI_Model
 	 */
 	function Read_Uploads($limit = 20)
 	{
-		$this->db->select('id, url, source, product_name, cost_usd, status, created_at');
+		$this->db->select('id, url, source, product_name, competitor_name, cost_usd, status, created_at');
 		$this->db->where('feature', $this->feature);
 		$this->db->where("(source IN ('upload','paste') OR (source IS NULL AND url NOT LIKE 'http%'))", null, false);
 		$this->db->order_by('id', 'DESC');
@@ -117,7 +119,7 @@ class Competitor_Analysis_Model extends CI_Model
 	 */
 	function Read_Crawl_Analyses($limit = 30)
 	{
-		$this->db->select('id, url, product_name, cost_usd, status, created_at');
+		$this->db->select('id, url, product_name, competitor_name, cost_usd, status, created_at');
 		$this->db->where('feature', $this->feature);
 		$this->db->where("url LIKE 'http%' AND (source IS NULL OR source NOT IN ('upload','paste'))", null, false);
 		$this->db->order_by('id', 'DESC');
