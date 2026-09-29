@@ -223,13 +223,19 @@ $FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
         <p style="font-size:12px; text-align:center;"><i>This Is A Computer Generated Quotation. No Signature Required.</i></p>
     </div>
 
+    <table style="width:100%;">
+        <tr>
+            <th style="width:65%;"><h3 class="text-right">Custom Quotation</h3></th>
+            <th style="width:35%; font-weight:700; text-align:right;">No : <?php echo html_escape($public_ref); ?></th>
+        </tr>
+    </table>
+
     <?php
-    // Feedback 28 Sep 2026: the first-page "Custom Quotation" title row + the
+    // Feedback 28 Sep 2026: the "Custom Quotation" title + No. row is kept, but the
     // Tour Package / Duration / Date / Travel Date / No. Of Pax / Sales Person
-    // details table are NOT rendered — with the pricing breakdown gone they left a
-    // near-empty first page, and every one of those fields is repeated on the
-    // Hotel & Flight logistics page's key/value table below. The quotation now
-    // opens directly on that logistics page. $public_ref / $PackageName /
+    // details table below it is NOT rendered — with the pricing breakdown gone it
+    // left a near-empty first page, and every one of those fields is repeated on
+    // the Hotel & Flight logistics page's key/value table below. $PackageName /
     // $TravelDate / $InsertDate remain available for internal callers.
     ?>
 

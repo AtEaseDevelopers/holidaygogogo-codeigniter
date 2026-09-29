@@ -24,6 +24,11 @@ $child_count = isset($booking['child_count']) ? (int) $booking['child_count'] : 
 $total_pax = isset($booking['total_pax']) ? (int) $booking['total_pax'] : ($adult_count + $child_count);
 $travel_date = isset($booking['travel_date']) ? $booking['travel_date'] : date('Y-m-d');
 $travel_date_end = !empty($booking['travel_date_end']) ? $booking['travel_date_end'] : $travel_date;
+// #2 Travel date is one range field. Keep ISO values for the hidden inputs the
+// controller reads, plus a DD/MM/YYYY display string for the visible picker.
+$travel_date_iso = date('Y-m-d', strtotime($travel_date));
+$travel_date_end_iso = date('Y-m-d', strtotime($travel_date_end));
+$travel_date_display = date('d/m/Y', strtotime($travel_date)) . ' - ' . date('d/m/Y', strtotime($travel_date_end));
 $booking_status_value = isset($booking['status_value']) ? $booking['status_value'] : 'active';
 $margin_percentage = isset($financials['margin_percentage']) ? (float) $financials['margin_percentage'] : 0;
 $sales_agents = isset($sales_agents) ? $sales_agents : array();
@@ -241,16 +246,12 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 <div class="cw-panel-sub">Set the pax and margin, then build the customer's price as one or more combinations below. Each combination holds its own cost items — enter each cost in its currency and MYR converts automatically (bank charges included) using the Costing Currency rates.</div>
 
                 <div class="row mb-2">
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <div class="form-group mb-2">
-                            <label>Travel Date (Start)</label>
-                            <input type="date" name="travel_date_start" class="form-control" value="<?php echo html_escape(date('Y-m-d', strtotime($travel_date))); ?>">
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="form-group mb-2">
-                            <label>Travel Date (End)</label>
-                            <input type="date" name="travel_date_end" class="form-control" value="<?php echo html_escape(date('Y-m-d', strtotime($travel_date_end))); ?>">
+                            <label>Travel Date</label>
+                            <input type="text" id="cw-travel-range" class="form-control" autocomplete="off" placeholder="Select date range" value="<?php echo html_escape($travel_date_display); ?>">
+                            <input type="hidden" name="travel_date_start" id="cw-travel-start" value="<?php echo html_escape($travel_date_iso); ?>">
+                            <input type="hidden" name="travel_date_end" id="cw-travel-end" value="<?php echo html_escape($travel_date_end_iso); ?>">
                         </div>
                     </div>
                     <div class="col-md-2">
@@ -1160,6 +1161,29 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
 
     recalc();
 })();
+</script>
+<script>
+// #2 Single "Travel Date" field: one daterangepicker feeds two hidden inputs
+// (travel_date_start / travel_date_end in ISO) that the controller still reads.
+jQuery(function () {
+    var $range = jQuery('#cw-travel-range');
+    if (!$range.length || !jQuery.fn.daterangepicker) { return; }
+    var startVal = jQuery('#cw-travel-start').val();
+    var endVal = jQuery('#cw-travel-end').val();
+    $range.daterangepicker({
+        startDate: startVal ? moment(startVal, 'YYYY-MM-DD') : moment(),
+        endDate: endVal ? moment(endVal, 'YYYY-MM-DD') : moment(),
+        locale: { format: 'DD/MM/YYYY', cancelLabel: 'Clear' },
+        buttonClasses: ' btn',
+        applyClass: 'btn-primary',
+        cancelClass: 'btn-secondary'
+    });
+    $range.on('apply.daterangepicker', function (ev, picker) {
+        jQuery(this).val(picker.startDate.format('DD/MM/YYYY') + ' - ' + picker.endDate.format('DD/MM/YYYY'));
+        jQuery('#cw-travel-start').val(picker.startDate.format('YYYY-MM-DD'));
+        jQuery('#cw-travel-end').val(picker.endDate.format('YYYY-MM-DD'));
+    });
+});
 </script>
 <?php } elseif ($active_step === 'itinerary') { ?>
 <script>
