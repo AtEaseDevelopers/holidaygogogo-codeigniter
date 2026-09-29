@@ -306,7 +306,7 @@ class Faq_Suggestion_Model extends CI_Model
 				$path = FCPATH . self::UPLOAD_DIR . basename((string) $run->StoredName);
 				$ext  = strtolower(pathinfo((string) $run->StoredName, PATHINFO_EXTENSION));
 				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest_file_path($path, $ext, (string) $run->FileName, $dest_names, $existing_faqs);
+				$result = $this->faqsuggestionservice->suggest_file_path($path, $ext, (string) $run->FileName, $dest_names, $existing_faqs, $this->max_suggestions());
 			} elseif (strtolower((string) $run->Source) === 'chatfile') {
 				// Mine an uploaded WhatsApp export (.txt, or .zip of several) — parse
 				// it into messages and reuse the same text path as the chats generator.
@@ -324,7 +324,7 @@ class Faq_Suggestion_Model extends CI_Model
 				// survives an AI failure).
 				$this->Update_Run($run_id, array('InputText' => $transcript));
 				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs);
+				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions());
 			} else {
 				$start     = substr((string) $run->StartDate, 0, 10) . ' 00:00:00';
 				$end       = substr((string) $run->EndDate, 0, 10) . ' 23:59:59';
@@ -339,7 +339,7 @@ class Faq_Suggestion_Model extends CI_Model
 				// Keep the exact text handed to the AI (see chat-file branch above).
 				$this->Update_Run($run_id, array('InputText' => $transcript));
 				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs);
+				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions());
 			}
 		} catch (Exception $e) {
 			$this->Update_Run($run_id, array('RunState' => 'error', 'ErrorMessage' => $e->getMessage()));
@@ -519,11 +519,13 @@ class Faq_Suggestion_Model extends CI_Model
 	}
 
 	/**
-	 * How many FAQ suggestions to keep from a single AI reply. The prompt asks
-	 * the model to be EXHAUSTIVE, so this is only a safety backstop against a
-	 * runaway reply — default 200 (well above the old hard 50 so genuine
-	 * long-tail suggestions are no longer silently dropped). Override with
-	 * FAQ_SUGGESTION_MAX_SUGGESTIONS; set 0 to store every suggestion uncapped.
+	 * How many FAQ suggestions to allow from a single AI reply. This ceiling is
+	 * now handed to the model in the prompt (so it stops generating once it hits
+	 * the cap instead of us paying for tokens we'd discard) AND enforced again at
+	 * parse time as a safety backstop against a runaway reply — default 200 (well
+	 * above the old hard 50 so genuine long-tail suggestions are no longer
+	 * silently dropped). Override with FAQ_SUGGESTION_MAX_SUGGESTIONS; set 0 to
+	 * leave it uncapped (the model is told to be EXHAUSTIVE and nothing is trimmed).
 	 */
 	protected function max_suggestions()
 	{

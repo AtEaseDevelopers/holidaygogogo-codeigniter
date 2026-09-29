@@ -323,7 +323,7 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 	 * exist — injected so the model skips duplicates up front (see
 	 * faq_suggestion_existing_block).
 	 */
-	function faq_suggestion_build_prompt($transcript, $destination_names = array(), $existing_faqs = array())
+	function faq_suggestion_build_prompt($transcript, $destination_names = array(), $existing_faqs = array(), $max = 0)
 	{
 		$dest = array();
 		foreach ((array) $destination_names as $n) {
@@ -333,6 +333,13 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			}
 		}
 		$dest_line = empty($dest) ? '(none configured)' : implode(', ', $dest);
+
+		// When a cap is given, tell the AI the ceiling up front so it doesn't spend
+		// output tokens on suggestions we'd only discard at parse time.
+		$max      = (int) $max;
+		$cap_line = $max > 0
+			? "Return AT MOST {$max} suggestions — if you can extract more, keep only the {$max} most broadly useful ones. "
+			: "";
 
 		$instructions =
 			"You are a knowledge analyst for a Malaysian tour agency. " .
@@ -351,7 +358,8 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"Base it on how the agents actually replied, but keep it generic so it works for any customer (no specific name, " .
 			"quoted price, or personal dates). " .
 			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came up or why it is useful. " .
-			"Roughly ORDER the suggestions with the more broadly useful ones first, but still list everything. " .
+			"Roughly ORDER the suggestions with the more broadly useful ones first. " .
+			$cap_line .
 			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
 			"skip it even if you would word the question differently; only return genuinely NEW questions. " .
 			"Never include a specific customer's name, phone number, a price quoted to one person, or any other private data. " .
@@ -371,7 +379,9 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
 			"\"items\":[{\"q\":\"the question\",\"a\":\"a detailed, step-by-step, ready-to-send reply to the customer\"}]" .
 			"}]}\n\n" .
-			"List every FAQ you can extract; put the more broadly useful ones first.\n\n" .
+			($max > 0
+				? "Return at most {$max} FAQs; put the more broadly useful ones first.\n\n"
+				: "List every FAQ you can extract; put the more broadly useful ones first.\n\n") .
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .
 			$existing_line .
@@ -393,7 +403,7 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 	 * $existing_faqs (['title'=>, 'questions'=>[]] list) are the FAQs that already
 	 * exist — injected so the model skips duplicates up front.
 	 */
-	function faq_suggestion_build_file_prompt($destination_names = array(), $existing_faqs = array())
+	function faq_suggestion_build_file_prompt($destination_names = array(), $existing_faqs = array(), $max = 0)
 	{
 		$dest = array();
 		foreach ((array) $destination_names as $n) {
@@ -403,6 +413,13 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			}
 		}
 		$dest_line = empty($dest) ? '(none configured)' : implode(', ', $dest);
+
+		// When a cap is given, tell the AI the ceiling up front so it doesn't spend
+		// output tokens on suggestions we'd only discard at parse time.
+		$max      = (int) $max;
+		$cap_line = $max > 0
+			? "Return AT MOST {$max} suggestions — if you can extract more, keep only the {$max} most broadly useful ones. "
+			: "";
 
 		$instructions =
 			"You are a knowledge analyst for a Malaysian tour agency. " .
@@ -419,7 +436,8 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			"for a visa), lay it out as clear STEP-BY-STEP instructions — use numbered steps (1., 2., 3. …) or short bullet " .
 			"lines so the customer can follow along easily; cover the whole flow end to end rather than a one-line summary. " .
 			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came from or why it is useful. " .
-			"Roughly ORDER the suggestions with the more broadly useful ones first, but still list everything. " .
+			"Roughly ORDER the suggestions with the more broadly useful ones first. " .
+			$cap_line .
 			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
 			"skip it even if worded differently; only return genuinely NEW questions. " .
 			"Never invent facts not supported by the document, and never include a specific customer's private data. " .
@@ -442,6 +460,7 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .
 			$existing_line .
+			($max > 0 ? "Return at most {$max} FAQs; put the more broadly useful ones first.\n\n" : "") .
 			"Read the attached document and extract the FAQs now.";
 
 		return array('instructions' => $instructions, 'input' => $input);

@@ -1612,12 +1612,13 @@ class Costing_Model extends CI_Model
             $item['bank_charges_myr'] = (float) $item['bank_charges_myr'];
 
             // Cost template math: the frozen per-unit MYR saved with the row wins
-            // (bank charge already baked in at save time, never re-pulled from the
-            // master); legacy rows with no frozen value convert from the rate.
+            // (never re-pulled from the master); legacy rows with no frozen value
+            // convert from the rate. base_total is a PURE conversion — the bank
+            // charge is added once per currency at aggregation (costing_bank_total).
             $stored_myr = ($item['frozen_myr_per_unit'] === null) ? null : (float) $item['frozen_myr_per_unit'];
             unset($item['frozen_myr_per_unit']);
             $cost_foreign = (float) $item['unit_price'] * (float) $item['unit_count'];
-            $myr = costing_row_totals($stored_myr, $cost_foreign, $item['exchange_rate'], $item['bank_charges_myr'], (float) $item['quantity']);
+            $myr = costing_row_totals($stored_myr, $cost_foreign, $item['exchange_rate'], (float) $item['quantity']);
             $item['myr_per_unit'] = $myr['myr_per_unit'];
             $item['base_total'] = $myr['total_myr'];
         }
@@ -1708,6 +1709,8 @@ class Costing_Model extends CI_Model
             foreach ($items as $item) {
                 $cost_myr += (float) $item['base_total'];
             }
+            // Bank (wire) charge once per distinct currency used by this combination.
+            $cost_myr += costing_bank_total($items);
             $out[] = array(
                 'id'       => $combo_id,
                 'name'     => (string) $combo['name'],
@@ -2086,6 +2089,8 @@ class Costing_Model extends CI_Model
         foreach ($booking_items as $item) {
             $total_cost += (float) $item['base_total'];
         }
+        // Bank (wire) charge once per distinct currency across the whole booking.
+        $total_cost += costing_bank_total($booking_items);
 
         $total_cost = round($total_cost, 2);
         $cost_per_pax = round($total_cost / $total_pax, 2);

@@ -59,13 +59,13 @@ class FaqSuggestionService
 	 * exist (['title'=>, 'questions'=>[]]) so the model skips duplicates. Returns
 	 * the raw JSON reply + usage/cost.
 	 */
-	public function suggest($transcript, $destination_names = array(), $existing_faqs = array())
+	public function suggest($transcript, $destination_names = array(), $existing_faqs = array(), $max = 0)
 	{
 		$transcript = trim((string) $transcript);
 		if ($transcript === '') {
 			throw new Exception('No recent conversations to analyse.');
 		}
-		$spec = faq_suggestion_build_prompt($transcript, $destination_names, $existing_faqs);
+		$spec = faq_suggestion_build_prompt($transcript, $destination_names, $existing_faqs, $max);
 		$raw  = $this->request($spec['instructions'], $spec['input']);
 		return $this->pack_result($raw);
 	}
@@ -79,13 +79,13 @@ class FaqSuggestionService
 	 * Returns the raw JSON reply + usage/cost. Throws on an unsupported type or any
 	 * API failure.
 	 */
-	public function suggest_file($base64, $ext, $destination_names = array(), $existing_faqs = array())
+	public function suggest_file($base64, $ext, $destination_names = array(), $existing_faqs = array(), $max = 0)
 	{
 		$part = competitor_file_input_part($ext, (string) $base64);
 		if ($part === null) {
 			throw new Exception('Unsupported file type. Upload a PDF or image.');
 		}
-		$spec  = faq_suggestion_build_file_prompt($destination_names, $existing_faqs);
+		$spec  = faq_suggestion_build_file_prompt($destination_names, $existing_faqs, $max);
 		$input = array(array(
 			'role'    => 'user',
 			'content' => array(
@@ -106,7 +106,7 @@ class FaqSuggestionService
 	 * proxy /base_url without a /files endpoint still works. Set
 	 * FAQ_SUGGESTION_PDF_UPLOAD=0 in .env to force the base64 path.
 	 */
-	public function suggest_file_path($path, $ext, $orig_name = '', $destination_names = array(), $existing_faqs = array())
+	public function suggest_file_path($path, $ext, $orig_name = '', $destination_names = array(), $existing_faqs = array(), $max = 0)
 	{
 		$ext = strtolower(ltrim((string) $ext, '.'));
 
@@ -116,7 +116,7 @@ class FaqSuggestionService
 		if ($ext === 'pdf' && $use_upload) {
 			try {
 				$file_id = $this->upload_file($path, (string) $orig_name);
-				$spec  = faq_suggestion_build_file_prompt($destination_names, $existing_faqs);
+				$spec  = faq_suggestion_build_file_prompt($destination_names, $existing_faqs, $max);
 				$input = array(array(
 					'role'    => 'user',
 					'content' => array(
@@ -141,7 +141,7 @@ class FaqSuggestionService
 		}
 		$b64 = base64_encode($data);
 		unset($data);
-		return $this->suggest_file($b64, $ext, $destination_names, $existing_faqs);
+		return $this->suggest_file($b64, $ext, $destination_names, $existing_faqs, $max);
 	}
 
 	/**

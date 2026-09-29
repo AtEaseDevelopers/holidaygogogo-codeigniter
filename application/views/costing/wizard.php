@@ -307,7 +307,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                                 <tr>
                                     <th style="text-align:left;">Currency</th>
                                     <th class="text-right">Rate to MYR</th>
-                                    <th class="text-right">Bank Charge / line</th>
+                                    <th class="text-right">Bank Charge / currency</th>
                                     <th class="text-right">Total (currency)</th>
                                     <th class="text-right">Total in MYR</th>
                                 </tr>
@@ -603,6 +603,9 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     var RATE_MAP = <?php echo json_encode($currency_rate_map); ?> || {};
     var CAT_LABELS = <?php echo json_encode($cat_labels); ?> || {};
     var DURATION_DAYS = <?php echo (int) $duration_days; ?>;
+    // Wire transfers per supplier line (deposit + balance) — the bank charge is
+    // levied this many times per currency. Mirrors costing_supplier_payment_count().
+    var SUPPLIER_PAYMENTS = <?php echo function_exists('costing_supplier_payment_count') ? (int) costing_supplier_payment_count() : 2; ?>;
 
     // #6 Differentiate items by colour — one distinct colour per category (Tour
     // Leader, Ground, Flight, …). Each category gets its OWN hue, spaced evenly
@@ -655,8 +658,8 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     function money(n) { return 'RM ' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2); }
     function totalPax() { return (parseInt(adultInput.value, 10) || 0) + (parseInt(childInput.value, 10) || 0); }
 
-    // Pure per-unit MYR conversion (NO bank charge). The bank charge is a per-line
-    // fee added ONCE to the line total, not per unit (feedback 18 Sep 2026, 2.2).
+    // Pure per-unit MYR conversion (NO bank charge). The bank charge is levied once
+    // per currency at the combination level, never per unit (feedback 29 Sep 2026).
     function rowMyrPerUnit(row) {
         var currencyId = row.querySelector('.cw-currency').value;
         var info = RATE_MAP[currencyId] || { rate_to_myr: 0, bank_charges_myr: 0 };
@@ -664,15 +667,30 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         return Math.round(cost * (Number(info.rate_to_myr) || 0) * 100) / 100;
     }
 
-    // Line total in MYR: converted amount + the bank charge once (only when the
-    // line actually has an amount).
+    // Line total in MYR: PURE converted amount (per-unit × count). The bank (wire)
+    // charge is added once per distinct currency in bankTotalForRows(), not here.
     function rowTotalMyr(row) {
         var perUnit = rowMyrPerUnit(row);
         var count = parseFloat(row.querySelector('.cw-count').value) || 0;
-        var info = RATE_MAP[row.querySelector('.cw-currency').value] || { bank_charges_myr: 0 };
-        var converted = Math.round(perUnit * count * 100) / 100;
-        var bank = Number(info.bank_charges_myr) || 0;
-        return converted > 0 ? Math.round((converted + bank) * 100) / 100 : 0;
+        return Math.round(perUnit * count * 100) / 100;
+    }
+
+    // Sum ONE bank charge per distinct currency that has a positive MYR amount
+    // across the given rows (mirrors costing_bank_total() in PHP).
+    function bankTotalForRows(rows) {
+        var byCur = {};
+        rows.forEach(function (row) {
+            var cid = row.querySelector('.cw-currency').value;
+            var info = RATE_MAP[cid] || { bank_charges_myr: 0 };
+            var bank = Number(info.bank_charges_myr) || 0;
+            var amount = rowTotalMyr(row);
+            if (!byCur[cid]) { byCur[cid] = { bank: 0, amount: 0 }; }
+            if (bank > byCur[cid].bank) { byCur[cid].bank = bank; }
+            byCur[cid].amount += amount;
+        });
+        var total = 0;
+        Object.keys(byCur).forEach(function (k) { if (byCur[k].amount > 0) { total += byCur[k].bank * SUPPLIER_PAYMENTS; } });
+        return Math.round(total * 100) / 100;
     }
 
     function autoCount(row) {
@@ -695,9 +713,9 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         var count = parseFloat(countInput.value) || 0;
         var total = rowTotalMyr(row);
 
-        // Freeze the pure "MYR (convert)" per-unit figure + the per-line bank charge
-        // onto hidden inputs so the saved value is exactly what the user sees. Bank
-        // is applied once to the line total, never baked into the per-unit figure.
+        // Freeze the pure "MYR (convert)" per-unit figure + the per-transaction bank
+        // charge onto hidden inputs so the saved value is exactly what the user sees.
+        // Bank is applied once per currency at the combination level, never per line.
         var info = RATE_MAP[row.querySelector('.cw-currency').value] || { bank_charges_myr: 0 };
         var myrHidden = row.querySelector('.cw-myr-hidden');
         var bankHidden = row.querySelector('.cw-bank-hidden');
@@ -707,7 +725,8 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
 
         var myrCell = row.querySelector('.cw-myr');
         myrCell.querySelector('.cw-myr-val').textContent = money(perUnit);
-        myrCell.querySelector('.cw-bank-note').textContent = (bankVal > 0 && total > 0) ? ('+ ' + money(bankVal) + ' bank / line') : '';
+        // Bank is no longer a per-line fee — shown once per currency in the breakdown.
+        myrCell.querySelector('.cw-bank-note').textContent = '';
         row.querySelector('.cw-total').textContent = money(total);
         return { total: total };
     }
@@ -722,10 +741,14 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     //   cost after markup / pax = cost/pax ÷ (1 − margin%/100)   [suggested]
     //   selling price / pax     = manual override, else the suggestion
     //   revenue = selling/pax × pax, profit/pax = selling/pax − cost/pax.
-    // Sum a card's own cost rows (also freezes each row's MYR via processRow).
-    function cardRowsCost(card) {
+    // A card's cost rows as an array (also freezes each row's MYR via processRow).
+    function cardRows(card) {
+        return Array.prototype.slice.call(card.querySelectorAll('.cw-crow'));
+    }
+    // Sum a set of rows' PURE converted totals (no bank — added per currency later).
+    function pureRowsCost(rows) {
         var cost = 0;
-        card.querySelectorAll('.cw-crow').forEach(function (row) { cost += processRow(row).total; });
+        rows.forEach(function (row) { cost += processRow(row).total; });
         return Math.round(cost * 100) / 100;
     }
 
@@ -734,16 +757,21 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
 
         // General Combination (item 6): its items are common to all, so its cost is
         // ADDED to every regular combination. Compute + show its subtotal first.
-        var generalTotal = 0;
         var generalCard = combosWrap.querySelector('.cw-combo-card.cw-combo-general');
+        var generalRows = generalCard ? cardRows(generalCard) : [];
+        var generalPure = generalRows.length ? pureRowsCost(generalRows) : 0;
         if (generalCard) {
-            generalTotal = cardRowsCost(generalCard);
-            set(generalCard, '.cw-combo-cost', generalTotal);
+            // The general subtotal charges bank once per its own currencies.
+            set(generalCard, '.cw-combo-cost', Math.round((generalPure + bankTotalForRows(generalRows)) * 100) / 100);
         }
 
         combosWrap.querySelectorAll('.cw-combo-card').forEach(function (card) {
             if (card.classList.contains('cw-combo-general')) { return; } // priced above
-            var cost = Math.round((cardRowsCost(card) + generalTotal) * 100) / 100;
+            // Bank once per distinct currency across THIS combo's rows + general rows,
+            // so a currency shared by both is charged once (mirrors the PHP fold).
+            var ownRows = cardRows(card);
+            var union = ownRows.concat(generalRows);
+            var cost = Math.round((pureRowsCost(ownRows) + generalPure + bankTotalForRows(union)) * 100) / 100;
             var costPax = Math.round((cost / pax) * 100) / 100;
             var divisor = 1 - (margin / 100);
             var markupPax = divisor > 0 ? Math.round((costPax / divisor) * 100) / 100 : costPax;
@@ -801,11 +829,18 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 };
             }
             acc[cid].foreign += unit * count;
-            // Bank charge is added once per line inside rowTotalMyr().
+            // Pure converted amount; the bank charge is added once per currency below.
             acc[cid].myr += rowTotalMyr(row);
         });
 
         var list = Object.keys(acc).map(function (k) { return acc[k]; });
+        // Bank (wire) charge per currency (deposit + balance = ×2), only when
+        // something is owed in it. bankCharged is the effective per-currency total.
+        list.forEach(function (e) {
+            e.bankCharged = Math.round(e.bank * SUPPLIER_PAYMENTS * 100) / 100;
+            if (e.myr > 0) { e.myr = Math.round((e.myr + e.bankCharged) * 100) / 100; }
+            else { e.bankCharged = 0; }
+        });
         list.sort(function (a, b) { return a.code < b.code ? -1 : (a.code > b.code ? 1 : 0); });
 
         if (!list.length) { panel.style.display = 'none'; tbody.innerHTML = ''; return; }
@@ -816,7 +851,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             return '<tr>' +
                 '<td style="text-align:left;">' + (e.code || '?') + '</td>' +
                 '<td class="text-right">' + num(e.rate, 4) + '</td>' +
-                '<td class="text-right">' + (e.bank > 0 ? 'RM ' + num(e.bank, 2) : '&mdash;') + '</td>' +
+                '<td class="text-right">' + (e.bankCharged > 0 ? 'RM ' + num(e.bankCharged, 2) : '&mdash;') + '</td>' +
                 '<td class="text-right">' + (e.code || '?') + ' ' + num(e.foreign, 2) + '</td>' +
                 '<td class="text-right">RM ' + num(e.myr, 2) + '</td>' +
                 '</tr>';

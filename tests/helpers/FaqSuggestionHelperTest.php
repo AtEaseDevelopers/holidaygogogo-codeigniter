@@ -118,6 +118,14 @@ assert_true('prompt lists an existing FAQ question', strpos($pe['input'], 'How m
 assert_true('prompt instructs to skip existing',     stripos($pe['input'] . $pe['instructions'], 'already') !== false);
 assert_false('no existing block when none given',    strpos($p2['input'], 'already exist') !== false);
 
+// build_prompt with a max cap -> the AI itself is told the ceiling.
+$pc = faq_suggestion_build_prompt("Customer: hi", array('Japan'), array(), 25);
+assert_true('capped prompt states the max in instructions', strpos($pc['instructions'], '25') !== false);
+assert_true('capped prompt says "at most"',                 stripos($pc['instructions'] . $pc['input'], 'at most') !== false);
+assert_false('uncapped prompt has no "at most"',            stripos($p['instructions'] . $p['input'], 'at most') !== false);
+$pc0 = faq_suggestion_build_prompt("Customer: hi", array('Japan'), array(), 0);
+assert_false('max 0 -> no "at most" (uncapped)',            stripos($pc0['instructions'] . $pc0['input'], 'at most') !== false);
+
 // ---- existing_block --------------------------------------------------------
 $blk = faq_suggestion_existing_block($existing_faqs);
 assert_true('block has title',    strpos($blk, 'Deposit amount') !== false);
@@ -257,6 +265,10 @@ assert_true('file prompt asks for step-by-step detail', stripos($fp['instruction
 $fpe = faq_suggestion_build_file_prompt(array('Japan'), $existing_faqs);
 assert_true('file prompt lists existing FAQ', strpos($fpe['input'], 'Deposit amount') !== false);
 assert_true('file prompt instructs skip existing', stripos($fpe['input'] . $fpe['instructions'], 'already') !== false);
+$fpc = faq_suggestion_build_file_prompt(array('Japan'), array(), 40);
+assert_true('capped file prompt states the max', strpos($fpc['instructions'], '40') !== false);
+assert_true('capped file prompt says "at most"', stripos($fpc['instructions'] . $fpc['input'], 'at most') !== false);
+assert_false('uncapped file prompt has no "at most"', stripos($fp['instructions'] . $fp['input'], 'at most') !== false);
 
 // ---- logs_to_prune ---------------------------------------------------------
 $now = mktime(12, 0, 0, 9, 18, 2026); // 2026-09-18 12:00:00

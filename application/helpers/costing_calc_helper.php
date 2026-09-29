@@ -288,28 +288,44 @@ if (!function_exists('costing_fold_general_combination')) {
      * cost is ADDED to each regular combination's cost_myr, and the general
      * combination itself is removed from the list (it is never a customer option).
      *
-     * When more than one combination is flagged general their costs sum. All other
-     * keys on each regular combination are preserved untouched.
+     * When more than one combination is flagged general their items all fold in. All
+     * other keys on each regular combination (incl. its own item list) are preserved
+     * untouched — only cost_myr is recomputed.
      *
-     * @param array $combinations each: ['cost_myr', 'is_general'(optional), ...]
-     * @return array regular combinations with cost_myr including the general cost
+     * Cost is rebuilt from the item rows (not summed cost_myr) so the bank (wire)
+     * charge lands ONCE per distinct currency across the combination's own rows AND
+     * the folded general rows together — a currency shared by both is charged once,
+     * not twice (feedback 29 Sep 2026). Each item row carries 'base_total' (its pure
+     * MYR conversion), 'currency_id' and 'bank_charges_myr'.
+     *
+     * @param array $combinations each: ['cost_myr', 'items'(rows), 'is_general'(opt), ...]
+     * @return array regular combinations with cost_myr including the general cost + bank
      */
     function costing_fold_general_combination($combinations)
     {
-        $general = 0.0;
+        $general_items = array();
+        $general_sum   = 0.0;
         foreach ((array) $combinations as $combo) {
             if (!empty($combo['is_general'])) {
-                $general += (float) (isset($combo['cost_myr']) ? $combo['cost_myr'] : 0);
+                foreach ((array) (isset($combo['items']) ? $combo['items'] : array()) as $item) {
+                    $general_items[] = $item;
+                    $general_sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
+                }
             }
         }
-        $general = round($general, 2);
 
         $out = array();
         foreach ((array) $combinations as $combo) {
             if (!empty($combo['is_general'])) {
                 continue;
             }
-            $combo['cost_myr'] = round((float) (isset($combo['cost_myr']) ? $combo['cost_myr'] : 0) + $general, 2);
+            $own_items = (array) (isset($combo['items']) ? $combo['items'] : array());
+            $own_sum = 0.0;
+            foreach ($own_items as $item) {
+                $own_sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
+            }
+            $union = array_merge($own_items, $general_items);
+            $combo['cost_myr'] = round($own_sum + $general_sum + costing_bank_total($union), 2);
             $out[] = $combo;
         }
         return $out;
@@ -425,37 +441,104 @@ if (!function_exists('costing_row_myr')) {
     /**
      * Convert one cost line the way the cost template shows it: the foreign Cost is
      * converted to MYR per unit ("MYR (convert)"), multiplied by the count (No of
-     * Day / No of pax), and the bank charge is added ONCE to the line total — it is
-     * a per-transaction fee on the total amount, NOT a per-unit charge (feedback
-     * 18 Sep 2026, item 2.2). No amount on the line (count 0 or rate 0) => no bank.
+     * Day / No of pax). The line total is a PURE conversion — the bank (wire) charge
+     * is NOT a per-line fee. It is levied once per distinct currency across the whole
+     * package (one wire transfer per currency), so it is added at the aggregation
+     * level via costing_bank_total(), never here (feedback 29 Sep 2026, supersedes
+     * the earlier per-line rule).
      *
      *   myr_per_unit = round(cost_foreign * rate, 2)
-     *   total_myr    = round(myr_per_unit * count, 2) + bank_charges_myr   (once)
+     *   total_myr    = round(myr_per_unit * count, 2)
      *
-     * @param float $cost_foreign     unit cost in the row's currency
-     * @param float $rate             rate_to_myr for that currency (>=0)
-     * @param float $bank_charges_myr per-line bank charge in MYR, applied once (>=0)
-     * @param float $count            No of Day / No of pax / 1
+     * @param float $cost_foreign unit cost in the row's currency
+     * @param float $rate         rate_to_myr for that currency (>=0)
+     * @param float $count        No of Day / No of pax / 1
      * @return array ['myr_per_unit','total_myr'] (floats, 2dp)
      */
-    function costing_row_myr($cost_foreign, $rate, $bank_charges_myr, $count)
+    function costing_row_myr($cost_foreign, $rate, $count)
     {
         $rate = (float) $rate;
         if ($rate < 0) {
             $rate = 0.0;
         }
-        $bank = max(0.0, (float) $bank_charges_myr);
         $count = max(0.0, (float) $count);
 
         $myr_per_unit = round((float) $cost_foreign * $rate, 2);
-        $converted    = round($myr_per_unit * $count, 2);
-        // Bank charge is a single per-line fee — only when the line has an amount.
-        $total_myr    = $converted > 0 ? round($converted + $bank, 2) : 0.0;
+        $total_myr    = round($myr_per_unit * $count, 2);
 
         return [
             'myr_per_unit' => $myr_per_unit,
             'total_myr'    => $total_myr,
         ];
+    }
+}
+
+if (!function_exists('costing_supplier_payment_count')) {
+    /**
+     * How many wire transfers a supplier line is settled with: a DEPOSIT and then a
+     * BALANCE payment = 2, each incurring the bank (wire) charge (feedback 29 Sep
+     * 2026, "should always twice"). The bank charge is therefore levied twice per
+     * distinct currency, not once.
+     *
+     * @return int
+     */
+    function costing_supplier_payment_count()
+    {
+        return 2;
+    }
+}
+
+if (!function_exists('costing_bank_total')) {
+    /**
+     * Total bank (wire) charge for a set of cost lines: one charge per DISTINCT
+     * currency that actually has a positive MYR amount, TIMES the number of supplier
+     * payments (deposit + balance = 2). Every foreign supplier of a given currency is
+     * paid with a deposit then a balance wire transfer, each incurring the fee, and
+     * the fee is per currency for the whole package no matter how many lines use it
+     * (feedback 29 Sep 2026: "for entire, if multiple then charges multiple" +
+     * "should always twice").
+     *
+     *   total = Σ_currency (amount_owed > 0 ? bank_charges_myr × payment_count : 0)
+     *
+     * A currency whose lines sum to 0 MYR (nothing owed) incurs no charge. MYR /
+     * local lines carry a 0 bank charge and never add anything.
+     *
+     * @param array $lines each: ['currency_id', 'bank_charges_myr',
+     *                            'amount_myr' (or 'base_total') = the line's MYR total]
+     * @return float total bank charge in MYR (2dp)
+     */
+    function costing_bank_total($lines)
+    {
+        $by_currency = array();
+        foreach ((array) $lines as $line) {
+            $cid  = isset($line['currency_id']) ? (int) $line['currency_id'] : 0;
+            $bank = isset($line['bank_charges_myr']) ? max(0.0, (float) $line['bank_charges_myr']) : 0.0;
+            if (array_key_exists('amount_myr', $line)) {
+                $amount = (float) $line['amount_myr'];
+            } else {
+                $amount = isset($line['base_total']) ? (float) $line['base_total'] : 0.0;
+            }
+
+            if (!isset($by_currency[$cid])) {
+                $by_currency[$cid] = array('bank' => 0.0, 'amount' => 0.0);
+            }
+            // The bank charge is a per-currency constant; guard against a 0 on an
+            // empty row by keeping the largest seen for the currency.
+            if ($bank > $by_currency[$cid]['bank']) {
+                $by_currency[$cid]['bank'] = $bank;
+            }
+            $by_currency[$cid]['amount'] += $amount;
+        }
+
+        $payments = costing_supplier_payment_count();
+        $total = 0.0;
+        foreach ($by_currency as $entry) {
+            if ($entry['amount'] > 0) {
+                $total += $entry['bank'] * $payments;
+            }
+        }
+
+        return round($total, 2);
     }
 }
 
@@ -467,31 +550,30 @@ if (!function_exists('costing_row_totals')) {
      * The "MYR (convert)" column is the pure per-unit conversion; once a row is
      * saved we persist that per-unit figure in its own column so it never drifts
      * when the exchange-rate master changes later. When a frozen value is present
-     * ($stored_myr_per_unit not null/''), it wins and the line total is derived
-     * from it with the bank charge added ONCE (a per-line fee, never per unit —
-     * feedback 18 Sep 2026, item 2.2). When absent (legacy pre-freeze rows), fall
-     * back to converting from the rate + bank charge like costing_row_myr().
+     * ($stored_myr_per_unit not null/''), it wins and the line total is that frozen
+     * per-unit × count. The bank (wire) charge is NOT included here — it is levied
+     * once per currency at the aggregation level via costing_bank_total() (feedback
+     * 29 Sep 2026). When absent (legacy pre-freeze rows), fall back to converting
+     * from the rate like costing_row_myr().
      *
      * @param float|null $stored_myr_per_unit frozen per-unit MYR, or null/'' to compute
      * @param float $cost_foreign
      * @param float $rate
-     * @param float $bank_charges_myr  per-line bank charge in MYR, applied once
      * @param float $count
      * @return array ['myr_per_unit','total_myr'] (floats, 2dp)
      */
-    function costing_row_totals($stored_myr_per_unit, $cost_foreign, $rate, $bank_charges_myr, $count)
+    function costing_row_totals($stored_myr_per_unit, $cost_foreign, $rate, $count)
     {
         if ($stored_myr_per_unit !== null && $stored_myr_per_unit !== '') {
-            $per_unit = round(max(0.0, (float) $stored_myr_per_unit), 2);
-            $bank     = max(0.0, (float) $bank_charges_myr);
+            $per_unit  = round(max(0.0, (float) $stored_myr_per_unit), 2);
             $converted = round($per_unit * max(0.0, (float) $count), 2);
             return [
                 'myr_per_unit' => $per_unit,
-                'total_myr'    => $converted > 0 ? round($converted + $bank, 2) : 0.0,
+                'total_myr'    => $converted,
             ];
         }
 
-        return costing_row_myr($cost_foreign, $rate, $bank_charges_myr, $count);
+        return costing_row_myr($cost_foreign, $rate, $count);
     }
 }
 
@@ -528,7 +610,7 @@ if (!function_exists('costing_currency_breakdown')) {
             $unit  = (float) (isset($row['unit_price']) ? $row['unit_price'] : 0);
             $count = max(0.0, (float) (isset($row['count']) ? $row['count'] : 0));
 
-            $line = costing_row_myr($unit, $rate, $bank, $count);
+            $line = costing_row_myr($unit, $rate, $count);
 
             if (!isset($acc[$cid])) {
                 $acc[$cid] = array(
@@ -544,9 +626,13 @@ if (!function_exists('costing_currency_breakdown')) {
             $acc[$cid]['total_myr']     += $line['total_myr'];
         }
 
+        $payments = costing_supplier_payment_count();
         foreach ($acc as &$entry) {
             $entry['total_foreign'] = round($entry['total_foreign'], 2);
-            $entry['total_myr']     = round($entry['total_myr'], 2);
+            // Bank (wire) charge is levied per currency (deposit + balance = ×2), added
+            // to the currency total — not per line — only when something is owed in it.
+            $bank = $entry['total_myr'] > 0 ? ($entry['bank_charges_myr'] * $payments) : 0.0;
+            $entry['total_myr']     = round($entry['total_myr'] + $bank, 2);
         }
         unset($entry);
 
