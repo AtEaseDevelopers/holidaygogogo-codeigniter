@@ -91,14 +91,20 @@ foreach (array_keys(customer_analysis_profile_list_fields()) as $__f) {
     check_true("request instructions ask for list field '$__f'", strpos($req['instructions'], '"' . $__f . '"') !== false);
 }
 check_true('request instructions ask for hot/cold temperature', strpos($req['instructions'], 'temperature') !== false && stripos($req['instructions'], 'hot') !== false && stripos($req['instructions'], 'cold') !== false);
-check_true('request instructions ask for approach_suggestion', strpos($req['instructions'], '"approach_suggestion"') !== false);
-check_true('approach guidance says write in English', stripos($req['instructions'], 'in English') !== false);
+check_true('request instructions ask for the recommendation object', strpos($req['instructions'], '"recommendation"') !== false);
+check_true('recommendation shape asks for comparison options', strpos($req['instructions'], '"options"') !== false && strpos($req['instructions'], '"dimensions"') !== false);
+check_true('recommendation shape asks for a decision guide', strpos($req['instructions'], '"decision_guide"') !== false);
+check_true('recommendation shape asks for a follow-up question', strpos($req['instructions'], '"follow_up"') !== false);
+check_true('recommendation shape keeps agent-only tc_notes', strpos($req['instructions'], '"tc_notes"') !== false);
+check_true('recommendation must be written in English', stripos($req['instructions'], 'in English') !== false);
 check_true('request instructions ask for recommended_tours', strpos($req['instructions'], '"recommended_tours"') !== false);
 check_true('recommend guidance says copy names exactly', stripos($req['instructions'], 'EXACTLY') !== false);
-// Approach must be produced for EVERY customer, not only hot/cold ones — otherwise
-// it appears "only for hot/cold leads" because those are the classified ones.
-check_true('approach guidance says ALWAYS write it', stripos($req['instructions'], 'ALWAYS write approach_suggestion') !== false);
-check_true('approach guidance covers cold/unclear re-engagement', stripos($req['instructions'], 're-engage') !== false || stripos($req['instructions'], 'reengage') !== false);
+// The recommendation must be produced for EVERY customer, not only hot/cold ones.
+check_true('recommendation guidance says ALWAYS fill it', stripos($req['instructions'], 'ALWAYS fill the recommendation') !== false);
+check_true('recommendation guidance lets the model choose dimensions per product type', stripos($req['instructions'], 'CHOOSE to fit the product type') !== false);
+check_true('recommendation guidance hedges date/season claims into tc_notes', stripos($req['instructions'], 'tc_notes') !== false && stripos($req['instructions'], 'season') !== false);
+check_true('recommendation guidance covers cold/unclear re-engagement', stripos($req['instructions'], 're-engage') !== false || stripos($req['instructions'], 'reengage') !== false);
+check_true('request instructions no longer ask for the flat approach_suggestion field', strpos($req['instructions'], '"approach_suggestion"') === false);
 
 // OUR PRODUCTS block: appended to the input only when we pass products, so the
 // model recommends a real tour instead of inventing one.
@@ -117,9 +123,9 @@ check_true('update request carries OUR PRODUCTS block', strpos(
 // and carries the prior profile fields so the model can keep what still holds.
 $reqUpd = customer_analysis_build_update_request('Ali', array('summary' => 'old', 'approach_suggestion' => 'ping about dates', 'profile' => array('character' => 'cautious buyer')), "Customer: still keen");
 check_true('update request carries prior summary', strpos($reqUpd['input'], 'old') !== false);
-check_true('update request carries prior approach_suggestion', strpos($reqUpd['input'], 'ping about dates') !== false);
-check_true('update request asks for approach_suggestion', strpos($reqUpd['instructions'], '"approach_suggestion"') !== false);
-check_true('update request also insists approach is always written', stripos($reqUpd['instructions'], 'ALWAYS write approach_suggestion') !== false);
+check_true('update request carries prior approach message', strpos($reqUpd['input'], 'ping about dates') !== false);
+check_true('update request asks for the recommendation object', strpos($reqUpd['instructions'], '"recommendation"') !== false);
+check_true('update request also insists the recommendation is always filled', stripos($reqUpd['instructions'], 'ALWAYS fill the recommendation') !== false);
 check_true('update request carries prior profile field', strpos($reqUpd['input'], 'cautious buyer') !== false);
 check_true('update request carries new transcript', strpos($reqUpd['input'], 'still keen') !== false);
 check_true('update request does NOT ask for next_actions (dropped)', strpos($reqUpd['instructions'], 'next_actions') === false);
@@ -179,6 +185,69 @@ check('parse recommended_tours price_myr', 4999.0, $recJson['recommended_tours']
 check('parse recommended_tours justification', 'Wants a Japan trip for 2 adults + 2 kids', $recJson['recommended_tours'][0]['justification']);
 check('parse recommended_tours zero price -> null', null, $recJson['recommended_tours'][1]['price_myr']);
 check('parse recommended_tours missing code -> empty', '', $recJson['recommended_tours'][1]['tour_code']);
+
+// ---- customer_analysis_normalize_recommendation ----------------------------
+$recRaw = array(
+    'intro'   => '  If you are a group of young friends going to Redang…  ',
+    'options' => array(
+        array(
+            'name' => 'Laguna Redang Island Resort', 'tour_code' => 'LAG3D', 'price_myr' => '1288',
+            'feel_emoji' => '🏝️', 'overall_feel' => 'Resort feel + comfy stay',
+            'dimensions' => array(
+                array('label' => 'Beach Vibe', 'emoji' => '🌊', 'points' => array('Long Beach scenery', 'White sand + blue sea')),
+                array('label' => '', 'emoji' => '', 'points' => array()), // empty dim -> dropped
+            ),
+        ),
+        array('name' => '', 'overall_feel' => 'dropped — no name'),      // nameless -> dropped
+        array('name' => 'Redang Bay Resort', 'price_myr' => 0, 'dimensions' => array()), // zero price -> null
+    ),
+    'decision_guide' => array(
+        array('emoji' => '🏝️', 'persona' => 'Wants comfort', 'pick' => 'Laguna'),
+        array('emoji' => '', 'persona' => '', 'pick' => ''),             // empty -> dropped
+    ),
+    'follow_up' => 'How many of you, which month, and budget per person?',
+    'tc_notes'  => array('Live shows vary by date/season — do not promise them', ''),
+);
+$rn = customer_analysis_normalize_recommendation($recRaw);
+check('recommendation trims intro', 'If you are a group of young friends going to Redang…', $rn['intro']);
+check('recommendation drops nameless options', 2, count($rn['options']));
+check('recommendation keeps option name', 'Laguna Redang Island Resort', $rn['options'][0]['name']);
+check('recommendation coerces positive price to float', 1288.0, $rn['options'][0]['price_myr']);
+check('recommendation zero price -> null', null, $rn['options'][1]['price_myr']);
+check('recommendation drops empty dimensions', 1, count($rn['options'][0]['dimensions']));
+check('recommendation keeps dimension points', array('Long Beach scenery', 'White sand + blue sea'), $rn['options'][0]['dimensions'][0]['points']);
+check('recommendation drops empty decision-guide rows', 1, count($rn['decision_guide']));
+check('recommendation keeps decision pick', 'Laguna', $rn['decision_guide'][0]['pick']);
+check('recommendation keeps follow_up', 'How many of you, which month, and budget per person?', $rn['follow_up']);
+check('recommendation drops blank tc_notes', array('Live shows vary by date/season — do not promise them'), $rn['tc_notes']);
+check('recommendation defaults empty input cleanly', array('intro' => '', 'options' => array(), 'decision_guide' => array(), 'follow_up' => '', 'tc_notes' => array()), customer_analysis_normalize_recommendation('nonsense'));
+
+// ---- customer_analysis_render_recommendation_text ---------------------------
+$msg = customer_analysis_render_recommendation_text($recRaw);
+check_true('render carries the intro', strpos($msg, 'young friends going to Redang') !== false);
+check_true('render numbers each option', strpos($msg, '1. Laguna Redang Island Resort') !== false);
+check_true('render carries the price', strpos($msg, 'RM 1,288') !== false);
+check_true('render carries a dimension label with emoji', strpos($msg, '🌊 Beach Vibe') !== false);
+check_true('render bullets the points', strpos($msg, '• Long Beach scenery') !== false);
+check_true('render carries the overall feel', strpos($msg, 'Resort feel + comfy stay') !== false);
+check_true('render carries the decision guide', strpos($msg, 'Which to pick') !== false && strpos($msg, 'Wants comfort → Laguna') !== false);
+check_true('render carries the follow-up', strpos($msg, 'budget per person?') !== false);
+check_true('render NEVER leaks agent-only tc_notes into the message', strpos($msg, 'do not promise') === false);
+check('render empty when no options', '', customer_analysis_render_recommendation_text(array('intro' => 'hi', 'options' => array())));
+
+// A parsed AI reply with a real recommendation object derives approach_suggestion
+// from it (structured), and keeps the structure under 'recommendation'.
+$recResp = customer_analysis_parse_ai_response(json_encode(array(
+    'summary'        => 'Young group weighing Redang resorts.',
+    'recommendation' => $recRaw,
+)));
+check_true('parse keeps the structured recommendation', is_array($recResp['recommendation']) && count($recResp['recommendation']['options']) === 2);
+check_true('parse derives approach_suggestion from the recommendation', strpos($recResp['approach_suggestion'], '1. Laguna Redang Island Resort') !== false);
+check_true('derived approach_suggestion excludes tc_notes', strpos($recResp['approach_suggestion'], 'do not promise') === false);
+// Back-compat: an old-shape reply with only a flat approach_suggestion still works.
+$legacy = customer_analysis_parse_ai_response('{"summary":"ok","approach_suggestion":"Hi! 帮你比较 Redang 😊"}');
+check('legacy flat approach_suggestion preserved', 'Hi! 帮你比较 Redang 😊', $legacy['approach_suggestion']);
+check('legacy reply has empty recommendation options', array(), $legacy['recommendation']['options']);
 
 // Missing fields default cleanly; a string list is split into an array.
 $partial = customer_analysis_parse_ai_response('{"summary":"Just a lead","preferences":"sea view; halal food"}');

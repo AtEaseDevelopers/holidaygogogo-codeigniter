@@ -27,6 +27,8 @@ class Customer_Analysis_Model extends CI_Model
 		// The structured character profile lives in details_json.
 		$profile      = isset($data['profile']) && is_array($data['profile']) ? $data['profile'] : array();
 		$rec_tours    = isset($data['recommended_tours']) && is_array($data['recommended_tours']) ? $data['recommended_tours'] : array();
+		// The structured customer-facing comparison (intro/options/decision_guide/…).
+		$recommendation = isset($data['recommendation']) && is_array($data['recommendation']) ? $data['recommendation'] : array();
 
 		$row = array(
 			'dedup_key'     => (string) (isset($data['dedup_key']) ? $data['dedup_key'] : ''),
@@ -41,6 +43,7 @@ class Customer_Analysis_Model extends CI_Model
 			'temperature_reason' => isset($data['temperature_reason']) ? $data['temperature_reason'] : null,
 			'approach_suggestion' => isset($data['approach_suggestion']) ? $data['approach_suggestion'] : null,
 			'recommended_tours' => $rec_tours ? json_encode($rec_tours, JSON_UNESCAPED_UNICODE) : null,
+			'recommendation_json' => ! empty($recommendation['options']) ? json_encode($recommendation, JSON_UNESCAPED_UNICODE) : null,
 			'summary'       => isset($data['summary']) ? $data['summary'] : null,
 			'sales_intel'   => json_encode($sales_intel, JSON_UNESCAPED_UNICODE),
 			'next_actions'  => json_encode($next_actions, JSON_UNESCAPED_UNICODE),
@@ -162,6 +165,11 @@ class Customer_Analysis_Model extends CI_Model
 		// Recommended tours (real products the AI matched to this customer).
 		$rt = isset($row->recommended_tours) ? json_decode((string) $row->recommended_tours, true) : array();
 		$row->recommended_tours = customer_analysis_normalize_recommended_tours(is_array($rt) ? $rt : array());
+
+		// Structured customer-facing comparison (may be absent on legacy rows).
+		$rc = (isset($row->recommendation_json) && $row->recommendation_json !== null)
+			? json_decode((string) $row->recommendation_json, true) : array();
+		$row->recommendation = customer_analysis_normalize_recommendation(is_array($rc) ? $rc : array());
 
 		$si = json_decode((string) $row->sales_intel, true);
 		if ( ! is_array($si)) {

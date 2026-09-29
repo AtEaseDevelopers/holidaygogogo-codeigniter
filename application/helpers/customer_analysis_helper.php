@@ -194,7 +194,13 @@ if ( ! function_exists('customer_analysis_json_shape'))
 		$lines[] = '  "temperature": "hot or cold — classify the customer\'s intention to make a booking",';
 		$lines[] = '  "temperature_reason": "one short sentence justifying the hot/cold call",';
 		$lines[] = '  "recommended_tours": [{"name": "the EXACT tour/product name copied from OUR PRODUCTS below", "tour_code": "its tour_code from OUR PRODUCTS if given, else empty", "price_myr": 0, "justification": "why THIS specific tour fits this customer — cite their destination, pax/family, budget and preferences from the chat"}],';
-		$lines[] = '  "approach_suggestion": "ALWAYS filled (never empty, whatever the temperature) — practical guidance for OUR agent on how to approach this customer next: a warm, ready-to-send WhatsApp-style message written in English, tailored to their interest and preferences, that recommends the tour(s) in recommended_tours by name (with price) and a one-line reason"';
+		$lines[] = '  "recommendation": {';
+		$lines[] = '    "intro": "one friendly opening line in English that frames the comparison for THIS customer (who they are / their trip), or empty when there is only one option",';
+		$lines[] = '    "options": [{"name": "EXACT product name from OUR PRODUCTS (same tours as recommended_tours)", "tour_code": "its tour_code or empty", "price_myr": 0, "dimensions": [{"label": "a comparison aspect you CHOOSE to fit the product type — use the SAME labels across every option (e.g. beach resort: Beach Vibe / Resort Vibe / Facilities / Rooms / Meals; city or multi-country tour: Itinerary / Pace / Inclusions / Hotels / Food / Budget)", "emoji": "one relevant emoji", "points": ["short bullet grounded in this product", "short bullet"]}], "overall_feel": "a one-line summary of the overall vibe and who it suits", "feel_emoji": "one emoji"}],';
+		$lines[] = '    "decision_guide": [{"emoji": "one emoji", "persona": "a type of traveller (e.g. wants comfort + resort feel)", "pick": "the option name that fits them"}],';
+		$lines[] = '    "follow_up": "one closing question in English that narrows the choice (usually pax + month + budget per person)",';
+		$lines[] = '    "tc_notes": ["agent-only caveats the agent should keep in mind but NOT send verbatim — e.g. live shows / activities vary by date or season, so never promise them as guaranteed"]';
+		$lines[] = '  }';
 		$lines[] = '}';
 		return implode("\n", $lines);
 	}
@@ -212,15 +218,17 @@ if ( ! function_exists('customer_analysis_field_guidance'))
 			"Copy each tour's name (and tour_code) EXACTLY as given in OUR PRODUCTS — NEVER invent or rename a tour, and never recommend one that is not in the list. " .
 			"ALWAYS recommend at least one tour whenever OUR PRODUCTS contains anything even loosely relevant to the customer's region or interest; only return an empty recommended_tours array when OUR PRODUCTS is empty or genuinely has nothing to offer them — do NOT invent one to fill the gap. " .
 			"For each recommended tour write a justification grounded in the chat (what the customer asked for and how this tour meets it). Include price_myr only when OUR PRODUCTS gives a price; otherwise use 0.\n" .
-			"Approach: ALWAYS write approach_suggestion — never leave it empty, WHATEVER the temperature. It is concrete, actionable guidance our travel agent can use right now to move THIS customer forward — a warm, human, ready-to-send message written in English (regardless of the customer's chat language). " .
-			"Tailor it to their stated interest and preferences; when the customer is HOT, nudge toward booking, and when they are COLD or unclear, write a gentle re-engagement message that re-opens the conversation. " .
-			"RECOMMEND the tour(s) in recommended_tours by name (mention the price when known) with a short reason; if recommended_tours is empty, still write a helpful message and ask what destination/dates/pax they have in mind. Suggest the natural next step (e.g. ask for pax/dates/budget, gently nudge to book), and use light structure and emojis where it helps them decide. " .
-			"When comparing options, lay them out clearly like a friendly recommendation. NEVER over-promise or state things that vary by date/season as guaranteed (e.g. write \"there's often Live Music / a Live Band in the evening\", not \"there is guaranteed to be a Live Band every night\").\n" .
+			"Recommendation: ALWAYS fill the recommendation object — never leave options empty when OUR PRODUCTS has anything relevant, WHATEVER the temperature. It is the ready-to-send comparison our travel agent gives THIS customer, written in English (regardless of the customer's chat language). " .
+			"Put ONE entry in options for each tour you recommend (the SAME tours as recommended_tours), and compare them across a CONSISTENT set of dimensions you CHOOSE to fit the product type — 4-6 aspects, the SAME labels across every option so they line up (e.g. beach resorts: Beach Vibe / Resort Vibe / Facilities / Rooms / Meals; a city or multi-country tour: Itinerary / Pace / Inclusions / Hotels / Food / Budget). " .
+			"Tailor every bullet and overall_feel to what THIS customer said they care about (their pax/family, budget and preferences). When only one tour is relevant, still fill options with that one (intro and decision_guide may be brief) — the comparison degrades to a single friendly recommendation. " .
+			"decision_guide maps each likely traveller persona to the option that fits them; follow_up asks the one question that best narrows the choice (usually pax + month + budget per person). " .
+			"When the customer is HOT, lead toward booking; when COLD or unclear, keep options light and lead with a warm re-engagement intro + follow_up that re-opens the conversation. " .
+			"NEVER over-promise things that vary by date/season (live shows, weather, specific activities) — hedge them (write \"there's often Live Music in the evening\", not \"there is guaranteed to be a Live Band every night\") and record such caveats in tc_notes for the agent, NOT in the customer-facing bullets.\n" .
 			"References: below the transcript you may be given up to three reference blocks — OUR PRODUCTS (our real tours), COMPETITOR PRODUCTS (rival tours captured via AI) and a KNOWLEDGE BASE of our internal FAQ. Base the whole approach on them together with the customer's profile. " .
 			"Use the KNOWLEDGE BASE to answer or pre-empt the customer's open or likely questions (e.g. visa, baggage, deposit, refund, what's included) with OUR real policy — quote it, never invent one; if the FAQ does not cover a question, offer to check rather than guess. " .
 			"Use COMPETITOR PRODUCTS ONLY to position OUR PRODUCTS on value (what we include that they may not, or why our price is worth it) — NEVER recommend a competitor tour and never name or run them down.\n" .
 			"Rules: use an empty string (or empty array for lists) when the transcript gives nothing for a field — do NOT guess. " .
-			"Write concrete, specific detail grounded in the chat over generic statements. Write every profile field in English, including approach_suggestion.";
+			"Write concrete, specific detail grounded in the chat over generic statements. Write every profile field in English, including the whole recommendation object.";
 	}
 }
 
@@ -628,6 +636,147 @@ if ( ! function_exists('customer_analysis_normalize_recommended_tours'))
 	}
 }
 
+if ( ! function_exists('customer_analysis_normalize_recommendation'))
+{
+	/**
+	 * Coerce the model's structured recommendation into a clean, stable shape:
+	 * a friendly intro, one option per compared tour (each with the dimensions the
+	 * model chose to fit the product type), a persona→pick decision guide, a
+	 * narrowing follow-up question and agent-only caveats (tc_notes — NEVER sent to
+	 * the customer). Empty parts default cleanly so partial/legacy data renders
+	 * without notices. Pure. Used by both the fresh-response normaliser and the
+	 * stored-row decoder so the shape can't drift.
+	 */
+	function customer_analysis_normalize_recommendation($v)
+	{
+		$v = is_array($v) ? $v : array();
+
+		$options = array();
+		if (isset($v['options']) && is_array($v['options'])) {
+			foreach ($v['options'] as $opt) {
+				$opt  = (array) $opt;
+				$name = customer_analysis_coerce_str(isset($opt['name']) ? $opt['name'] : '');
+				if ($name === '') {
+					continue;
+				}
+				$price = null;
+				if (isset($opt['price_myr']) && is_numeric($opt['price_myr']) && (float) $opt['price_myr'] > 0) {
+					$price = (float) $opt['price_myr'];
+				}
+				$dimensions = array();
+				if (isset($opt['dimensions']) && is_array($opt['dimensions'])) {
+					foreach ($opt['dimensions'] as $dim) {
+						$dim   = (array) $dim;
+						$label = customer_analysis_coerce_str(isset($dim['label']) ? $dim['label'] : '');
+						$points = customer_analysis_coerce_list(isset($dim['points']) ? $dim['points'] : array());
+						if ($label === '' && empty($points)) {
+							continue;
+						}
+						$dimensions[] = array(
+							'label'  => $label,
+							'emoji'  => customer_analysis_coerce_str(isset($dim['emoji']) ? $dim['emoji'] : ''),
+							'points' => $points,
+						);
+					}
+				}
+				$options[] = array(
+					'name'         => $name,
+					'tour_code'    => customer_analysis_coerce_str(isset($opt['tour_code']) ? $opt['tour_code'] : ''),
+					'price_myr'    => $price,
+					'dimensions'   => $dimensions,
+					'overall_feel' => customer_analysis_coerce_str(isset($opt['overall_feel']) ? $opt['overall_feel'] : ''),
+					'feel_emoji'   => customer_analysis_coerce_str(isset($opt['feel_emoji']) ? $opt['feel_emoji'] : ''),
+				);
+			}
+		}
+
+		$decision = array();
+		if (isset($v['decision_guide']) && is_array($v['decision_guide'])) {
+			foreach ($v['decision_guide'] as $g) {
+				$g       = (array) $g;
+				$persona = customer_analysis_coerce_str(isset($g['persona']) ? $g['persona'] : '');
+				$pick    = customer_analysis_coerce_str(isset($g['pick']) ? $g['pick'] : '');
+				if ($persona === '' && $pick === '') {
+					continue;
+				}
+				$decision[] = array(
+					'emoji'   => customer_analysis_coerce_str(isset($g['emoji']) ? $g['emoji'] : ''),
+					'persona' => $persona,
+					'pick'    => $pick,
+				);
+			}
+		}
+
+		return array(
+			'intro'          => customer_analysis_coerce_str(isset($v['intro']) ? $v['intro'] : ''),
+			'options'        => $options,
+			'decision_guide' => $decision,
+			'follow_up'      => customer_analysis_coerce_str(isset($v['follow_up']) ? $v['follow_up'] : ''),
+			'tc_notes'       => customer_analysis_coerce_list(isset($v['tc_notes']) ? $v['tc_notes'] : array()),
+		);
+	}
+}
+
+if ( ! function_exists('customer_analysis_render_recommendation_text'))
+{
+	/**
+	 * Flatten a normalised recommendation into a ready-to-send, WhatsApp-style
+	 * plain-text message (the copyable/back-compat approach_suggestion). Agent-only
+	 * tc_notes are deliberately EXCLUDED — they are never part of the customer
+	 * message. Returns '' when there is nothing to send. Pure.
+	 */
+	function customer_analysis_render_recommendation_text($rec)
+	{
+		$rec = customer_analysis_normalize_recommendation($rec);
+		if (empty($rec['options'])) {
+			return '';
+		}
+		$blocks = array();
+
+		if ($rec['intro'] !== '') {
+			$blocks[] = $rec['intro'];
+		}
+
+		$n = 0;
+		foreach ($rec['options'] as $opt) {
+			$n++;
+			$head = ($opt['feel_emoji'] !== '' ? $opt['feel_emoji'] . ' ' : '') . $n . '. ' . $opt['name'];
+			if ($opt['price_myr'] !== null && $opt['price_myr'] > 0) {
+				$head .= ' — RM ' . number_format($opt['price_myr'], 0);
+			}
+			$lines = array($head);
+			foreach ($opt['dimensions'] as $dim) {
+				$label = trim(($dim['emoji'] !== '' ? $dim['emoji'] . ' ' : '') . $dim['label']);
+				if ($label !== '') {
+					$lines[] = $label;
+				}
+				foreach ($dim['points'] as $p) {
+					$lines[] = '• ' . $p;
+				}
+			}
+			if ($opt['overall_feel'] !== '') {
+				$lines[] = '👉 ' . $opt['overall_feel'];
+			}
+			$blocks[] = implode("\n", $lines);
+		}
+
+		if ( ! empty($rec['decision_guide'])) {
+			$lines = array('💡 Which to pick:');
+			foreach ($rec['decision_guide'] as $g) {
+				$prefix = $g['emoji'] !== '' ? $g['emoji'] . ' ' : '';
+				$lines[] = $prefix . $g['persona'] . ($g['pick'] !== '' ? ' → ' . $g['pick'] : '');
+			}
+			$blocks[] = implode("\n", $lines);
+		}
+
+		if ($rec['follow_up'] !== '') {
+			$blocks[] = $rec['follow_up'];
+		}
+
+		return implode("\n\n", $blocks);
+	}
+}
+
 if ( ! function_exists('customer_analysis_normalize_profile'))
 {
 	/**
@@ -659,10 +808,18 @@ if ( ! function_exists('customer_analysis_normalize_record'))
 	 */
 	function customer_analysis_normalize_record($data)
 	{
+		$recommendation = customer_analysis_normalize_recommendation(isset($data['recommendation']) ? $data['recommendation'] : array());
+		// The copyable/back-compat message is the flattened recommendation; fall back
+		// to a literal approach_suggestion string if the model returned the old shape.
+		$approach = customer_analysis_render_recommendation_text($recommendation);
+		if ($approach === '') {
+			$approach = customer_analysis_coerce_str(isset($data['approach_suggestion']) ? $data['approach_suggestion'] : '');
+		}
 		return array(
 			'temperature'         => customer_analysis_normalize_temperature(isset($data['temperature']) ? $data['temperature'] : ''),
 			'temperature_reason'  => customer_analysis_coerce_str(isset($data['temperature_reason']) ? $data['temperature_reason'] : ''),
-			'approach_suggestion' => customer_analysis_coerce_str(isset($data['approach_suggestion']) ? $data['approach_suggestion'] : ''),
+			'approach_suggestion' => $approach,
+			'recommendation'      => $recommendation,
 			'recommended_tours'   => customer_analysis_normalize_recommended_tours(isset($data['recommended_tours']) ? $data['recommended_tours'] : array()),
 			'summary'             => customer_analysis_coerce_str(isset($data['summary']) ? $data['summary'] : ''),
 			'profile'             => customer_analysis_normalize_profile($data),

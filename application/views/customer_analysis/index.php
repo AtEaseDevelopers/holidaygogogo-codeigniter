@@ -144,21 +144,103 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
 
                 <?php // Approach + Recommended Tours: Hot/Cold-entry only (sales follow-up flow).
                 if ($show_approach) { ?>
-                <?php $approach = isset($a->approach_suggestion) ? trim((string) $a->approach_suggestion) : '';
-                if ($approach !== '') { ?>
+                <?php
+                $rec       = isset($a->recommendation) && is_array($a->recommendation) ? $a->recommendation : array();
+                $rec_opts  = isset($rec['options']) && is_array($rec['options']) ? $rec['options'] : array();
+                $approach  = isset($a->approach_suggestion) ? trim((string) $a->approach_suggestion) : '';
+                $tc_notes  = isset($rec['tc_notes']) && is_array($rec['tc_notes']) ? $rec['tc_notes'] : array();
+                if ( ! empty($rec_opts) || $approach !== '') { ?>
                     <div class="separator separator-dashed my-4"></div>
-                    <div class="alert alert-custom alert-light-primary fade show mb-0" role="alert">
-                        <div class="alert-icon"><i class="la la-comments-o"></i></div>
-                        <div class="alert-text" style="width:100%;">
-                            <div class="d-flex align-items-center justify-content-between mb-2">
-                                <span class="font-weight-bolder text-dark">How to Approach This Customer</span>
-                                <button type="button" class="btn btn-icon btn-xs btn-light-primary js-ca-copy-approach" data-toggle="tooltip" title="Copy message">
-                                    <i class="la la-copy"></i>
-                                </button>
-                            </div>
-                            <div class="js-ca-approach-text text-dark-75" style="font-size:13px; line-height:1.7; white-space:pre-wrap;"><?php echo htmlspecialchars($approach); ?></div>
+                    <div class="js-ca-approach">
+                        <div class="d-flex align-items-center justify-content-between mb-3">
+                            <span class="font-weight-bolder text-dark"><i class="la la-comments-o mr-1 text-primary"></i>How to Approach This Customer</span>
+                            <button type="button" class="btn btn-sm btn-light-primary font-weight-bold js-ca-copy-approach" data-toggle="tooltip" title="Copy the ready-to-send message">
+                                <i class="la la-copy"></i> Copy message
+                            </button>
                         </div>
+                        <?php // Hidden plain-text copy of the message (excludes agent-only notes). ?>
+                        <textarea class="js-ca-approach-text" readonly style="position:absolute; left:-9999px; top:0; opacity:0;"><?php echo htmlspecialchars($approach); ?></textarea>
+                        <?php if ( ! empty($rec_opts)) {
+                            if (trim((string) (isset($rec['intro']) ? $rec['intro'] : '')) !== '') { ?>
+                                <div class="text-dark-75 mb-4" style="font-size:13px; line-height:1.7;"><?php echo nl2br(htmlspecialchars($rec['intro'])); ?></div>
+                            <?php }
+                            foreach ($rec_opts as $oi => $opt) {
+                                $o_name  = trim((string) (isset($opt['name']) ? $opt['name'] : ''));
+                                if ($o_name === '') { continue; }
+                                $o_code  = trim((string) (isset($opt['tour_code']) ? $opt['tour_code'] : ''));
+                                $o_price = (isset($opt['price_myr']) && $opt['price_myr'] !== null && $opt['price_myr'] !== '') ? (float) $opt['price_myr'] : null;
+                                $o_emoji = trim((string) (isset($opt['feel_emoji']) ? $opt['feel_emoji'] : ''));
+                                $o_feel  = trim((string) (isset($opt['overall_feel']) ? $opt['overall_feel'] : ''));
+                                $o_dims  = isset($opt['dimensions']) && is_array($opt['dimensions']) ? $opt['dimensions'] : array();
+                                ?>
+                                <div class="mb-3 p-4 rounded" style="background-color:#F3F6F9;">
+                                    <div class="d-flex align-items-center flex-wrap mb-3">
+                                        <span class="font-weight-bolder text-dark mr-2" style="font-size:14px;"><?php echo ($o_emoji !== '' ? htmlspecialchars($o_emoji) . ' ' : '') . (int) ($oi + 1) . '. ' . htmlspecialchars($o_name); ?></span>
+                                        <?php if ($o_code !== '') { ?>
+                                            <span class="label label-light-primary label-inline font-weight-bold mr-2" style="font-size:11px;"><?php echo htmlspecialchars($o_code); ?></span>
+                                        <?php } ?>
+                                        <?php if ($o_price !== null && $o_price > 0) { ?>
+                                            <span class="label label-light-success label-inline font-weight-bold" style="font-size:11px;">RM <?php echo number_format($o_price, 0); ?></span>
+                                        <?php } ?>
+                                    </div>
+                                    <?php foreach ($o_dims as $dim) {
+                                        $d_label = trim((string) (isset($dim['label']) ? $dim['label'] : ''));
+                                        $d_emoji = trim((string) (isset($dim['emoji']) ? $dim['emoji'] : ''));
+                                        $d_pts   = isset($dim['points']) && is_array($dim['points']) ? $dim['points'] : array();
+                                        if ($d_label === '' && empty($d_pts)) { continue; } ?>
+                                        <div class="mb-2">
+                                            <?php if ($d_label !== '') { ?>
+                                                <div class="font-weight-bold text-dark-75 mb-1" style="font-size:12px;"><?php echo ($d_emoji !== '' ? htmlspecialchars($d_emoji) . ' ' : '') . htmlspecialchars($d_label); ?></div>
+                                            <?php } ?>
+                                            <?php if ( ! empty($d_pts)) { ?>
+                                                <ul class="text-dark-75 mb-0 pl-4" style="font-size:12px; line-height:1.7;">
+                                                    <?php foreach ($d_pts as $p) { ?><li><?php echo htmlspecialchars((string) $p); ?></li><?php } ?>
+                                                </ul>
+                                            <?php } ?>
+                                        </div>
+                                    <?php } ?>
+                                    <?php if ($o_feel !== '') { ?>
+                                        <div class="text-primary font-weight-bold mt-2" style="font-size:12px; line-height:1.6;"><i class="la la-arrow-circle-right mr-1"></i><?php echo htmlspecialchars($o_feel); ?></div>
+                                    <?php } ?>
+                                </div>
+                            <?php }
+
+                            $dg = isset($rec['decision_guide']) && is_array($rec['decision_guide']) ? $rec['decision_guide'] : array();
+                            if ( ! empty($dg)) { ?>
+                                <div class="mb-3 p-4 rounded" style="background-color:#FFF8E1;">
+                                    <div class="font-weight-bolder text-dark mb-2" style="font-size:12px;"><i class="la la-lightbulb-o mr-1 text-warning"></i>Which to pick</div>
+                                    <?php foreach ($dg as $g) {
+                                        $g_persona = trim((string) (isset($g['persona']) ? $g['persona'] : ''));
+                                        $g_pick    = trim((string) (isset($g['pick']) ? $g['pick'] : ''));
+                                        $g_emoji   = trim((string) (isset($g['emoji']) ? $g['emoji'] : ''));
+                                        if ($g_persona === '' && $g_pick === '') { continue; } ?>
+                                        <div class="text-dark-75 mb-1" style="font-size:12px; line-height:1.6;">
+                                            <?php echo ($g_emoji !== '' ? htmlspecialchars($g_emoji) . ' ' : '') . htmlspecialchars($g_persona); ?>
+                                            <?php if ($g_pick !== '') { ?><span class="text-muted">→</span> <span class="font-weight-bold text-dark"><?php echo htmlspecialchars($g_pick); ?></span><?php } ?>
+                                        </div>
+                                    <?php } ?>
+                                </div>
+                            <?php }
+
+                            if (trim((string) (isset($rec['follow_up']) ? $rec['follow_up'] : '')) !== '') { ?>
+                                <div class="text-dark-75 font-weight-bold" style="font-size:13px; line-height:1.7;"><i class="la la-question-circle mr-1 text-primary"></i><?php echo nl2br(htmlspecialchars($rec['follow_up'])); ?></div>
+                            <?php }
+                        } else { // legacy rows: no structured recommendation, show the stored message ?>
+                            <div class="text-dark-75" style="font-size:13px; line-height:1.7; white-space:pre-wrap;"><?php echo htmlspecialchars($approach); ?></div>
+                        <?php } ?>
                     </div>
+
+                    <?php if ( ! empty($tc_notes)) { ?>
+                        <div class="alert alert-custom alert-light-warning fade show mt-3 mb-0" role="alert">
+                            <div class="alert-icon"><i class="la la-info-circle"></i></div>
+                            <div class="alert-text" style="font-size:12px; line-height:1.6;">
+                                <span class="font-weight-bolder text-dark">Notes for you (do not send to the customer):</span>
+                                <ul class="mb-0 mt-1 pl-4">
+                                    <?php foreach ($tc_notes as $note) { ?><li><?php echo htmlspecialchars((string) $note); ?></li><?php } ?>
+                                </ul>
+                            </div>
+                        </div>
+                    <?php } ?>
                 <?php } ?>
 
                 <?php
@@ -347,7 +429,8 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
     // Copy the ready-to-send approach message to the clipboard.
     $(document).on('click', '.js-ca-copy-approach', function () {
         var $btn = $(this);
-        var text = $btn.closest('.alert-text').find('.js-ca-approach-text').text();
+        var $src = $btn.closest('.js-ca-approach').find('.js-ca-approach-text');
+        var text = $src.is('textarea, input') ? $src.val() : $src.text();
         var done = function () {
             var $icon = $btn.find('i');
             var prev = $icon.attr('class');
