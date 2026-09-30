@@ -347,7 +347,8 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"and distil them into reusable FAQ entries. " .
 			"Be EXHAUSTIVE: list every distinct question or reusable piece of knowledge you can extract from the chats — " .
 			"any topic a FAQ could capture (e.g. pricing & deposits, payment, booking / cancellation / refund process, " .
-			"what's included, visa & documents, flights & logistics, itinerary specifics, and any niche or one-off point). " .
+			"what's included, visa & documents, flights & logistics, accommodation, transport, foods, " .
+			"activities & attractions, environment & scenery, itinerary specifics, and any niche or one-off point). " .
 			"Do NOT limit yourself to the most common questions; include the less frequent and edge-case ones too. " .
 			"Group near-identical questions together. Write the answer as a complete, warm, READY-TO-SEND reply that a sales agent " .
 			"can COPY and PASTE straight to a customer with no editing — address the customer directly (\"you\"), keep the tone " .
@@ -427,7 +428,8 @@ if (!function_exists('faq_suggestion_build_file_prompt')) {
 			"and distil it into reusable FAQ entries. " .
 			"Be EXHAUSTIVE: list every distinct question or reusable piece of knowledge the document supports — " .
 			"any topic a FAQ could capture (e.g. pricing & deposits, payment, booking / cancellation / refund process, " .
-			"what's included, visa & documents, flights & logistics, itinerary specifics, and any niche or one-off detail). " .
+			"what's included, visa & documents, flights & logistics, accommodation, transport, foods, " .
+			"activities & attractions, environment & scenery, itinerary specifics, and any niche or one-off detail). " .
 			"Do NOT limit yourself to the most common questions; include the less frequent and edge-case ones too. " .
 			"Write the answer as a complete, warm, READY-TO-SEND reply that a sales agent can COPY and PASTE straight to a " .
 			"customer with no editing — address the customer directly (\"you\"), keep the tone friendly and professional, and " .
