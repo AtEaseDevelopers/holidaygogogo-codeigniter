@@ -136,6 +136,8 @@ class Faq_Suggestion extends MY_Controller
 		$titles = array('tab_title' => 'HolidayGoGoGo | FAQ AI Suggestion', 'breadcrumb_title' => 'FAQ AI Suggestion >> Edit');
 		$data['suggestion'] = $suggestion;
 		$data['run_url']    = $this->Run_Url($id);
+		$data['evidence']   = $this->Faq_Suggestion_Model->Read_Evidence($id);
+		$data['run']        = !empty($suggestion->RunID) ? $this->Faq_Suggestion_Model->Read_Run((int) $suggestion->RunID) : null;
 		$data['items']      = Faq_Model::Decode_Items($suggestion->Description);
 		$data['tags']       = $this->Faq_Tag_Model->Read_Active();
 		$data['destinations'] = $this->Faq_Model->Read_Destinations();

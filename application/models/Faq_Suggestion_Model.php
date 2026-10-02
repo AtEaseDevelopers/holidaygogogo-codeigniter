@@ -32,26 +32,9 @@ class Faq_Suggestion_Model extends CI_Model
 		$rows = $this->db->get()->result();
 
 		$dest_names = $this->Destination_Name_Map();
-		// Load all evidence links in one query (rather than one query per
-		// suggestion) so the run detail can show exactly which chat messages led
-		// to each AI candidate.
-		$evidence_by_suggestion = array();
 		$ids = array();
 		foreach ($rows as $row) { $ids[] = (int) $row->SuggestionID; }
-		if (!empty($ids)) {
-			$this->db->select('fs.SuggestionID, fs.SourceType, fs.SourceRef, fs.GhlMessageID, fs.ChatFileID, fs.MessageIndex, fs.SourceExcerpt');
-			$this->db->select('gm.conversation_id AS ConversationID, gm.contact_id AS ContactID, gm.direction AS MessageDirection, gm.from_number AS FromNumber, gm.to_number AS ToNumber, gm.date_added AS MessageDate');
-			$this->db->select('chf.OriginalName AS ChatFileName, chf.dedup_key AS ChatContactKey');
-			$this->db->from('faq_suggestion_sources fs');
-			$this->db->join('ghl_messages gm', 'gm.id = fs.GhlMessageID', 'left');
-			$this->db->join('chat_history_files chf', 'chf.FileID = fs.ChatFileID', 'left');
-			$this->db->where_in('fs.SuggestionID', $ids);
-			$this->db->order_by('fs.SuggestionID', 'ASC');
-			$this->db->order_by('fs.SourceID', 'ASC');
-			foreach ($this->db->get()->result() as $source) {
-				$evidence_by_suggestion[(int) $source->SuggestionID][] = $source;
-			}
-		}
+		$evidence_by_suggestion = $this->Read_Evidence_For_Suggestions($ids);
 		foreach ($rows as $row) {
 			$items = Faq_Model::Decode_Items($row->Description);
 			$row->QuestionCount = count($items);
@@ -67,6 +50,40 @@ class Faq_Suggestion_Model extends CI_Model
 				? $evidence_by_suggestion[(int) $row->SuggestionID] : array();
 		}
 		return $rows;
+	}
+
+	/**
+	 * Source messages cited by one suggestion, for the edit screen. The run
+	 * detail uses the batched variant below; keeping this public lets both pages
+	 * show identical "Detected from" evidence.
+	 */
+	function Read_Evidence($suggestion_id)
+	{
+		$all = $this->Read_Evidence_For_Suggestions(array((int) $suggestion_id));
+		return isset($all[(int) $suggestion_id]) ? $all[(int) $suggestion_id] : array();
+	}
+
+	/** Load source evidence for many suggestions in one query. */
+	private function Read_Evidence_For_Suggestions($suggestion_ids)
+	{
+		$ids = array_values(array_filter(array_map('intval', (array) $suggestion_ids)));
+		if (empty($ids)) {
+			return array();
+		}
+		$this->db->select('fs.SuggestionID, fs.SourceType, fs.SourceRef, fs.GhlMessageID, fs.ChatFileID, fs.MessageIndex, fs.SourceExcerpt');
+		$this->db->select('gm.conversation_id AS ConversationID, gm.contact_id AS ContactID, gm.direction AS MessageDirection, gm.from_number AS FromNumber, gm.to_number AS ToNumber, gm.date_added AS MessageDate');
+		$this->db->select('chf.OriginalName AS ChatFileName, chf.dedup_key AS ChatContactKey');
+		$this->db->from('faq_suggestion_sources fs');
+		$this->db->join('ghl_messages gm', 'gm.id = fs.GhlMessageID', 'left');
+		$this->db->join('chat_history_files chf', 'chf.FileID = fs.ChatFileID', 'left');
+		$this->db->where_in('fs.SuggestionID', $ids);
+		$this->db->order_by('fs.SuggestionID', 'ASC');
+		$this->db->order_by('fs.SourceID', 'ASC');
+		$out = array();
+		foreach ($this->db->get()->result() as $source) {
+			$out[(int) $source->SuggestionID][] = $source;
+		}
+		return $out;
 	}
 
 	// ---------------------------------------------------------------------
