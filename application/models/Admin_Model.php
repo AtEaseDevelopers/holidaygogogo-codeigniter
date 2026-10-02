@@ -18,10 +18,16 @@ class Admin_Model extends CI_Model
 				switch($this->router->method) {
 					case 'index':
 						$select = 'a.AdminID, a.Name, a.Username, a.Level, a.Status, a.TeamID, t.Name as TeamName';
+						// Extra teams a multi-team leader (25/45) oversees, comma-joined.
+						if($this->db->table_exists('admin_team')) {
+							$select .= ', (SELECT GROUP_CONCAT(t2.Name ORDER BY t2.Name SEPARATOR ", ")'
+							         . ' FROM admin_team at2 JOIN team t2 ON t2.TeamID = at2.TeamID AND t2.Status = "Y"'
+							         . ' WHERE at2.AdminID = a.AdminID) AS ExtraTeamNames';
+						}
 						if($this->session->level == 10) {
 							$select .= ', a.Password';
 						}
-						$this->db->select($select);
+						$this->db->select($select, FALSE);
 						$this->db->from('admin a');
 						$this->db->join('team t', 'a.TeamID = t.TeamID AND t.Status = "Y"', 'left');
 						$this->db->where('a.AdminID !=', $this->session->admin_id);
@@ -129,6 +135,18 @@ class Admin_Model extends CI_Model
 		return array_map(function($r) { return $r->GhlUserID; }, $rows);
 	}
 
+	// Extra teams a multi-team leader (Level 25/45) oversees, beyond their
+	// primary admin.TeamID. Returns int[] of TeamID. See admin_team table.
+	function Read_Teams_For_Admin($admin_id)
+	{
+		$admin_id = (int) $admin_id;
+		if ($admin_id <= 0) return array();
+		$this->db->select('TeamID');
+		$this->db->where('AdminID', $admin_id);
+		$rows = $this->db->get('admin_team')->result();
+		return array_map(function($r) { return (int) $r->TeamID; }, $rows);
+	}
+
 	function Read_Sales_Targets_For_Admin($admin_id)
 	{
 		$admin_id = (int) $admin_id;
@@ -220,6 +238,41 @@ class Admin_Model extends CI_Model
 		$this->db->insert_batch('admin_lead_dashboard_agents', $rows);
 	}
 
+	// Sync a leader's EXTRA team memberships (admin_team). Only TEAM LEAD (25) /
+	// OP TEAM LEAD (45) may hold extra teams; for any other level the set is
+	// force-cleared. The primary team ($primary_team_id, from admin.TeamID) is
+	// never stored here — it already lives on the admin row.
+	private function _Sync_Admin_Teams($admin_id, array $team_ids, $level, $primary_team_id = null)
+	{
+		$admin_id = (int) $admin_id;
+		if ($admin_id <= 0) return;
+
+		$this->db->where('AdminID', $admin_id)->delete('admin_team');
+
+		// Non-leaders never keep extra teams.
+		if (!in_array((string) $level, array('25', '45'), true)) return;
+
+		$primary = (int) $primary_team_id;
+		$team_ids = array_values(array_unique(array_filter(
+			array_map('intval', $team_ids),
+			function ($t) use ($primary) { return $t > 0 && $t !== $primary; }
+		)));
+		if (empty($team_ids)) return;
+
+		$now = date('Y-m-d H:i:s');
+		$insertBy = (int) $this->session->admin_id ?: null;
+		$rows = array();
+		foreach ($team_ids as $tid) {
+			$rows[] = array(
+				'AdminID'    => $admin_id,
+				'TeamID'     => $tid,
+				'InsertBy'   => $insertBy,
+				'InsertDate' => $now,
+			);
+		}
+		$this->db->insert_batch('admin_team', $rows);
+	}
+
 	// Active finance admins with a usable email address. Used to fan out
 	// e-invoice notification emails to the finance team.
 	function get_finance_admins()
@@ -247,6 +300,12 @@ class Admin_Model extends CI_Model
 			$this->_Sync_Lead_Dashboard_Agents(
 				$newAdminId,
 				(array) $this->input->post('lead_dashboard_agents')
+			);
+			$this->_Sync_Admin_Teams(
+				$newAdminId,
+				(array) $this->input->post('teams'),
+				isset($row['Level'])  ? $row['Level']  : null,
+				isset($row['TeamID']) ? $row['TeamID'] : null
 			);
 			return true;
 		} else {
@@ -276,13 +335,14 @@ class Admin_Model extends CI_Model
 						$ldaDirty = ($this->input->post('lead_dashboard_agents_dirty') === '1');
 						$stDirty  = ($this->input->post('sales_targets_dirty') === '1');
 						$styDirty = ($this->input->post('year_sales_targets_dirty') === '1');
+						$atDirty  = ($this->input->post('teams_dirty') === '1');
 
 						// update_batch returns int (>=0) on success, FALSE on input error.
 						// 0 means "row matched but values already equal" — still a success for the user.
 						$updateResult = $this->db->update_batch('admin', json_decode(json_encode($this->input->post('admin'))), 'AdminID');
 						$adminOk = ($updateResult !== FALSE);
 
-						if($adminOk || $ldaDirty || $stDirty || $styDirty) {
+						if($adminOk || $ldaDirty || $stDirty || $styDirty || $atDirty) {
 							$adminLog = $this->input->post('admin_log');
 							if(!empty($adminLog)) {
 								$this->db->insert_batch('admin_log', json_decode(json_encode($adminLog)));
@@ -315,6 +375,23 @@ class Admin_Model extends CI_Model
 									);
 								} catch (Exception $e) {
 									log_message('error', 'Year sales targets sync failed for AdminID '.$adminId.': '.$e->getMessage());
+								}
+							}
+							if($atDirty && $adminId > 0) {
+								try {
+									// Level/TeamID may be unchanged (absent from the dirty
+									// payload); the admin row was already updated above, so read
+									// the authoritative current values straight from it.
+									$cur = $this->db->select('Level, TeamID')
+										->get_where('admin', array('AdminID' => $adminId))->row();
+									$this->_Sync_Admin_Teams(
+										$adminId,
+										(array) $this->input->post('teams'),
+										$cur ? $cur->Level  : null,
+										$cur ? $cur->TeamID : null
+									);
+								} catch (Exception $e) {
+									log_message('error', 'Additional teams sync failed for AdminID '.$adminId.': '.$e->getMessage());
 								}
 							}
 							return true;

@@ -70,5 +70,39 @@ assert_eq('String "7" matches int 7',            array(3, 4), team_member_admin_
 echo "String admin_id coercion:\n";
 assert_eq("Viewer id as string '2' behaves like int", array(1, 2, 3), team_member_admin_ids('2', $admins));
 
+// --- Multi-team leaders (admin_team link table) -----------------------------
+// Only TEAM LEAD (25) / OP TEAM LEAD (45) may belong to >1 team; membership
+// beyond the primary admin.TeamID comes in as link rows (AdminID, TeamID). A
+// leader's visibility = union of their primary team and every extra team; a
+// member is in scope when ANY of their teams intersects the viewer's team set.
+function at_row($id, $team) {
+    return (object) array('AdminID' => $id, 'TeamID' => $team);
+}
+echo "Multi-team leader union:\n";
+// Admin 1 leads Team 7 (primary) and ALSO oversees Team 9 via a link row.
+$extra = array(at_row(1, 9));
+assert_eq('Leader (1) with extra team 9 sees both teams',
+    array(1, 2, 3, 4, 5), team_member_admin_ids(1, $admins, $extra));
+assert_eq('Plain member (2) unaffected by leader extra team',
+    array(1, 2, 3), team_member_admin_ids(2, $admins, $extra));
+assert_eq('Team 9 member (5) still sees only Team 9',
+    array(4, 5), team_member_admin_ids(5, $admins, $extra));
+
+echo "Extra-team rows honour active/inactive + normalisation:\n";
+$inactive2 = array(
+    admin_row(1, 7),
+    admin_row(2, 7, 'N'),  // resigned — excluded even though in leader's team
+    admin_row(4, 9),
+    admin_row(5, 9)
+);
+assert_eq('Inactive teammate still excluded under multi-team',
+    array(1, 4, 5), team_member_admin_ids(1, $inactive2, array(at_row(1, 9))));
+assert_eq('Empty/zero extra TeamID ignored',
+    array(1, 2, 3), team_member_admin_ids(1, $admins, array(at_row(1, 0), at_row(1, ''))));
+
+echo "No extra rows => identical to legacy single-team behaviour:\n";
+assert_eq('Empty extra array matches 2-arg call',
+    team_member_admin_ids(1, $admins), team_member_admin_ids(1, $admins, array()));
+
 echo "\n" . ($failures === 0 ? "All assertions passed.\n" : "$failures assertion(s) FAILED.\n");
 exit($failures === 0 ? 0 : 1);

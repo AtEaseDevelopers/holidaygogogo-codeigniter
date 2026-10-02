@@ -69,6 +69,7 @@ class Admin extends MY_Controller
 			$array['teams'] = $this->Admin_Model->Read_Teams();
 			$array['ghl_users'] = $this->Admin_Model->Read_GHL_Users();
 			$array['lead_dashboard_agents'] = array();
+			$array['additional_teams'] = array();
 			$array['sales_targets'] = array();
 			$array['year_sales_targets'] = array();
 			$this->load->view('layout/header', $titles);
@@ -92,6 +93,7 @@ class Admin extends MY_Controller
 				$array['teams'] = $this->Admin_Model->Read_Teams();
 				$array['ghl_users'] = $this->Admin_Model->Read_GHL_Users();
 				$array['lead_dashboard_agents'] = $this->Admin_Model->Read_Lead_Dashboard_Agents_For_Admin($this->input->get('admin_id'));
+				$array['additional_teams'] = $this->Admin_Model->Read_Teams_For_Admin($this->input->get('admin_id'));
 				$array['sales_targets'] = $this->Admin_Model->Read_Sales_Targets_For_Admin($this->input->get('admin_id'));
 				$array['year_sales_targets'] = $this->Admin_Model->Read_Year_Sales_Targets_For_Admin($this->input->get('admin_id'));
 				$this->load->view('layout/header', $titles);

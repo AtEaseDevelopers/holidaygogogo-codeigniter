@@ -119,11 +119,12 @@ $fin_start = strpos($controller, 'if($is_finance) {');
 assert_true('controller has an $is_op block', $op_start !== false && $fin_start !== false && $fin_start > $op_start);
 $op_block = substr($controller, $op_start, $fin_start - $op_start);
 
-// The OP block resolves the team via team_member_admin_ids and scopes by IN(...).
+// The OP block resolves the team via the team_scope helper (team_member_ids_from_db,
+// which unions a multi-team leader's extra admin_team teams) and scopes by IN(...).
 assert_true('OP block loads the team_scope helper',
     strpos($op_block, "load->helper('team_scope')") !== false);
-assert_true('OP block resolves team_member_admin_ids for the logged-in user',
-    preg_match('/team_member_admin_ids\(\s*\$admin_id/', $op_block) === 1);
+assert_true('OP block resolves the team for the logged-in user',
+    preg_match('/team_member_ids_from_db\(\s*\$this->db\s*,\s*\$admin_id\s*\)/', $op_block) === 1);
 assert_true('OP block scopes by SalesAgent IN (team)',
     strpos($op_block, 'booking.SalesAgent IN ({$op_team_csv})') !== false);
 

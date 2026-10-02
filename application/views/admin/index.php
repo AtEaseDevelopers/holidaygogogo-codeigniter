@@ -173,7 +173,13 @@
                                             </td>
                                         <?php } ?>
                                         <td style="text-align:center;"><?php echo $admin->Level; ?></td>
-                                        <td style="text-align:center;"><?php echo !empty($admin->TeamName) ? $admin->TeamName : ''; ?></td>
+                                        <td style="text-align:center;"><?php
+                                            // Primary team first, then any extra teams a leader oversees.
+                                            $team_names = array();
+                                            if(!empty($admin->TeamName)) { $team_names[] = $admin->TeamName; }
+                                            if(!empty($admin->ExtraTeamNames)) { $team_names[] = $admin->ExtraTeamNames; }
+                                            echo $team_names ? html_escape(implode(', ', $team_names)) : '';
+                                        ?></td>
                                         <td style="text-align:center;"><?php echo $admin->StatusIcon; ?></td>
                                         <td style="text-align:center;">
                                             <div class="btn-group">

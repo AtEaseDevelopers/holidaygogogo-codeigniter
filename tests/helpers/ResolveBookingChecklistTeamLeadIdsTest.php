@@ -28,10 +28,27 @@ class TestDbFacade
     public $pdo;
     private $select = '*';
     private $conds = array();  // each: [sqlFragment, params[]]
+    private $from = null;
+    private $joins = array();
 
     public function __construct(PDO $pdo) { $this->pdo = $pdo; }
 
     public function select($cols) { $this->select = $cols; return $this; }
+
+    public function from($table) { $this->from = $table; return $this; }
+
+    public function join($table, $cond, $type = '')
+    {
+        $this->joins[] = trim(strtoupper($type) . " JOIN $table ON $cond");
+        return $this;
+    }
+
+    public function table_exists($table)
+    {
+        $stmt = $this->pdo->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
+        $stmt->execute(array($table));
+        return (bool) $stmt->fetch();
+    }
 
     public function where_in($field, array $values)
     {
@@ -58,9 +75,13 @@ class TestDbFacade
         return $this;
     }
 
-    public function get($table)
+    public function get($table = null)
     {
-        $sql = "SELECT {$this->select} FROM $table";
+        $tbl = ($table !== null) ? $table : $this->from;
+        $sql = "SELECT {$this->select} FROM $tbl";
+        if (!empty($this->joins)) {
+            $sql .= ' ' . implode(' ', $this->joins);
+        }
         $params = array();
         if (!empty($this->conds)) {
             $frags = array();
@@ -76,6 +97,8 @@ class TestDbFacade
         // Reset builder state (mirrors CI flushing after get()).
         $this->select = '*';
         $this->conds = array();
+        $this->from = null;
+        $this->joins = array();
         return new class($rows) {
             private $rows;
             public function __construct($rows) { $this->rows = $rows; }
@@ -97,6 +120,8 @@ $pdo->exec("CREATE TABLE admin (
 
 // Team 1: lead L1a (25), lead L1b (45), member M1 (20). Team 2: lead L2 (25).
 // Team 3: lead L3 (25). Plus an inactive lead and a wrong-level admin in team 1.
+// Team 5: member M5 (20) with NO primary-team leader; L5 (primary team 4) leads
+// it via the admin_team link table (multi-team leader).
 $pdo->exec("INSERT INTO admin VALUES
     (10, 'L1a sales lead', '25', 'Y', 1),
     (11, 'L1b op lead',    '45', 'Y', 1),
@@ -106,8 +131,17 @@ $pdo->exec("INSERT INTO admin VALUES
     (20, 'L2 sales lead',  '25', 'Y', 2),
     (21, 'M2 member',      '20', 'Y', 2),
     (30, 'L3 sales lead',  '25', 'Y', 3),
-    (40, 'No-team lead',   '25', 'Y', NULL)
+    (40, 'No-team lead',   '25', 'Y', NULL),
+    (50, 'L5 multi lead',  '25', 'Y', 4),
+    (51, 'M5 member',      '20', 'Y', 5)
 ");
+
+// Extra team memberships for multi-team leaders. L5 (50) oversees team 5.
+$pdo->exec("CREATE TABLE admin_team (
+    AdminID INTEGER,
+    TeamID INTEGER
+)");
+$pdo->exec("INSERT INTO admin_team VALUES (50, 5)");
 
 $CI = (object) array('db' => new TestDbFacade($pdo));
 if (!function_exists('get_instance')) {
@@ -149,6 +183,12 @@ assert_eq('cross-team TC/TC2/OP -> {10,11,20,30}',
 assert_eq('TC is a team1 lead -> team1 leads {10,11}',
     array(10, 11),
     resolve_booking_checklist_team_lead_ids(array('SalesAgent' => 10, 'SalesAgent2' => 0, 'BookingOP' => 0)));
+
+// Multi-team leader: M5 is in team 5, which has no primary-team leader; L5 (50)
+// oversees team 5 only via admin_team, so they qualify to tick M5's checklist.
+assert_eq('team5 assignee -> multi-team lead {50}',
+    array(50),
+    resolve_booking_checklist_team_lead_ids(array('SalesAgent' => 51, 'SalesAgent2' => 0, 'BookingOP' => 0)));
 
 // Assignee with no team -> no team leads.
 assert_eq('no-team assignee -> {}',

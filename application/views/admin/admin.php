@@ -168,16 +168,26 @@
                                 </select>
                             </div>
                         </div>
+                        <?php
+                            // Pre-selected teams = primary (admin.TeamID) first, then any
+                            // extra teams a leader oversees (admin_team). The FIRST entry is
+                            // the primary that owns the person's own sales / targets.
+                            $selected_teams = array();
+                            if (!empty($TeamID)) { $selected_teams[] = (int) $TeamID; }
+                            foreach ((array) $additional_teams as $__t) {
+                                $__t = (int) $__t;
+                                if ($__t > 0 && !in_array($__t, $selected_teams, true)) { $selected_teams[] = $__t; }
+                            }
+                        ?>
                         <div class="col-md-6">
                             <div class="form-group">
                                 <label>Team
-                                    <small class="text-muted d-block">The Team this admin belongs to. A TEAM LEAD (25), OP TEAM LEAD (45) &amp; OP (40) see every booking &amp; payment whose TC, TC2 or OP is in their team (cross-team included); Sales Agent (20) &amp; TC (50) see only what they're personally assigned to.</small>
+                                    <small class="text-muted d-block">The team(s) this admin belongs to. Most roles have ONE team and see only what they're personally assigned to. Only a TEAM LEAD (25) or OP TEAM LEAD (45) may belong to several &mdash; they then see every booking, payment &amp; checklist across all their teams. The FIRST selected team is the primary (owns their own sales &amp; targets).</small>
                                 </label>
-                                <select id="TeamID" class="form-control selectpicker">
-                                    <option selected data-icon="la la-users font-size-lg bs-icon" value="">--SELECT TEAM--</option>
+                                <select id="Teams" multiple data-live-search="true" data-actions-box="true" title="--SELECT TEAM--" class="form-control selectpicker">
                                     <?php if(!empty($teams)) {
                                         foreach($teams as $team) { ?>
-                                            <option <?php if($Action == 'U' && $TeamID == $team->TeamID) { echo 'selected'; } ?> data-icon="la la-users font-size-lg bs-icon" value="<?php echo $team->TeamID; ?>"><?php echo $team->Name; ?></option>
+                                            <option <?php if(in_array((int)$team->TeamID, $selected_teams, true)) { echo 'selected'; } ?> data-icon="la la-users font-size-lg bs-icon" value="<?php echo $team->TeamID; ?>"><?php echo $team->Name; ?></option>
                                         <?php }
                                     } ?>
                                 </select>
@@ -414,6 +424,18 @@
         var show = (action == 'U') && (lvl === 20 || lvl === 50);
         $('#sales_target_section').toggle(show);
     }
+    // Only a TEAM LEAD (25) / OP TEAM LEAD (45) may belong to >1 team. For any
+    // other level, cap the Team multi-select to a single team (keep the first).
+    function teams_enforce_cap() {
+        var lvl = parseInt($('#Level').val(), 10);
+        var isLeader = (lvl === 25 || lvl === 45);
+        if(isLeader) { return; }
+        var v = $('#Teams').val() || [];
+        if(v.length > 1) {
+            $('#Teams').val([v[0]]);
+            if($('#Teams').hasClass('selectpicker')) { $('#Teams').selectpicker('refresh'); }
+        }
+    }
     function st_update_hint() {
         $('#StSavedHint').toggle(st_is_dirty());
     }
@@ -499,6 +521,8 @@
         }
         st_visibility_check();
         $('#Level').on('change', st_visibility_check);
+        $('#Level').on('change', teams_enforce_cap);
+        $('#Teams').on('changed.bs.select', teams_enforce_cap);
     });
 
     $('input[type="button"]').click(function() {
@@ -530,11 +554,22 @@
                 var password = ($('#Password').val()).toUpperCase();
                 var level = $('#Level').val();
                 var access_control = ($('#AccessControl').val()).toString();
-                var team_id = $('#TeamID').val();
                 var lead_dashboard_agents = $('#LeadDashboardAgents').val() || [];
                 var lda_initial_str = '<?php echo implode(",", $lead_dashboard_agents); ?>'.split(',').filter(Boolean).sort().join(',');
                 var lda_current_str = lead_dashboard_agents.slice().sort().join(',');
                 var lda_dirty = (lda_current_str !== lda_initial_str);
+                // Team(s): the full selected set, plus the resolved primary team. Keep
+                // the existing primary if it's still selected so adding an extra team
+                // never silently moves a leader's sales/target attribution; otherwise
+                // the first selected becomes primary.
+                var teams = $('#Teams').val() || [];
+                var teams_initial_str = '<?php echo implode(",", $selected_teams); ?>'.split(',').filter(Boolean).sort().join(',');
+                var teams_current_str = teams.slice().sort().join(',');
+                var teams_dirty = (teams_current_str !== teams_initial_str);
+                var current_primary = '<?php echo (int)(!empty($TeamID) ? $TeamID : 0); ?>';
+                var primary_team = (current_primary !== '0' && teams.indexOf(current_primary) !== -1)
+                    ? current_primary
+                    : (teams.length ? teams[0] : null);
                 // Capture the currently-edited input into the dict first so the most
                 // recent edit isn't lost when diffing.
                 if($('#StAmount').length) { st_capture_input_into_dict(); }
@@ -547,8 +582,8 @@
                     if(action == 'C') {
                         var admin = [];
                         var url = '<?php echo base_url('Admin/Create') ?>';
-                        admin.push({CountryCodeID:country_code, Name:name, Gender:gender, IdentificationNumber:identification_number, PassportNumber:passport_number, Mobile:mobile, Email:email, Username:username, Password:password, Level:level, AccessControl:access_control, TeamID:team_id ? team_id : null, InsertBy:session_id, InsertDate:current_datetime});
-                        Submit_Admin(url, admin, null, lead_dashboard_agents, true, {}, false, {}, false);
+                        admin.push({CountryCodeID:country_code, Name:name, Gender:gender, IdentificationNumber:identification_number, PassportNumber:passport_number, Mobile:mobile, Email:email, Username:username, Password:password, Level:level, AccessControl:access_control, TeamID:primary_team, InsertBy:session_id, InsertDate:current_datetime});
+                        Submit_Admin(url, admin, null, lead_dashboard_agents, true, {}, false, {}, false, teams, true);
                     } else {
                         var dirty_fields = $('#form').dirty('showDirtyFields');
                         var admin_id = <?php echo $AdminID ?>;
@@ -562,18 +597,13 @@
                             // Also skip non-column UI inputs that live alongside the form
                             // (LeadDashboardAgents posts via its own array; Sales Target inputs
                             // post via the sales_targets dict).
-                            if(!key || key == 'LeadDashboardAgents'
+                            if(!key || key == 'LeadDashboardAgents' || key == 'Teams'
                                     || key == 'StAmount' || key == 'StYear' || key == 'StMonth'
                                     || key == 'StYearAmount') {
                                 continue;
                             }
                             if(key != 'AccessControl') {
                                 var value = key == 'Name' || key == 'PassportNumber' || key == 'Email' || key == 'Password' ? (dirty_fields[i].value).toUpperCase() : dirty_fields[i].value;
-
-                                //Handle TeamID empty value as null
-                                if(key == 'TeamID' && value == '') {
-                                    value = null;
-                                }
 
                                 //Update Admin
                                 admin[0][key] = value;
@@ -600,15 +630,25 @@
                             admin_log.push({AdminID:admin_id, Column:'AccessControl', CurrentData:'<?php echo implode(',', $AccessControl); ?>', NewData:access_control, InsertBy:session_id, InsertDate:current_datetime});
                         }
 
+                        // Action : Update primary Team (admin.TeamID). The Team multi-select
+                        // posts its extras via the teams[] array; the primary column rides
+                        // the normal admin update so AutoCount/log stay consistent.
+                        if(teams_dirty) {
+                            admin[0]['TeamID'] = primary_team;
+                            if((primary_team || '0') !== (current_primary || '0')) {
+                                admin_log.push({AdminID:admin_id, Column:'TeamID', CurrentData:(current_primary !== '0' ? current_primary : null), NewData:primary_team, InsertBy:session_id, InsertDate:current_datetime});
+                            }
+                        }
+
                         var count = 0;
                         $.each(admin[0], function() {
                             count++;
                         });
-                        if(count == 3 && !lda_dirty && !st_dirty && !sty_dirty) {
+                        if(count == 3 && !lda_dirty && !st_dirty && !sty_dirty && !teams_dirty) {
                             var url = '<?php echo base_url('Admin') ?>';
                             Display_Message(background, '<?php echo 'No Changes Detected In Admin Record : ' . $Name; ?>', url);
                         } else {
-                            Submit_Admin(url, admin, admin_log, lead_dashboard_agents, lda_dirty, stTargets, st_dirty, styTargets, sty_dirty);
+                            Submit_Admin(url, admin, admin_log, lead_dashboard_agents, lda_dirty, stTargets, st_dirty, styTargets, sty_dirty, teams, teams_dirty);
                         }
                     }
                 }
@@ -616,7 +656,7 @@
         });
     });
 
-    function Submit_Admin(url, admin, admin_log, lead_dashboard_agents, lda_dirty, sales_targets, st_dirty, year_sales_targets, sty_dirty)
+    function Submit_Admin(url, admin, admin_log, lead_dashboard_agents, lda_dirty, sales_targets, st_dirty, year_sales_targets, sty_dirty, teams, teams_dirty)
     {
         $.ajax({
             url: url,
@@ -629,7 +669,9 @@
                 sales_targets: sales_targets || {},
                 sales_targets_dirty: st_dirty ? '1' : '0',
                 year_sales_targets: year_sales_targets || {},
-                year_sales_targets_dirty: sty_dirty ? '1' : '0'
+                year_sales_targets_dirty: sty_dirty ? '1' : '0',
+                teams: teams || [],
+                teams_dirty: teams_dirty ? '1' : '0'
             },
             dataType: 'json',
             success: function(status) {

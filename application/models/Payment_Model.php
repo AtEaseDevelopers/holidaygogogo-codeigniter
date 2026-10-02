@@ -703,15 +703,15 @@ return $query->result_array(); // instead of result()
 	// Server-Side DataTables Methods
 	// ============================================
 
-	// Resolve the admin IDs of the logged-in user's Team (shared admin.TeamID),
-	// used to scope the payment listing for a TEAM LEAD (25) / OP TEAM LEAD (45).
-	// Uses a raw query() so it does NOT flush the query-builder state the caller
-	// is mid-way through building.
+	// Resolve the admin IDs of the logged-in user's Team(s), used to scope the
+	// payment listing for a TEAM LEAD (25) / OP TEAM LEAD (45). A leader may
+	// oversee several teams (admin_team), so this unions every member of their
+	// primary team and each extra team. Uses a raw query() so it does NOT flush
+	// the query-builder state the caller is mid-way through building.
 	private function team_member_ids()
 	{
 		$this->load->helper('team_scope');
-		$admins = $this->db->query('SELECT AdminID, TeamID, Status FROM admin')->result();
-		return team_member_admin_ids($this->session->userdata('admin_id'), $admins);
+		return team_member_ids_from_db($this->db, $this->session->userdata('admin_id'));
 	}
 
 	// Role-based row scope shared by the paginated listing + filtered count. Mirrors

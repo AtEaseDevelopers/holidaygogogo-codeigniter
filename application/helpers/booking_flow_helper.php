@@ -1220,16 +1220,32 @@ if (!function_exists('resolve_booking_checklist_team_lead_ids')) {
             return array();
         }
 
-        // Active TEAM LEAD (25) / OP TEAM LEAD (45) admins in those teams.
+        // Active TEAM LEAD (25) / OP TEAM LEAD (45) admins whose PRIMARY team is
+        // one of those teams.
         $CI->db->select('AdminID');
         $CI->db->where_in('TeamID', $team_ids);
         $CI->db->where_in('Level', array('25', '45'));
         $CI->db->where('Status', 'Y');
         $lead_ids = array();
         foreach ($CI->db->get('admin')->result() as $row) {
-            $lead_ids[] = (int)$row->AdminID;
+            $lead_ids[(int)$row->AdminID] = true;
         }
-        $lead_ids = array_values(array_unique($lead_ids));
+
+        // Plus multi-team leaders who oversee any of those teams via the
+        // admin_team link table (their primary team may be elsewhere).
+        if ($CI->db->table_exists('admin_team')) {
+            $CI->db->select('a.AdminID');
+            $CI->db->from('admin_team at');
+            $CI->db->join('admin a', 'a.AdminID = at.AdminID', 'inner');
+            $CI->db->where_in('at.TeamID', $team_ids);
+            $CI->db->where_in('a.Level', array('25', '45'));
+            $CI->db->where('a.Status', 'Y');
+            foreach ($CI->db->get()->result() as $row) {
+                $lead_ids[(int)$row->AdminID] = true;
+            }
+        }
+
+        $lead_ids = array_keys($lead_ids);
         sort($lead_ids);
         return $lead_ids;
     }

@@ -2109,8 +2109,7 @@ class Booking extends MY_Controller
 			$restrict_ids = null;
 			if($is_team_lead) {
 				$this->load->helper('team_scope');
-				$admins = $this->db->query('SELECT AdminID, TeamID, Status FROM admin')->result();
-				$restrict_ids = team_member_admin_ids($admin_id, $admins);
+				$restrict_ids = team_member_ids_from_db($this->db, $admin_id);
 			}
 			$tables['owner_agent_matrix'] = $this->owner_agent_matrix(
 				$owner_period['start_date'], $owner_period['end_date'], $owner_matrix_base, $restrict_ids
@@ -2129,8 +2128,7 @@ class Booking extends MY_Controller
 			// $op_team_csv backs the drill-down links (sales_agent=<team csv>), so
 			// card counts and the filtered listing stay in agreement.
 			$this->load->helper('team_scope');
-			$team_admins = $this->db->query('SELECT AdminID, TeamID, Status FROM admin')->result();
-			$op_team_ids = team_member_admin_ids($admin_id, $team_admins);
+			$op_team_ids = team_member_ids_from_db($this->db, $admin_id);
 			$op_team_csv = implode(',', $op_team_ids);
 			$op_sa_in    = "booking.SalesAgent IN ({$op_team_csv})";
 
@@ -3719,10 +3717,11 @@ class Booking extends MY_Controller
 			$month_start = $period['month_start'];
 			$month_end   = $period['month_end'];
 
-			// Same OP-team scope as the other OP cards: everyone sharing the
-			// user's admin.TeamID, matched on booking.SalesAgent (TC1).
-			$team_admins = $this->db->query('SELECT AdminID, TeamID, Status FROM admin')->result();
-			$op_team_ids = team_member_admin_ids($admin_id, $team_admins);
+			// Same OP-team scope as the other OP cards: everyone in the user's
+			// team(s) (incl. a leader's extra admin_team teams), matched on
+			// booking.SalesAgent (TC1).
+			$this->load->helper('team_scope');
+			$op_team_ids = team_member_ids_from_db($this->db, $admin_id);
 			$op_team_csv = implode(',', $op_team_ids);
 			$op_sa_in    = "booking.SalesAgent IN ({$op_team_csv})";
 
