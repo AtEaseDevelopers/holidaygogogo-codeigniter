@@ -373,7 +373,7 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 		// output tokens on suggestions we'd only discard at parse time.
 		$max      = (int) $max;
 		$cap_line = $max > 0
-			? "Return AT MOST {$max} suggestions — if you can extract more, keep only the {$max} most broadly useful ones. "
+			? "Return AT MOST {$max} suggestions — if you can extract more, keep the {$max} best-supported and most actionable ones; do not discard a well-supported tour-specific question merely because it is less broadly reusable. "
 			: "";
 
 		$instructions =
@@ -391,10 +391,14 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"Be DETAILED and, whenever the answer involves a process or several points (e.g. how to book, pay, cancel, or apply " .
 			"for a visa), lay it out as clear STEP-BY-STEP instructions — use numbered steps (1., 2., 3. …) or short bullet " .
 			"lines so the customer can follow along easily; cover the whole flow end to end rather than a one-line summary. " .
-			"Base it on how the agents actually replied, but keep it generic so it works for any customer (no specific name, " .
-			"quoted price, or personal dates). " .
+			"Preserve tour-specific facts when the conversation supports them. Do NOT turn a question about a named tour, package, " .
+			"itinerary day, departure, airline, hotel, meal, inclusion, exclusion, optional activity, eligibility, or tour condition " .
+			"into a generic agency policy. Keep the tour/package name and the factual detail in both the question and answer, and tag " .
+			"the applicable destination whenever it is in the allowed list. Only combine conversations when they concern the same tour " .
+			"or the same factual answer. Remove customer-only details (name, phone, personal travel date, and a bespoke quote), but retain " .
+			"a published or generally applicable package price, departure date, or condition when the agent clearly states it applies to that tour. " .
 			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came up or why it is useful. " .
-			"Roughly ORDER the suggestions with the more broadly useful ones first. " .
+			"Order the suggestions by strength of evidence and customer usefulness; tour-specific and agency-wide FAQs are both valuable. " .
 			$cap_line .
 			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
 			"skip it even if you would word the question differently; only return genuinely NEW questions. " .
@@ -417,8 +421,8 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"\"items\":[{\"q\":\"the question\",\"a\":\"a detailed, step-by-step, ready-to-send reply to the customer\"}]" .
 			"}]}\n\n" .
 			($max > 0
-				? "Return at most {$max} FAQs; put the more broadly useful ones first.\n\n"
-				: "List every FAQ you can extract; put the more broadly useful ones first.\n\n") .
+				? "Return at most {$max} FAQs; keep well-supported tour-specific FAQs as well as agency-wide ones.\n\n"
+				: "List every FAQ you can extract; retain supported tour-specific details.\n\n") .
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .
 			$existing_line .

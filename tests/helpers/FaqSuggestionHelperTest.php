@@ -115,6 +115,9 @@ assert_true('prompt mentions copy and paste to customer', stripos($p['instructio
 assert_true('json shape hint says ready-to-send reply', stripos($p['input'], 'ready-to-send reply') !== false);
 assert_true('prompt requests evidence refs', strpos($p['input'], 'source_refs') !== false);
 assert_true('prompt asks for step-by-step detail', stripos($p['instructions'], 'step-by-step') !== false);
+assert_true('prompt preserves tour-specific facts', stripos($p['instructions'], 'Preserve tour-specific facts') !== false);
+assert_true('prompt rejects genericising tour questions', stripos($p['instructions'], 'Do NOT turn a question about a named tour') !== false);
+assert_true('prompt distinguishes private and published details', stripos($p['instructions'], 'published or generally applicable package price') !== false);
 
 // build_prompt with existing FAQs injected so the model can skip duplicates.
 $existing_faqs = array(
