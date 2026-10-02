@@ -193,6 +193,19 @@ if (!function_exists('faq_suggestion_transcript')) {
 	 */
 	function faq_suggestion_transcript($ghl_rows, $wa_messages, $max_chars = 0)
 	{
+		$built = faq_suggestion_transcript_with_sources($ghl_rows, $wa_messages, $max_chars, false);
+		return $built['text'];
+	}
+}
+
+if (!function_exists('faq_suggestion_transcript_with_sources')) {
+	/**
+	 * As faq_suggestion_transcript(), but also assigns each retained line a
+	 * reference (S1, S2, ...), returned as a server-side source map. The visible
+	 * references let the model cite evidence without ever inventing database IDs.
+	 */
+	function faq_suggestion_transcript_with_sources($ghl_rows, $wa_messages, $max_chars = 0, $include_refs = true)
+	{
 		// 1) Unify into an ordered list of ['who'=>, 'body'=>], dropping blanks/system.
 		$msgs = array();
 		foreach ((array) $ghl_rows as $r) {
@@ -201,7 +214,9 @@ if (!function_exists('faq_suggestion_transcript')) {
 				continue;
 			}
 			$dir = strtolower((string) (isset($r['direction']) ? $r['direction'] : ''));
-			$msgs[] = array('who' => ($dir === 'inbound') ? 'Customer' : 'Agent', 'body' => $body);
+			$msgs[] = array('who' => ($dir === 'inbound') ? 'Customer' : 'Agent', 'body' => $body,
+				'source_type' => 'ghl_message', 'ghl_message_id' => isset($r['id']) ? (int) $r['id'] : null,
+				'chat_file_id' => null, 'message_index' => null);
 		}
 		foreach ((array) $wa_messages as $m) {
 			if (!empty($m['system'])) {
@@ -211,7 +226,10 @@ if (!function_exists('faq_suggestion_transcript')) {
 			if ($body === '') {
 				continue;
 			}
-			$msgs[] = array('who' => !empty($m['outbound']) ? 'Agent' : 'Customer', 'body' => $body);
+			$msgs[] = array('who' => !empty($m['outbound']) ? 'Agent' : 'Customer', 'body' => $body,
+				'source_type' => isset($m['source_type']) ? (string) $m['source_type'] : 'whatsapp_history',
+				'ghl_message_id' => null, 'chat_file_id' => isset($m['chat_file_id']) ? (int) $m['chat_file_id'] : null,
+				'message_index' => isset($m['message_index']) ? (int) $m['message_index'] : null);
 		}
 
 		// 2) Drop noise.
@@ -238,6 +256,8 @@ if (!function_exists('faq_suggestion_transcript')) {
 
 		$seen  = array();
 		$lines = array();
+		$sources = array();
+		$number = 0;
 		foreach ($kept as $m) {
 			$k  = faq_suggestion_norm_msg($m['body']);
 			$sk = $m['who'] . '|' . $k;
@@ -247,11 +267,18 @@ if (!function_exists('faq_suggestion_transcript')) {
 			if ($k !== '') {
 				$seen[$sk] = true;
 			}
-			$line = $m['who'] . ': ' . $m['body'];
+			$number++;
+			$ref = 'S' . $number;
+			$line = ($include_refs ? '[' . $ref . '] ' : '') . $m['who'] . ': ' . $m['body'];
 			if ($m['who'] === 'Customer' && $k !== '' && isset($counts[$k]) && $counts[$k] > 1) {
 				$line .= ' (asked ' . $counts[$k] . ' times)';
 			}
 			$lines[] = $line;
+			$sources[$ref] = array(
+				'source_type' => $m['source_type'], 'ghl_message_id' => $m['ghl_message_id'],
+				'chat_file_id' => $m['chat_file_id'], 'message_index' => $m['message_index'],
+				'excerpt' => $m['who'] . ': ' . $m['body'],
+			);
 		}
 
 		// 4) Char backstop (0 = uncapped).
@@ -264,7 +291,15 @@ if (!function_exists('faq_suggestion_transcript')) {
 				$text = substr($text, $nl + 1); // drop the partial leading line
 			}
 		}
-		return $text;
+		// If the tail cap removed lines, only retain sources that remain visible.
+		if ($include_refs && $text !== '') {
+			$visible = array();
+			foreach ($sources as $ref => $source) {
+				if (strpos($text, '[' . $ref . '] ') !== false) { $visible[$ref] = $source; }
+			}
+			$sources = $visible;
+		}
+		return array('text' => $text, 'sources' => $sources);
 	}
 }
 
@@ -377,6 +412,7 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"{\"suggestions\":[{" .
 			"\"title\":\"short FAQ title\"," .
 			"\"reason\":\"one sentence: where this came up or why it is useful\"," .
+			"\"source_refs\":[\"S1\"]," .
 			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
 			"\"items\":[{\"q\":\"the question\",\"a\":\"a detailed, step-by-step, ready-to-send reply to the customer\"}]" .
 			"}]}\n\n" .
@@ -386,7 +422,9 @@ if (!function_exists('faq_suggestion_build_prompt')) {
 			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
 			$dest_line . "\n\n" .
 			$existing_line .
-			"Conversations:\n" . (string) $transcript;
+			"Conversations (each [S#] is an evidence reference):\n" . (string) $transcript .
+			"\n\nFor every suggestion, source_refs MUST contain only the [S#] reference(s) that directly support it."
+			. " Use an empty array only when no source reference is available.";
 
 		return array('instructions' => $instructions, 'input' => $input);
 	}
@@ -661,7 +699,12 @@ if (!function_exists('faq_suggestion_parse_response')) {
 				}
 			}
 
-			$out[] = array('title' => $title, 'reason' => $reason, 'destination_ids' => $dest_ids, 'items' => $items);
+			$refs = array();
+			foreach ((isset($s['source_refs']) && is_array($s['source_refs'])) ? $s['source_refs'] : array() as $ref) {
+				$ref = strtoupper(trim((string) $ref));
+				if (preg_match('/^S[1-9][0-9]*$/', $ref) && !in_array($ref, $refs, true)) { $refs[] = $ref; }
+			}
+			$out[] = array('title' => $title, 'reason' => $reason, 'destination_ids' => $dest_ids, 'items' => $items, 'source_refs' => $refs);
 			if ($max > 0 && count($out) >= $max) {
 				break;
 			}

@@ -54,6 +54,14 @@ assert_eq('transcript lines',
 	"Customer: What time is check-in?\nAgent: Check-in is 3pm.\nCustomer: Is breakfast included?\nAgent: Yes, daily breakfast.",
 	$t);
 assert_eq('empty inputs -> empty', '', faq_suggestion_transcript(array(), array(), 60000));
+$with_sources = faq_suggestion_transcript_with_sources(
+	array(array('id' => 91, 'direction' => 'inbound', 'body' => 'Can I pay by card?')),
+	array(array('outbound' => true, 'body' => 'Yes, card is accepted.', 'system' => false, 'chat_file_id' => 7, 'message_index' => 3)),
+	60000
+);
+assert_true('source transcript labels message', strpos($with_sources['text'], '[S1] Customer: Can I pay by card?') !== false);
+assert_eq('source map preserves GHL id', 91, $with_sources['sources']['S1']['ghl_message_id']);
+assert_eq('source map preserves WA file id', 7, $with_sources['sources']['S2']['chat_file_id']);
 
 // ---- is_noise --------------------------------------------------------------
 assert_true('blank is noise',            faq_suggestion_is_noise('   '));
@@ -105,6 +113,7 @@ assert_true('no destinations -> (none configured)', strpos($p2['input'], '(none 
 assert_true('prompt asks for ready-to-send answers', stripos($p['instructions'], 'ready-to-send') !== false);
 assert_true('prompt mentions copy and paste to customer', stripos($p['instructions'], 'copy') !== false);
 assert_true('json shape hint says ready-to-send reply', stripos($p['input'], 'ready-to-send reply') !== false);
+assert_true('prompt requests evidence refs', strpos($p['input'], 'source_refs') !== false);
 assert_true('prompt asks for step-by-step detail', stripos($p['instructions'], 'step-by-step') !== false);
 
 // build_prompt with existing FAQs injected so the model can skip duplicates.
@@ -138,6 +147,7 @@ $json = array('suggestions' => array(
 	array(
 		'title' => 'Check-in time',
 		'reason' => 'Asked by many customers before arrival.',
+		'source_refs' => array('s3', 'NOPE', 'S3', 'S9'),
 		'destinations' => array('Japan', 'Atlantis'), // Atlantis unknown -> dropped
 		'items' => array(
 			array('q' => 'What time is check-in?', 'a' => '3pm.'),
@@ -161,6 +171,7 @@ assert_eq('parsed[0] dest ids', array(5), $parsed[0]['destination_ids']);
 assert_eq('parsed[0] items kept', 1, count($parsed[0]['items']));
 assert_eq('parsed[1] title', 'Breakfast', $parsed[1]['title']);
 assert_eq('parsed[1] dest ids ci', array(8), $parsed[1]['destination_ids']);
+assert_eq('valid source refs normalised', array('S3', 'S9'), $parsed[0]['source_refs']);
 
 // String input is decoded; cap is honoured.
 $raw = '{"suggestions":[{"title":"A","items":[{"q":"a","a":"b"}]},{"title":"B","items":[{"q":"a","a":"b"}]}]}';
