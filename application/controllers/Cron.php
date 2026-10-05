@@ -1931,20 +1931,20 @@ class Cron extends CI_Controller
 			$booking['remark2'] = $booking['ReservationNumber'];
 		}
 
-		// cc 
-		// Check for Adult, Children, and Infant; if empty, set to 0
-		$booking['cc'] = '';
-
-		$booking['cc'] .= (!empty($booking['Adult']) ? $booking['Adult'] : 0) . ' A, ';
-		$booking['cc'] .= (!empty($booking['Children']) ? $booking['Children'] : 0) . ' C, ';
-		$booking['cc'] .= (!empty($booking['Infant']) ? $booking['Infant'] : 0) . ' IN';
-
-		// Remove trailing comma and space
-		$booking['cc'] = rtrim($booking['cc'], ', ');
-
-		if (!empty($booking['cc'])) {
-			$booking['remark3'] = $booking['cc'];
-		}
+		// cc — pax head-count for the e-invoice "Remark 3" line.
+		// The authoritative count lives in Room Management (guest_list_room)
+		// with a guest_list fallback, NOT in booking.Adult/Children/Infant
+		// (those stay frozen when rooms change — see feedback_booking_pax), so
+		// mirror the Booking Confirmation / Travel Voucher logic here.
+		$this->load->helper('booking_pax');
+		$this->load->model('Guest_List_Room_Model');
+		$this->load->model('Guest_List_Model');
+		$rooms  = $this->Guest_List_Room_Model->Read_Rooms_By_Booking_ID($booking['BookingID']);
+		$guests = empty($rooms) ? $this->Guest_List_Model->Read_Guests_By_Booking_ID($booking['BookingID']) : array();
+		// Legacy bookings (pre-Room-Management) have neither rooms nor roster;
+		// fall back to the booking's own Adult/Children/Infant columns.
+		$booking['cc'] = booking_pax_remark($rooms, $guests, $booking);
+		$booking['remark3'] = $booking['cc'];
 
 		// deliveryTerm  
 		if (!empty($booking['Destination'])) {

@@ -54,23 +54,14 @@ class Booking_PDF_Generator {
 
 		// Compute PaxNumber from room management totals; fall back to counting
 		// guest_list records (Type = ADULT/CHILD/INFANT) when no rooms exist.
+		// Shared with the e-invoice "Remark 3" pax line (see booking_pax_helper).
+		$this->CI->load->helper('booking_pax');
 		$rooms = $this->CI->Guest_List_Room_Model->Read_Rooms_By_Booking_ID($array['BookingID']);
-		if (!empty($rooms)) {
-			$pax_adult = 0; $pax_child = 0; $pax_infant = 0;
-			foreach ($rooms as $r) {
-				$pax_adult += (int)$r->adult_count;
-				$pax_child += (int)$r->child_count;
-				$pax_infant += (int)$r->infant_count;
-			}
-		} else {
-			$pax_adult = 0; $pax_child = 0; $pax_infant = 0;
-			$guests = $this->CI->Guest_List_Model->Read_Guests_By_Booking_ID($array['BookingID']);
-			foreach ($guests as $g) {
-				if ($g->Type == 'ADULT') { $pax_adult++; }
-				elseif ($g->Type == 'CHILD') { $pax_child++; }
-				elseif ($g->Type == 'INFANT') { $pax_infant++; }
-			}
-		}
+		$guests = empty($rooms) ? $this->CI->Guest_List_Model->Read_Guests_By_Booking_ID($array['BookingID']) : array();
+		// Legacy bookings (pre-Room-Management) have neither rooms nor roster;
+		// fall back to the booking's own Adult/Children/Infant columns.
+		$pax = booking_pax_counts($rooms, $guests, $array);
+		$pax_adult = $pax['ADULT']; $pax_child = $pax['CHILD']; $pax_infant = $pax['INFANT'];
 		$adult_str = $pax_adult > 0 ? ($pax_adult == 1 ? $pax_adult . ' ADULT ' : $pax_adult . ' ADULTS ') : '';
 		$child_str = $pax_child > 0 ? ($pax_child == 1 ? $pax_child . ' CHILD ' : $pax_child . ' CHILDREN ') : '';
 		$infant_str = $pax_infant > 0 ? ($pax_infant == 1 ? $pax_infant . ' INFANT ' : $pax_infant . ' INFANTS ') : '';
