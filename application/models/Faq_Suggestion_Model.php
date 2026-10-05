@@ -32,6 +32,9 @@ class Faq_Suggestion_Model extends CI_Model
 		$rows = $this->db->get()->result();
 
 		$dest_names = $this->Destination_Name_Map();
+		$ids = array();
+		foreach ($rows as $row) { $ids[] = (int) $row->SuggestionID; }
+		$evidence_by_suggestion = $this->Read_Evidence_For_Suggestions($ids);
 		foreach ($rows as $row) {
 			$items = Faq_Model::Decode_Items($row->Description);
 			$row->QuestionCount = count($items);
@@ -43,8 +46,44 @@ class Faq_Suggestion_Model extends CI_Model
 			}
 			sort($names);
 			$row->Destinations = implode('||', $names);
+			$row->Evidence = isset($evidence_by_suggestion[(int) $row->SuggestionID])
+				? $evidence_by_suggestion[(int) $row->SuggestionID] : array();
 		}
 		return $rows;
+	}
+
+	/**
+	 * Source messages cited by one suggestion, for the edit screen. The run
+	 * detail uses the batched variant below; keeping this public lets both pages
+	 * show identical "Detected from" evidence.
+	 */
+	function Read_Evidence($suggestion_id)
+	{
+		$all = $this->Read_Evidence_For_Suggestions(array((int) $suggestion_id));
+		return isset($all[(int) $suggestion_id]) ? $all[(int) $suggestion_id] : array();
+	}
+
+	/** Load source evidence for many suggestions in one query. */
+	private function Read_Evidence_For_Suggestions($suggestion_ids)
+	{
+		$ids = array_values(array_filter(array_map('intval', (array) $suggestion_ids)));
+		if (empty($ids)) {
+			return array();
+		}
+		$this->db->select('fs.SuggestionID, fs.SourceType, fs.SourceRef, fs.GhlMessageID, fs.ChatFileID, fs.MessageIndex, fs.SourceExcerpt');
+		$this->db->select('gm.conversation_id AS ConversationID, gm.contact_id AS ContactID, gm.direction AS MessageDirection, gm.from_number AS FromNumber, gm.to_number AS ToNumber, gm.date_added AS MessageDate');
+		$this->db->select('chf.OriginalName AS ChatFileName, chf.dedup_key AS ChatContactKey');
+		$this->db->from('faq_suggestion_sources fs');
+		$this->db->join('ghl_messages gm', 'gm.id = fs.GhlMessageID', 'left');
+		$this->db->join('chat_history_files chf', 'chf.FileID = fs.ChatFileID', 'left');
+		$this->db->where_in('fs.SuggestionID', $ids);
+		$this->db->order_by('fs.SuggestionID', 'ASC');
+		$this->db->order_by('fs.SourceID', 'ASC');
+		$out = array();
+		foreach ($this->db->get()->result() as $source) {
+			$out[(int) $source->SuggestionID][] = $source;
+		}
+		return $out;
 	}
 
 	// ---------------------------------------------------------------------
@@ -314,7 +353,9 @@ class Faq_Suggestion_Model extends CI_Model
 				$path       = FCPATH . self::UPLOAD_DIR . basename((string) $run->StoredName);
 				$ext        = strtolower(pathinfo((string) $run->StoredName, PATHINFO_EXTENSION));
 				$wa_rows    = $this->Chat_File_Messages($path, $ext);
-				$transcript = faq_suggestion_transcript(array(), $wa_rows, $this->max_transcript_chars());
+				$built      = faq_suggestion_transcript_with_sources(array(), $wa_rows, $this->max_transcript_chars());
+				$transcript = $built['text'];
+				$source_map = $built['sources'];
 				if (trim($transcript) === '') {
 					$this->Update_Run($run_id, array('RunState' => 'done', 'Proposed' => 0, 'Created' => 0));
 					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
@@ -331,7 +372,9 @@ class Faq_Suggestion_Model extends CI_Model
 				$phone_key = faq_suggestion_phone_key((string) $run->Mobile);
 				$ghl_rows  = $this->Recent_Ghl_Messages($start, $end, $phone_key);
 				$wa_rows   = $this->Recent_Wa_Messages($start, $end, $phone_key);
-				$transcript = faq_suggestion_transcript($ghl_rows, $wa_rows, $this->max_transcript_chars());
+				$built      = faq_suggestion_transcript_with_sources($ghl_rows, $wa_rows, $this->max_transcript_chars());
+				$transcript = $built['text'];
+				$source_map = $built['sources'];
 				if (trim($transcript) === '') {
 					$this->Update_Run($run_id, array('RunState' => 'done', 'Proposed' => 0, 'Created' => 0));
 					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
@@ -346,7 +389,7 @@ class Faq_Suggestion_Model extends CI_Model
 			return array('created' => 0, 'proposed' => 0, 'reason' => 'error', 'model' => '', 'run_id' => $run_id, 'error' => $e->getMessage());
 		}
 
-		return $this->store_suggestions($run_id, $result, $dest_map, $existing_faqs) + array('run_id' => $run_id);
+		return $this->store_suggestions($run_id, $result, $dest_map, $existing_faqs, isset($source_map) ? $source_map : array()) + array('run_id' => $run_id);
 	}
 
 	/**
@@ -355,7 +398,7 @@ class Faq_Suggestion_Model extends CI_Model
 	 * model. Shared by the chats and PDF generators. Returns
 	 * ['created'=>int, 'proposed'=>int, 'reason'=>string, 'model'=>string].
 	 */
-	protected function store_suggestions($run_id, $result, $dest_map, $existing_faqs = null)
+	protected function store_suggestions($run_id, $result, $dest_map, $existing_faqs = null, $source_map = array())
 	{
 		$this->load->model('Faq_Model');
 
@@ -403,6 +446,7 @@ class Faq_Suggestion_Model extends CI_Model
 				'Description'    => Faq_Model::Encode_Items($built['items']),
 				'Reason'         => isset($s['reason']) ? $s['reason'] : '',
 				'DestinationIds' => implode(',', $s['destination_ids']),
+				'SourceRefs'     => isset($s['source_refs']) && is_array($s['source_refs']) ? $s['source_refs'] : array(),
 			);
 		}
 
@@ -410,12 +454,17 @@ class Faq_Suggestion_Model extends CI_Model
 		$cost_each = empty($rows) ? 0 : round(((float) $result['cost_usd']) / count($rows), 6);
 		$created   = 0;
 		foreach ($rows as $row) {
+			$source_refs = $row['SourceRefs'];
+			unset($row['SourceRefs']); // this is evidence metadata, not a faq_suggestions column
 			$row['State']   = 'pending';
 			$row['RunKey']  = $run_key;
 			$row['RunID']   = (int) $run_id;
 			$row['Model']   = $result['model'];
 			$row['CostUsd'] = $cost_each;
-			$this->Create($row);
+			$suggestion_id = $this->Create($row);
+			foreach ($source_refs as $ref) {
+				if (isset($source_map[$ref])) { $this->Create_Source($suggestion_id, $run_id, $ref, $source_map[$ref]); }
+			}
 			$created++;
 		}
 
@@ -433,6 +482,19 @@ class Faq_Suggestion_Model extends CI_Model
 			'reason'   => $created === 0 ? 'no_suggestions' : '',
 			'model'    => $result['model'],
 		);
+	}
+
+	/** Store a validated evidence link returned by the model for one suggestion. */
+	protected function Create_Source($suggestion_id, $run_id, $ref, $source)
+	{
+		$this->db->insert('faq_suggestion_sources', array(
+			'SuggestionID' => (int) $suggestion_id, 'RunID' => (int) $run_id, 'SourceRef' => (string) $ref,
+			'SourceType' => (string) $source['source_type'],
+			'GhlMessageID' => !empty($source['ghl_message_id']) ? (int) $source['ghl_message_id'] : null,
+			'ChatFileID' => !empty($source['chat_file_id']) ? (int) $source['chat_file_id'] : null,
+			'MessageIndex' => !empty($source['message_index']) ? (int) $source['message_index'] : null,
+			'SourceExcerpt' => (string) $source['excerpt'],
+		));
 	}
 
 	/**
@@ -544,7 +606,7 @@ class Faq_Suggestion_Model extends CI_Model
 	 */
 	protected function Recent_Ghl_Messages($start, $end, $phone_key = '')
 	{
-		$this->db->select('direction, body');
+		$this->db->select('id, direction, body');
 		$this->db->from('ghl_messages');
 		$this->db->where('date_added >=', $start);
 		$this->db->where('date_added <=', $end);
@@ -577,7 +639,7 @@ class Faq_Suggestion_Model extends CI_Model
 	 */
 	protected function Recent_Wa_Messages($start, $end, $phone_key = '')
 	{
-		$this->db->select('StoredName');
+		$this->db->select('FileID, StoredName');
 		$this->db->from('chat_history_files');
 		$this->db->where('Status', 'Y');
 		$this->db->where('CreatedAt >=', $start);
@@ -604,7 +666,8 @@ class Faq_Suggestion_Model extends CI_Model
 			if ($text === '') {
 				continue;
 			}
-			foreach (chat_history_parse($text) as $m) {
+			foreach (chat_history_parse($text) as $i => $m) {
+				$m['source_type'] = 'whatsapp_history'; $m['chat_file_id'] = (int) $f->FileID; $m['message_index'] = $i + 1;
 				$messages[] = $m;
 			}
 		}
@@ -643,7 +706,8 @@ class Faq_Suggestion_Model extends CI_Model
 				if ($stat && (int) $stat['size'] > $per_file_max) { continue; }
 				$content = $zip->getFromIndex($i);
 				if ($content === false || trim($content) === '') { continue; }
-				foreach (chat_history_parse($content) as $m) {
+				foreach (chat_history_parse($content) as $message_index => $m) {
+					$m['source_type'] = 'uploaded_chat_file'; $m['message_index'] = $message_index + 1;
 					$messages[] = $m;
 				}
 			}
@@ -651,7 +715,8 @@ class Faq_Suggestion_Model extends CI_Model
 		} else {
 			$text = (string) @file_get_contents($path);
 			if (trim($text) !== '') {
-				foreach (chat_history_parse($text) as $m) {
+				foreach (chat_history_parse($text) as $message_index => $m) {
+					$m['source_type'] = 'uploaded_chat_file'; $m['message_index'] = $message_index + 1;
 					$messages[] = $m;
 				}
 			}

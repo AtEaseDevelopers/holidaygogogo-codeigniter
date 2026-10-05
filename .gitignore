@@ -10,3 +10,4 @@ tools/competitor_render/node_modules/
 
 # Competitor Analysis runtime crawl job/status files (recreated at runtime)
 application/logs/competitor_crawl/
+application/logs/*
