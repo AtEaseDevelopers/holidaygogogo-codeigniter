@@ -1,4 +1,4 @@
-function Delete_Record(background, title, url, key, value, status, href)
+function Confirm_Delete_Record(background, title)
 {
 	const swalWithBootstrapButtons = Swal.mixin({
 		customClass: {
@@ -7,15 +7,39 @@ function Delete_Record(background, title, url, key, value, status, href)
 		},
 		buttonsStyling: true
 	});
-	swalWithBootstrapButtons.fire({
+	return swalWithBootstrapButtons.fire({
 		width: 550,
 		background: `url(${background})`,
 		icon: 'warning',
-		title: `Delete ${title} ?`,
+		titleText: `Delete ${title} ?`,
 		confirmButtonText: 'Confirm',
 		cancelButtonText: 'Cancel',
 		showCancelButton: true
-	}).then((action) => {
+	});
+}
+
+function Confirm_Delete_Form(form, background, title)
+{
+	if (form.dataset.deletePending === '1' || form.dataset.deleteSubmitting === '1') {
+		return false;
+	}
+	form.dataset.deletePending = '1';
+	Confirm_Delete_Record(background, title).then((action) => {
+		delete form.dataset.deletePending;
+		if (action.isConfirmed) {
+			form.dataset.deleteSubmitting = '1';
+			Array.from(form.elements).forEach((field) => {
+				if (field.type === 'submit') { field.disabled = true; }
+			});
+			HTMLFormElement.prototype.submit.call(form);
+		}
+	});
+	return false;
+}
+
+function Delete_Record(background, title, url, key, value, status, href)
+{
+	Confirm_Delete_Record(background, title).then((action) => {
 		if(action.isConfirmed) {
 			$.ajax({
 				url: url,

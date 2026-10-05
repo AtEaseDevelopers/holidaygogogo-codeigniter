@@ -161,7 +161,8 @@ class Faq_Model extends CI_Model
 	// posted rows - each entry is itself a list (that row's sub_link_labels[i][]
 	// and sub_link_urls[i][]). A kept row gets a cleaned, non-empty 'links' key
 	// (placed right after any 'tags'); empty/absent link sets omit the key.
-	public static function Build_Items($questions, $answers, $meta = null, $actor = '', $now = '', $tags = null, $link_labels = null, $link_urls = null)
+	// Suggestion drafts may allow unanswered questions; FAQ saves require complete pairs.
+	public static function Build_Items($questions, $answers, $meta = null, $actor = '', $now = '', $tags = null, $link_labels = null, $link_urls = null, $allow_incomplete = false)
 	{
 		$questions = is_array($questions) ? array_values($questions) : array();
 		$answers   = is_array($answers)   ? array_values($answers)   : array();
@@ -185,7 +186,7 @@ class Faq_Model extends CI_Model
 			if($q === '' && $a === '') {
 				continue; // blank row, ignore
 			}
-			if($q === '' || $a === '') {
+			if($q === '' || ($a === '' && !$allow_incomplete)) {
 				return array('items' => array(), 'error' => 'Each sub-question must have a matching sub-answer.');
 			}
 

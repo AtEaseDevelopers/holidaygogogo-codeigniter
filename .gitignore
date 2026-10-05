@@ -1,6 +1,10 @@
 .env
 application/cache/sessions/*
 assets/upload/*
+!assets/upload/faq_knowledge_sources/
+assets/upload/faq_knowledge_sources/*
+!assets/upload/faq_knowledge_sources/.htaccess
+!assets/upload/faq_knowledge_sources/index.html
 backups/*.sql.gz
 backups/cron.log
 whats-new.txt

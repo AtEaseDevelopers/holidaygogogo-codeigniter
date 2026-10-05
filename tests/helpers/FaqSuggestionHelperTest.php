@@ -11,7 +11,6 @@
  *                                    (Responses json_object mode) + destinations
  *   - faq_suggestion_parse_response: AI JSON -> clean suggestions, resolving
  *                                    destination names to ids, dropping bad rows
- *   - faq_suggestion_filter_new    : drop titles already seen / duplicated
  */
 
 if (!defined('BASEPATH')) {
@@ -62,6 +61,12 @@ $with_sources = faq_suggestion_transcript_with_sources(
 assert_true('source transcript labels message', strpos($with_sources['text'], '[S1] Customer: Can I pay by card?') !== false);
 assert_eq('source map preserves GHL id', 91, $with_sources['sources']['S1']['ghl_message_id']);
 assert_eq('source map preserves WA file id', 7, $with_sources['sources']['S2']['chat_file_id']);
+$separate=faq_suggestion_transcript_with_sources(array(
+    array('id'=>1,'conversation_id'=>'tour-a','direction'=>'inbound','body'=>'Are meals included?'),
+    array('id'=>2,'conversation_id'=>'tour-b','direction'=>'inbound','body'=>'Are meals included?')
+),array(),0);
+assert_eq('same question in different tours retains both sources',2,count($separate['sources']));
+assert_true('transcript identifies conversation boundaries',strpos($separate['text'],'conversation C1')!==false && strpos($separate['text'],'conversation C2')!==false);
 
 // ---- is_noise --------------------------------------------------------------
 assert_true('blank is noise',            faq_suggestion_is_noise('   '));
@@ -100,6 +105,44 @@ assert_false('cap drops early line', strpos($capped, 'line1:') !== false);
 assert_true('cap keeps last line', strpos($capped, 'line50') !== false);
 assert_false('cap never starts mid-line', substr($capped, 0, 1) === 'e' || substr($capped, 0, 1) === 'l' && strpos($capped, 'Customer') !== 0);
 
+// ---- JSON mode input (single/batch re-evaluation and file requests) ----------
+$candidate = array('id'=>64, 'title'=>'Club Med Cherating child under 2 years old eligibility',
+	'items'=>array(array('q'=>'Can I bring a child below 2 years old to Club Med Cherating?', 'a'=>'')));
+$evidence = array(array('reference'=>'S1094', 'text'=>'Customer: Club med Cherating boleh bawa budak 2tahun ke bawah'));
+$reevaluation = faq_workspace_reevaluate_prompt($candidate, $evidence, '', array());
+assert_false('regression fixture has no json word in the candidate input', stripos($reevaluation['input'], 'json') !== false);
+assert_true('instructions alone already mention JSON', stripos($reevaluation['instructions'], 'json') !== false);
+$messages = faq_suggestion_json_input($reevaluation['input']);
+assert_true('single re-evaluation input explicitly requests JSON', stripos($messages[0]['content'], 'json object') !== false);
+assert_eq('candidate input remains a user message', 'user', $messages[1]['role']);
+assert_eq('single re-evaluation keeps its exact input', $reevaluation['input'], $messages[1]['content']);
+assert_eq('single re-evaluation preserves candidate and evidence', array(
+	'existing_candidate'=>$candidate, 'conversation_evidence'=>$evidence,
+	'staff_additional_information'=>'', 'approved_knowledge'=>array(), 'staff_information_reference'=>null,
+), json_decode($messages[1]['content'], true));
+
+$batch_input = json_encode(array('candidates'=>array(array('candidate_id'=>64, 'input'=>json_decode($reevaluation['input'], true)))));
+$messages = faq_suggestion_json_input($batch_input);
+assert_true('batch re-evaluation input explicitly requests JSON', stripos($messages[0]['content'], 'json object') !== false);
+assert_eq('batch re-evaluation keeps its candidate IDs and data', $batch_input, $messages[1]['content']);
+
+foreach (array(
+	array('type'=>'input_file', 'file_id'=>'file-test'),
+	array('type'=>'input_file', 'filename'=>'policy.pdf', 'file_data'=>'data:application/pdf;base64,cGRm'),
+	array('type'=>'input_image', 'image_url'=>'data:image/png;base64,aW1hZ2U='),
+) as $attachment) {
+	$file_input = array(array('role'=>'user', 'content'=>array(
+		array('type'=>'input_text', 'text'=>'Extract policy excerpts for review.'), $attachment,
+	)));
+	$messages = faq_suggestion_json_input($file_input);
+	assert_true($attachment['type'].' request explicitly asks for JSON', stripos($messages[0]['content'], 'json object') !== false);
+	assert_eq($attachment['type'].' request keeps its complete attachment and text', $file_input, array_slice($messages, 1));
+	assert_eq('file input is not mutated', 'Extract policy excerpts for review.', $file_input[0]['content'][0]['text']);
+}
+$chat_input = "Return json with this exact shape:\n{\"suggestions\":[]}\nCustomer: hi";
+$messages = faq_suggestion_json_input($chat_input);
+assert_eq('existing JSON chat prompts remain intact', $chat_input, $messages[1]['content']);
+
 // ---- build_prompt ----------------------------------------------------------
 $p = faq_suggestion_build_prompt("Customer: hi\nAgent: hello", array('Japan', ' Korea ', ''));
 assert_true('prompt has instructions', trim($p['instructions']) !== '');
@@ -109,15 +152,42 @@ assert_true('input lists destination Japan', strpos($p['input'], 'Japan') !== fa
 assert_true('input lists destination Korea trimmed', strpos($p['input'], 'Korea') !== false);
 $p2 = faq_suggestion_build_prompt('x', array());
 assert_true('no destinations -> (none configured)', strpos($p2['input'], '(none configured)') !== false);
-// Answers must be customer-facing, ready to copy & paste straight to a customer.
-assert_true('prompt asks for ready-to-send answers', stripos($p['instructions'], 'ready-to-send') !== false);
-assert_true('prompt mentions copy and paste to customer', stripos($p['instructions'], 'copy') !== false);
-assert_true('json shape hint says ready-to-send reply', stripos($p['input'], 'ready-to-send reply') !== false);
+// One response identifies scope, assesses readiness and drafts supported answers.
+assert_true('prompt drafts in the initial response', stripos($p['instructions'], 'draft answers and assess readiness in this single response') !== false);
+assert_true('prompt forbids inferred policy', stripos($p['instructions'], 'Never infer a supplier/resort policy') !== false);
+assert_true('json shape has label and missing information', strpos($p['input'], '"label":"Needs Information"') !== false && strpos($p['input'], 'missing_information') !== false);
 assert_true('prompt requests evidence refs', strpos($p['input'], 'source_refs') !== false);
-assert_true('prompt asks for step-by-step detail', stripos($p['instructions'], 'step-by-step') !== false);
+assert_true('original prompt still requests ready-to-send replies', stripos($p['instructions'], 'READY-TO-SEND') !== false && stripos($p['instructions'], 'Be EXHAUSTIVE') !== false && stripos($p['instructions'], 'STEP-BY-STEP') !== false);
+assert_false('prompt no longer requires empty answers for missing information', strpos($p['instructions'].$p['input'], 'empty answers') !== false);
 assert_true('prompt preserves tour-specific facts', stripos($p['instructions'], 'Preserve tour-specific facts') !== false);
 assert_true('prompt rejects genericising tour questions', stripos($p['instructions'], 'Do NOT turn a question about a named tour') !== false);
 assert_true('prompt distinguishes private and published details', stripos($p['instructions'], 'published or generally applicable package price') !== false);
+$knowledge_prompt=faq_suggestion_build_prompt('[S1] Customer: What meals?',array(),array(),10,array(array('reference'=>'K12','excerpt'=>'Daily breakfast for Package A.')),array(array('name'=>'Package A','code'=>'PA')));
+assert_true('initial prompt includes approved source excerpt',strpos($knowledge_prompt['input'],'Daily breakfast for Package A.')!==false);
+assert_true('initial prompt identifies answer references',strpos($knowledge_prompt['input'],'answer_refs')!==false);
+$sample=faq_suggestion_candidate_example(); $sample['title']='Package A meals';
+assert_false('generation contract has no structured context',array_key_exists('context',$sample));
+$sample['label']='Pending Approval'; $sample['missing_information']=array(); $sample['answer_refs']=array('S2','K12'); $sample['items']=array(array('q'=>'What meals?','a'=>'Daily breakfast.'));
+$result=faq_suggestion_parse_response(array('suggestions'=>array($sample)),array(),1,true);
+assert_eq('strict assessment preserves AI answer','Daily breakfast.',$result[0]['items'][0]['a']);
+assert_eq('label maps to the saved readiness status','pending_approval',$result[0]['assessment']['status']);
+assert_eq('strict assessment keeps answer message evidence',array('S2'),$result[0]['source_refs']);
+$sample['label']='Approved';
+assert_eq('AI cannot approve its own candidate',array(),faq_suggestion_parse_response(array('suggestions'=>array($sample)),array(),1,true));
+$sample['label']='General';
+assert_eq('general is rejected as a readiness label',array(),faq_suggestion_parse_response(array('suggestions'=>array($sample)),array(),1,true));
+$sample['label']='Ready to Approve';
+assert_eq('removed ready-to-approve label rejected',array(),faq_suggestion_parse_response(array('suggestions'=>array($sample)),array(),1,true));
+$sample['label']='Needs Information'; $sample['missing_information']=array('Confirm whether dinner is included.');
+$partial=faq_suggestion_parse_response(array('suggestions'=>array($sample)),array(),1,true);
+assert_eq('needs information preserves a supported partial draft','Daily breakfast.',$partial[0]['items'][0]['a']);
+assert_eq('partial draft still needs information','needs_information',$partial[0]['assessment']['status']);
+$sample['status']='pending_approval';
+assert_eq('conflicting label and status rejected',array(),faq_suggestion_parse_response(array('suggestions'=>array($sample)),array(),1,true));
+$sample['status']='needs_information'; unset($sample['label']);
+assert_eq('previous status contract remains readable','needs_information',faq_suggestion_parse_response(array('suggestions'=>array($sample)),array(),1,true)[0]['assessment']['status']);
+$sample['items'][0]['a']='';
+assert_eq('missing information candidate survives an empty answer',1,count(faq_suggestion_parse_response(array('suggestions'=>array($sample)),array(),1,true)));
 
 // build_prompt with existing FAQs injected so the model can skip duplicates.
 $existing_faqs = array(
@@ -183,41 +253,6 @@ assert_eq('string input decoded + capped', 1, count(faq_suggestion_parse_respons
 assert_eq('max 0 = uncapped', 2, count(faq_suggestion_parse_response($raw, array(), 0)));
 assert_eq('garbage -> empty', array(), faq_suggestion_parse_response('not json', array(), 30));
 
-// ---- norm_title / filter_new ----------------------------------------------
-assert_eq('norm strips punctuation', 'check in time', faq_suggestion_norm_title('  Check-In  Time!! '));
-$sugg = array(
-	array('title' => 'Check-in time'),
-	array('title' => 'CHECK IN TIME'),   // dup of #1 -> dropped
-	array('title' => 'Baggage allowance'),
-	array('title' => 'Visa rules'),      // already an existing FAQ -> dropped
-);
-$new = faq_suggestion_filter_new($sugg, array('Visa Rules'));
-assert_eq('filter_new count', 2, count($new));
-assert_eq('filter_new[0]', 'Check-in time', $new[0]['title']);
-assert_eq('filter_new[1]', 'Baggage allowance', $new[1]['title']);
-
-// filter_new also drops a suggestion whose QUESTION already exists as a FAQ
-// question, even when its title is worded differently (reworded-title case).
-$sugg2 = array(
-	array('title' => 'Deposit info', 'items' => array(array('q' => 'How much is the deposit?', 'a' => 'RM500.'))),
-	array('title' => 'Refund policy', 'items' => array(array('q' => 'Can I get a refund?', 'a' => 'Yes.'))),
-);
-$new2 = faq_suggestion_filter_new($sugg2, array(), array('How much is the deposit?'));
-assert_eq('filter_new by question count', 1, count($new2));
-assert_eq('filter_new by question kept',  'Refund policy', $new2[0]['title']);
-
-// A suggestion whose title matches an existing question is also dropped.
-$sugg3 = array(array('title' => 'How much is the deposit', 'items' => array(array('q' => 'x?', 'a' => 'y'))));
-assert_eq('filter_new title vs existing question', 0,
-	count(faq_suggestion_filter_new($sugg3, array(), array('How much is the deposit?'))));
-
-// Two batch suggestions sharing one identical question -> second dropped.
-$sugg4 = array(
-	array('title' => 'A', 'items' => array(array('q' => 'What is the deposit?', 'a' => '1'))),
-	array('title' => 'B', 'items' => array(array('q' => 'What is the deposit?', 'a' => '2'))),
-);
-assert_eq('filter_new in-batch question dedupe', 1, count(faq_suggestion_filter_new($sugg4)));
-
 // ---- date_range / valid_date ----------------------------------------------
 assert_eq('valid_date passes',      '2026-09-17', faq_suggestion_valid_date('2026-09-17'));
 assert_eq('valid_date trims',       '2026-09-17', faq_suggestion_valid_date('  2026-09-17 '));
@@ -273,9 +308,9 @@ $fp = faq_suggestion_build_file_prompt(array('Japan', 'Korea'));
 assert_true('file prompt has instructions', strlen($fp['instructions']) > 0);
 assert_true('file prompt input mentions json', stripos($fp['input'], 'json') !== false);
 assert_true('file prompt lists destinations', strpos($fp['input'], 'Japan') !== false);
-assert_true('file prompt asks for ready-to-send answers', stripos($fp['instructions'], 'ready-to-send') !== false);
-assert_true('file prompt json hint says ready-to-send reply', stripos($fp['input'], 'ready-to-send reply') !== false);
-assert_true('file prompt asks for step-by-step detail', stripos($fp['instructions'], 'step-by-step') !== false);
+assert_true('file prompt drafts supported answers immediately', stripos($fp['instructions'], 'draft answers and assess readiness in this single response') !== false);
+assert_true('file prompt identifies document evidence', strpos($fp['input'], 'D1') !== false);
+assert_true('original file prompt requests detailed replies grounded in the document', stripos($fp['instructions'], 'READY-TO-SEND') !== false && strpos($fp['instructions'], "grounded in the document's contents") !== false);
 $fpe = faq_suggestion_build_file_prompt(array('Japan'), $existing_faqs);
 assert_true('file prompt lists existing FAQ', strpos($fpe['input'], 'Deposit amount') !== false);
 assert_true('file prompt instructs skip existing', stripos($fpe['input'] . $fpe['instructions'], 'already') !== false);
@@ -297,52 +332,6 @@ assert_eq('prune keeps last 3 days', array('run_3.out', 'run_4.out'),
 assert_eq('prune empty list', array(), faq_suggestion_logs_to_prune(array(), $now, 3));
 assert_eq('prune floors keep_days to 1', array('run_2.out', 'run_3.out', 'run_4.out'),
 	faq_suggestion_logs_to_prune($files, $now, 0));
-
-// ---- embed_text (semantic dedupe canonical text) ---------------------------
-assert_eq('embed_text folds title + q + a',
-	'Deposit How much deposit? RM500 per person',
-	faq_suggestion_embed_text('Deposit', array(array('q' => 'How much deposit?', 'a' => 'RM500 per person'))));
-assert_eq('embed_text collapses whitespace',
-	'A B C',
-	faq_suggestion_embed_text("  A  ", array(array('q' => "B\n\n", 'a' => "  C "))));
-assert_eq('embed_text skips empty pairs',
-	'Only title',
-	faq_suggestion_embed_text('Only title', array(array('q' => '', 'a' => ''))));
-
-// ---- cosine ----------------------------------------------------------------
-assert_eq('cosine identical = 1',      1.0, faq_suggestion_cosine(array(1, 2, 3), array(1, 2, 3)));
-assert_eq('cosine scaled = 1',         1.0, faq_suggestion_cosine(array(1, 0), array(5, 0)));
-assert_eq('cosine orthogonal = 0',     0.0, faq_suggestion_cosine(array(1, 0), array(0, 1)));
-assert_eq('cosine length mismatch = 0', 0.0, faq_suggestion_cosine(array(1, 2), array(1, 2, 3)));
-assert_eq('cosine empty = 0',          0.0, faq_suggestion_cosine(array(), array()));
-assert_eq('cosine zero vector = 0',    0.0, faq_suggestion_cosine(array(0, 0), array(1, 1)));
-
-// ---- filter_semantic -------------------------------------------------------
-// A candidate near an existing FAQ vector is dropped; a distinct one survives.
-$sugs = array(array('title' => 'near'), array('title' => 'far'));
-$sug_vecs = array(array(1.0, 0.0), array(0.0, 1.0));
-$existing_vecs = array(array(0.99, 0.01)); // ~cos 0.9999 to "near", ~0.01 to "far"
-assert_eq('semantic drops near-existing, keeps distinct',
-	array(array('title' => 'far')),
-	faq_suggestion_filter_semantic($sugs, $sug_vecs, $existing_vecs, 0.9));
-
-// In-batch dedupe: two candidates that embed nearly the same -> keep the first.
-$dupSugs = array(array('title' => 'first'), array('title' => 'reworded dup'));
-$dupVecs = array(array(1.0, 0.0), array(0.999, 0.001));
-assert_eq('semantic in-batch keeps first only',
-	array(array('title' => 'first')),
-	faq_suggestion_filter_semantic($dupSugs, $dupVecs, array(), 0.9));
-
-// Threshold outside (0,1) disables the pass -> everything survives.
-assert_eq('semantic disabled by threshold >= 1',
-	$sugs, faq_suggestion_filter_semantic($sugs, $sug_vecs, $existing_vecs, 1));
-assert_eq('semantic disabled by threshold <= 0',
-	$sugs, faq_suggestion_filter_semantic($sugs, $sug_vecs, $existing_vecs, 0));
-
-// A candidate with no usable vector is KEPT (fail-open, never silently dropped).
-assert_eq('semantic keeps candidate lacking a vector',
-	array(array('title' => 'novec')),
-	faq_suggestion_filter_semantic(array(array('title' => 'novec')), array(null), $existing_vecs, 0.9));
 
 // ---- memory_limit (PDF processing headroom) --------------------------------
 assert_eq('mem default when blank',   '1024M', faq_suggestion_memory_limit(''));

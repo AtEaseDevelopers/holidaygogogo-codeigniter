@@ -24,6 +24,11 @@ class Faq_Suggestion extends MY_Controller
 		$this->load->model('Faq_Model');
 		$this->load->model('Faq_Tag_Model');
 		$this->load->model('Universal_Model');
+		$this->load->model('Faq_Workspace_Model');
+		$this->load->helper('faq_suggestion');
+		if (!$this->session->userdata('faq_workspace_csrf')) {
+			$this->session->set_userdata('faq_workspace_csrf',bin2hex(random_bytes(32)));
+		}
 	}
 
 	private function Can_View()
@@ -36,8 +41,22 @@ class Faq_Suggestion extends MY_Controller
 		return (int) $this->session->level === 10 || in_array('FE', (array) $this->session->access_control);
 	}
 
-	// Listing of generation runs (each run opens to the suggestions inside it,
-	// mirroring the Competitor Analysis history → detail flow).
+	private function Can_Manage_Sources()
+	{
+		return faq_workspace_can_manage_sources($this->session);
+	}
+
+	private function Require_Workspace_Post()
+	{
+		if (strtoupper((string)$this->input->server('REQUEST_METHOD'))!=='POST' ||
+			!is_string($this->input->post('workspace_token')) ||
+			!hash_equals((string)$this->session->userdata('faq_workspace_csrf'),$this->input->post('workspace_token'))) {
+			show_error('A valid workspace form submission is required.',403); return false;
+		}
+		return true;
+	}
+
+	// Legacy entry point; the consolidated list is the canonical suggestion page.
 	function index()
 	{
 		if (!$this->Can_View()) {
@@ -45,13 +64,11 @@ class Faq_Suggestion extends MY_Controller
 			return;
 		}
 
-		$titles = array('tab_title' => 'HolidayGoGoGo | FAQ AI Suggestion', 'breadcrumb_title' => 'FAQ AI Suggestion');
-		$data['runs']          = $this->Faq_Suggestion_Model->Read_Runs();
-		$data['pending_count'] = $this->Faq_Suggestion_Model->Count_Pending();
-		$data['can_edit']      = $this->Can_Edit();
-		$this->load->view('layout/header', $titles);
-		$this->load->view('faq_suggestion/index', $data);
-		$this->load->view('layout/footer');
+		$tab=$this->input->get('tab');
+		if ($tab==='ready') { $tab='pending'; }
+		// Preserve feedback across this compatibility redirect.
+		foreach (array('faq_success','faq_error') as $key) { $this->session->keep_flashdata($key); }
+		redirect(base_url('Faq?section=suggestions').(is_string($tab)&&isset(faq_workspace_filters()[$tab])?'&tab='.rawurlencode($tab):''));
 	}
 
 	// Detail of one run — its metadata plus the candidate FAQs it produced.
@@ -75,6 +92,269 @@ class Faq_Suggestion extends MY_Controller
 		$this->load->view('layout/header', $titles);
 		$this->load->view('faq_suggestion/view', $data);
 		$this->load->view('layout/footer');
+	}
+
+	/** Compatibility redirect to the source list; new imports use Add_Source. */
+	function Sources()
+	{
+		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
+		redirect(base_url('Faq?section=sources'));
+	}
+
+	function Add_Source()
+	{
+		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
+		$this->load->model('Faq_Knowledge_Source_Model'); $this->load->library('FaqSourceImport');
+		$this->load->helper('faq_source_import');
+		$data=array('step'=>'type','type'=>'','draft'=>null,'draft_id'=>'','error'=>'','selected_entries'=>null,'products'=>$this->Faq_Workspace_Model->Products());
+		$imports=$this->session->userdata('faq_source_imports'); $imports=is_array($imports)?$imports:array();
+		if (strtoupper((string)$this->input->server('REQUEST_METHOD'))==='POST') {
+			if (!$this->Require_Workspace_Post()) { return; }
+			try {
+				$stage=$this->input->post('stage');
+				$type=$this->input->post('type');
+				if (!is_string($type) || !in_array($type,array('pdf','csv','url','manual'),true)) { throw new Exception('Choose an import type.'); }
+				$data['type']=$type;
+				if ($stage==='choose') { $data['step']='input'; }
+				elseif ($stage==='import') {
+					@set_time_limit(600);
+					$data['step']='input'; $draft=array('type'=>$type,'entries'=>array());
+					$row=array('SourceType'=>$type,'Title'=>'','SourceUrl'=>'','StoredName'=>null,'Excerpt'=>'','ProductID'=>'0','ResortName'=>'','RoomType'=>'','Topic'=>'','ValidFrom'=>'','ValidTo'=>'','ReviewDue'=>'');
+					if ($type==='pdf') {
+						$stored=$this->Receive_Knowledge_Pdf(); $draft['stored']=$stored;
+						$this->load->library('FaqSuggestionService');
+						$result=$this->faqsuggestionservice->extract_knowledge_pdf(FCPATH.Faq_Knowledge_Source_Model::UPLOAD_DIR.$stored,(string)$_FILES['file']['name']);
+						$parsed=json_decode($result['raw'],true);
+						if (!is_array($parsed) || !isset($parsed['text']) || !is_string($parsed['text']) || trim($parsed['text'])==='') { throw new Exception('Could not extract readable policy wording from this PDF.'); }
+						$row['Title']=mb_substr(is_string($parsed['title']??null)?$parsed['title']:pathinfo($_FILES['file']['name'],PATHINFO_FILENAME),0,255);
+						$row['Excerpt']=mb_strcut($parsed['text'],0,60000,'UTF-8'); $row['ExtractedText']=$parsed['text']; $row['StoredName']=$stored;
+						$draft['entries']=array($row);
+					} elseif ($type==='csv') {
+						$stored=$this->Receive_Knowledge_Csv(); $draft['stored']=$stored;
+						$csv=$this->faqsourceimport->CSV(FCPATH.Faq_Knowledge_Source_Model::UPLOAD_DIR.$stored);
+						$records=faq_source_ai_csv_records($csv);
+						$draft['entries']=$this->Extract_Imported_Knowledge('csv',(string)($_FILES['file']['name']??$stored),$records,$data['products'],array('stored'=>$stored));
+					} elseif ($type==='url') {
+						$read=$this->faqsourceimport->Read_URL($this->input->post('source_url'));
+						$draft['entries']=$this->Extract_Imported_Knowledge('url',$read['title'],array('U1'=>$read['text']),$data['products'],array('url'=>$read['url'],'retrieved'=>date('Y-m-d H:i:s')));
+					} else {
+						$title=$this->input->post('title'); $text=$this->input->post('content');
+						if (!is_string($title) || trim($title)==='' || !is_string($text) || trim($text)==='' || strlen($text)>60000) { throw new Exception('Enter a title and content of at most 60,000 bytes.'); }
+						$row['Title']=$title; $row['Excerpt']=$text; $row['ExtractedText']=$text; $draft['entries']=array($row);
+					}
+					$token=bin2hex(random_bytes(16)); $imports[$token]=$draft;
+					while (count($imports)>3) { array_shift($imports); }
+					$this->session->set_userdata('faq_source_imports',$imports);
+					$data['draft_id']=$token; $data['draft']=$draft; $data['step']='review';
+				} elseif ($stage==='save') {
+					$token=$this->input->post('draft_id');
+					if (!is_string($token) || !isset($imports[$token]) || $imports[$token]['type']!==$type) { throw new Exception('Import preview expired. Start the import again.'); }
+					$draft=$imports[$token]; $data['draft_id']=$token; $data['draft']=$draft; $data['step']='review';
+					$entries=$this->input->post('entries'); $selected=$this->input->post('selected_entries');
+					$data['selected_entries']=array();
+					if (!is_array($selected) || !$selected) { throw new Exception('Select at least one useful source to save.'); }
+					foreach ($selected as $index) {
+						if (!is_string($index) || !ctype_digit($index) || !array_key_exists((int)$index,$draft['entries']) || in_array((int)$index,$data['selected_entries'],true)) { throw new Exception('Invalid source selection.'); }
+						$data['selected_entries'][]=(int)$index;
+					}
+					if (!is_array($entries)) { throw new Exception('Review the selected source entries.'); }
+					$rows=array();
+					foreach ($draft['entries'] as $i=>$original) {
+						if (!in_array($i,$data['selected_entries'],true)) { continue; }
+						$posted=$entries[$i]??null; if (!is_array($posted)) { throw new Exception('Invalid imported entry.'); }
+						foreach (array('Title','Excerpt','ProductID','ResortName','RoomType','Topic','ValidFrom','ValidTo','ReviewDue') as $field) {
+							if (!isset($posted[$field]) || !is_string($posted[$field])) { throw new Exception('Missing source field: '.$field); }
+							$original[$field]=$posted[$field];
+						}
+						$original['AppliesToAllRooms']=isset($posted['AppliesToAllRooms'])&&$posted['AppliesToAllRooms']==='1'?1:0;
+						$data['draft']['entries'][$i]=$original;
+						$rows[]=$original;
+					}
+					$count=$this->Faq_Knowledge_Source_Model->Create_Import(faq_source_unique_entries($rows));
+					unset($imports[$token]); $this->session->set_userdata('faq_source_imports',$imports);
+					$this->session->set_flashdata('faq_success',$count.' knowledge source(s) saved as Approved and available for AI evaluation.');
+					redirect(base_url('Faq?section=sources')); return;
+				} else { throw new Exception('Invalid import step.'); }
+			} catch(Exception $e) { $data['error']=$e->getMessage(); }
+		}
+		$this->load->view('layout/header',array('tab_title'=>'Knowledge Source | Add Source','breadcrumb_title'=>'Knowledge Source >> Add Source'));
+		$this->load->view('faq_suggestion/source_wizard',$data); $this->load->view('layout/footer');
+	}
+
+	private function Extract_Imported_Knowledge($type, $title, $records, $products, $metadata)
+	{
+		$metadata['title']=$title;
+		// Validate the size before starting a paid request.
+		faq_source_ai_build_prompt($type,$title,$records,$products);
+		$this->load->library('FaqSuggestionService');
+		$result=$this->faqsuggestionservice->extract_knowledge_text($type,$title,$records,$products);
+		return faq_source_ai_parse_entries($result['raw'],$type,$records,$products,$metadata);
+	}
+
+	function Source_Detail()
+	{
+		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
+		$s=$this->Faq_Knowledge_Source_Model->Read((int)$this->input->get('id')); if (!$s) { show_404(); return; }
+		$this->load->view('layout/header',array('tab_title'=>'Knowledge Source | Edit','breadcrumb_title'=>'Knowledge Source >> Edit'));
+		$this->load->view('faq_suggestion/source_detail',array('source'=>$s,'products'=>$this->Faq_Workspace_Model->Products(),'return_query'=>$this->Source_List_Query())); $this->load->view('layout/footer');
+	}
+
+	function Review_Source()
+	{
+		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
+		if (!$this->Require_Workspace_Post()) { return; }
+		try {
+			$id=$this->input->post('source_id'); $state=$this->input->post('state');
+			if (!is_string($id) || !preg_match('/^[1-9][0-9]*$/D',$id) || !is_string($state)) { throw new Exception('Invalid source update.'); }
+			$this->Faq_Knowledge_Source_Model->Review((int)$id,$state,$this->Source_Post());
+			$this->session->set_flashdata('faq_success','Source updated. Suggestions using this source have been checked.');
+		} catch (Exception $e) { $this->session->set_flashdata('faq_error',$e->getMessage()); }
+		redirect(base_url('Faq_Suggestion/Source_Detail').'?'.http_build_query(array('id'=>(int)$this->input->post('source_id'))+$this->Source_List_Query(true)));
+	}
+
+	function Delete_Source()
+	{
+		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
+		if (!$this->Require_Workspace_Post()) { return; }
+		try {
+			$id=$this->input->post('source_id');
+			if (!is_string($id) || !preg_match('/^[1-9][0-9]*$/D',$id)) { throw new Exception('Invalid source ID.'); }
+			$this->Faq_Knowledge_Source_Model->Delete((int)$id);
+			$this->session->set_flashdata('faq_success','Source deleted. Suggestions using this source have been checked.');
+		} catch (Exception $e) { $this->session->set_flashdata('faq_error',$e->getMessage()); }
+		redirect(base_url('Faq').'?'.http_build_query($this->Source_List_Query(true)));
+	}
+
+	private function Source_List_Query($post=false)
+	{
+		$method=$post?'post':'get';
+		$batch=filter_var($this->input->$method('batch_id'),FILTER_VALIDATE_INT,array('options'=>array('min_range'=>0,'max_range'=>4294967295)));
+		$page=$this->input->$method('page'); $page=is_scalar($page)?max(1,(int)$page):1;
+		return array('section'=>'sources','batch_id'=>$batch===false?0:$batch,'page'=>$page,'page_size'=>faq_workspace_page_size($this->input->$method('page_size')),'search'=>faq_workspace_search($this->input->$method('search')));
+	}
+
+	private function Source_Post()
+	{
+		$data=array();
+		foreach (array('SourceType'=>'source_type','Title'=>'title','SourceUrl'=>'source_url','Excerpt'=>'excerpt','ProductID'=>'product_id','ResortName'=>'resort_name','RoomType'=>'room_type','Topic'=>'topic','ValidFrom'=>'valid_from','ValidTo'=>'valid_to','ReviewDue'=>'review_due','AppliesToAllRooms'=>'all_rooms') as $key=>$field) { $data[$key]=$this->input->post($field); }
+		return $data;
+	}
+
+	function Source_File()
+	{
+		if (!$this->Can_View() && !$this->Can_Manage_Sources()) { show_error('FAQ access required.',403); return; }
+		$s=$this->Faq_Knowledge_Source_Model->Read((int)$this->input->get('id'));
+		if (!$s || (!$this->Can_Manage_Sources() && $s->Status!=='approved') || !$s->StoredName || !preg_match('/^[a-zA-Z0-9_-]+\.(pdf|csv)$/D',$s->StoredName)) { show_404(); return; }
+		$path=FCPATH.Faq_Knowledge_Source_Model::UPLOAD_DIR.$s->StoredName;
+		if (!is_file($path)) { show_404(); return; }
+		$pdf=pathinfo($s->StoredName,PATHINFO_EXTENSION)==='pdf';
+		$this->output->set_content_type($pdf?'application/pdf':'text/csv')->set_header('X-Content-Type-Options: nosniff')
+			->set_header('Content-Disposition: '.($pdf?'inline; filename="source.pdf"':'attachment; filename="source.csv"'))->set_output(file_get_contents($path));
+	}
+
+	// Keep existing links working; Update is the combined editing and review screen.
+	function Candidate()
+	{
+		if (!$this->Can_View() && !$this->Can_Edit()) { show_error('FAQ view access required.',403); return; }
+		redirect(base_url('Faq_Suggestion/Update?id=').(int)$this->input->get('id'));
+	}
+
+	private function Selected_Ids()
+	{
+		$raw=$this->input->post('suggestion_ids');
+		if (!is_array($raw) || !$raw || count($raw)>100) { throw new Exception('Select between 1 and 100 suggestions.'); }
+		$ids=array();
+		foreach ($raw as $id) {
+			if ((!is_int($id) && !is_string($id)) || !preg_match('/^[1-9][0-9]*$/D',(string)$id)) { throw new Exception('Invalid suggestion selection.'); }
+			$ids[(int)$id]=(int)$id;
+		}
+		return array_values($ids);
+	}
+
+	function Bulk_Action()
+	{
+		if (!$this->Can_Edit()) { show_error('FAQ edit access required.',403); return; }
+		if (!$this->Require_Workspace_Post()) { return; }
+		try {
+			$ids=$this->Selected_Ids(); $action=$this->input->post('action');
+			if (!is_string($action) || !in_array($action,array('approve','reject','delete','reevaluate'),true)) { throw new Exception('Select a valid action.'); }
+			if ($action==='reevaluate') {
+				if (count($ids)>10) { throw new Exception('Re-evaluate up to 10 suggestions at a time.'); }
+				$selected=array();
+				foreach ($ids as $id) {
+					$s=$this->Faq_Suggestion_Model->Read($id);
+					if (!$s || in_array($s->State,array('accepted','dismissed'),true)) { throw new Exception('Select active pending suggestions for re-evaluation.'); }
+					$selected[]=$s;
+				}
+				$this->Show_Reevaluation($selected); return;
+			}
+			$done=0; $errors=array();
+			foreach ($ids as $id) {
+				try {
+					$s=$this->Faq_Suggestion_Model->Read($id); if (!$s) { throw new Exception('Suggestion not found.'); }
+					if ($action==='approve') { $this->Faq_Workspace_Model->Publish($id); }
+					elseif ($action==='reject') { $this->Faq_Workspace_Model->Dismiss_Candidate($id); }
+					elseif ($action==='delete') { $this->Faq_Suggestion_Model->Delete($id); }
+					$done++;
+				} catch (Exception $e) { $errors[]='#'.$id.': '.$e->getMessage(); }
+			}
+			if ($done) { $this->session->set_flashdata('faq_success',$done.' suggestion(s) updated.'); }
+			if ($errors) { $this->session->set_flashdata('faq_error',implode(' ',$errors)); }
+		} catch (Exception $e) { $this->session->set_flashdata('faq_error',$e->getMessage()); }
+		redirect(base_url('Faq?section=suggestions'));
+	}
+
+	function Reevaluate()
+	{
+		if (!$this->Can_Edit()) { show_error('FAQ edit access required.',403); return; }
+		if (!$this->Require_Workspace_Post()) { return; }
+		try {
+			$ids=$this->Selected_Ids(); if (count($ids)>10) { throw new Exception('Re-evaluate up to 10 suggestions at a time.'); }
+			$details=$this->input->post('details'); if (!is_array($details)) { throw new Exception('Provide additional information for the selected suggestions.'); }
+			$done=0; $errors=array(); $requests=array();
+			@set_time_limit(600);
+			foreach ($ids as $id) {
+				try {
+					$d=isset($details[$id])?$details[$id]:null;
+					if (!is_array($d) || !isset($d['version'],$d['additional']) || !is_string($d['version']) || !is_string($d['additional'])) { throw new Exception('Invalid additional information.'); }
+					$s=$this->Faq_Suggestion_Model->Read($id); if (!$s) { throw new Exception('Suggestion not found.'); }
+					if (!hash_equals(faq_workspace_review_version($s),$d['version'])) { throw new Exception('Suggestion changed; reload before re-evaluating.'); }
+					$requests[]=array('id'=>$id,'additional'=>$d['additional'],'include_more'=>isset($d['more_messages'])&&$d['more_messages']==='1','version'=>$d['version']);
+				} catch (Exception $e) { $errors[]='#'.$id.': '.$e->getMessage(); }
+			}
+			if ($requests) { $result=$this->Faq_Workspace_Model->Reevaluate_Batch($requests); $done=$result['done']; $errors=array_merge($errors,$result['errors']); }
+			if ($done) { $this->session->set_flashdata('faq_success',$done.' suggestion(s) re-evaluated. Review the updated answers before approval.'); }
+			if ($errors) { $this->session->set_flashdata('faq_error',implode(' ',$errors)); }
+		} catch (Exception $e) { $this->session->set_flashdata('faq_error',$e->getMessage()); }
+		redirect(isset($ids)&&count($ids)===1?base_url('Faq_Suggestion/Update?id=').$ids[0]:base_url('Faq?section=suggestions'));
+	}
+
+	private function Show_Reevaluation($suggestions)
+	{
+		$previews=array(); foreach ($suggestions as $s) { $previews[(int)$s->SuggestionID]=$this->Faq_Workspace_Model->Knowledge_For_Candidate($s->SuggestionID,'',true)['selection']; }
+		$this->load->view('layout/header',array('tab_title'=>'AI Suggestion | Re-evaluate','breadcrumb_title'=>'AI Suggestion >> Re-evaluate'));
+		$this->load->view('faq_suggestion/reevaluate',array('suggestions'=>$suggestions,'knowledge_previews'=>$previews,'can_manage_sources'=>$this->Can_Manage_Sources()));
+		$this->load->view('layout/footer');
+	}
+
+	/** Read-only preview uses the same retrieval as evaluation, including unsaved questions. */
+	function Knowledge_Preview()
+	{
+		if (!$this->Can_View() && !$this->Can_Edit()) { show_error('FAQ view access required.',403); return; }
+		if (!$this->Require_Workspace_Post()) { return; }
+		$this->output->set_content_type('application/json');
+		try {
+			$id=$this->input->post('suggestion_id'); $additional=$this->input->post('additional')??'';
+			if (!is_string($id) || !ctype_digit($id) || (int)$id<1) { throw new Exception('Invalid suggestion.'); }
+			$edited=null; $title=$this->input->post('title'); $questions=$this->input->post('questions');
+			if ($title!==null || $questions!==null) {
+				if (!is_string($title) || strlen($title)>1024 || !is_array($questions) || count($questions)>50) { throw new Exception('Invalid question preview.'); }
+				$items=array(); foreach ($questions as $q) { if (!is_string($q) || strlen($q)>4000) { throw new Exception('Invalid question preview.'); } $items[]=array('q'=>$q); }
+				$edited=array('title'=>$title,'items'=>$items);
+			}
+			$knowledge=$this->Faq_Workspace_Model->Knowledge_For_Candidate((int)$id,$additional,$this->input->post('more_messages')==='1',$edited);
+			echo json_encode(array('ok'=>true,'selection'=>$knowledge['selection'],'can_manage_sources'=>$this->Can_Manage_Sources()),JSON_UNESCAPED_UNICODE);
+		} catch (Exception $e) { echo json_encode(array('ok'=>false,'error'=>$e->getMessage()),JSON_UNESCAPED_UNICODE); }
 	}
 
 	// Ajax: return the exact text sent to the AI for one run (the transcript),
@@ -104,50 +384,48 @@ class Faq_Suggestion extends MY_Controller
 
 	function Update()
 	{
-		if (!$this->Can_Edit()) {
-			redirect(base_url('Faq_Suggestion'));
-			return;
-		}
-		$id = (int) $this->input->get('id');
-
+		if (!$this->Can_View() && !$this->Can_Edit()) { show_error('FAQ view access required.',403); return; }
+		$id=(int)$this->input->get('id');
 		if ($this->input->post()) {
-			$post_id = (int) $this->input->post('suggestion_id');
-			if (!$this->Universal_Model->Validate_Id('SuggestionID', $post_id, 'faq_suggestions')) {
-				redirect(base_url('Faq_Suggestion'));
-				return;
-			}
-			$error = $this->Save_From_Post($post_id);
-			if ($error !== true) {
-				$this->session->set_flashdata('faq_error', $error);
-				redirect(base_url('Faq_Suggestion/Update?id=') . $post_id);
-				return;
-			}
-			$this->session->set_flashdata('faq_success', 'Suggestion updated.');
-			redirect($this->Run_Url($post_id));
-			return;
+			if (!$this->Can_Edit()) { show_error('FAQ edit access required.',403); return; }
+			if (!$this->Require_Workspace_Post()) { return; }
+			$post_id=(int)$this->input->post('suggestion_id');
+			$suggestion=$this->Faq_Suggestion_Model->Read($post_id);
+			if (!$suggestion) { show_404(); return; }
+			$action=$this->input->post('review_action'); $action=$action===null?'save':$action;
+			try {
+				if (!is_string($action) || !in_array($action,array('save','approve','reevaluate'),true)) { throw new Exception('Choose a valid update action.'); }
+				$completed=in_array($suggestion->State,array('accepted','dismissed'),true);
+				if ($completed && $action!=='approve') { throw new Exception('This suggestion is completed and cannot be edited.'); }
+				$expected=$this->input->post('expected_version');
+				if ($expected!==null && (!is_string($expected) || !hash_equals(faq_workspace_review_version($suggestion),$expected))) { throw new Exception('Suggestion changed; reload before saving.'); }
+				if (!$completed) { $error=$this->Save_From_Post($post_id); if ($error!==true) { throw new Exception($error); } }
+				if ($action==='approve') {
+					$this->Faq_Workspace_Model->Publish($post_id);
+					$this->session->set_flashdata('faq_success',$completed?'Suggestion approved into the FAQ Library.':'Suggestion saved and approved into the FAQ Library.');
+				} elseif ($action==='reevaluate') {
+					$this->Show_Reevaluation(array($this->Faq_Suggestion_Model->Read($post_id))); return;
+				} else { $this->session->set_flashdata('faq_success','Suggestion updated.'); }
+			} catch (Exception $e) { $this->session->set_flashdata('faq_error',$e->getMessage()); }
+			redirect(base_url('Faq_Suggestion/Update?id=').$post_id); return;
 		}
 
-		$suggestion = $this->Faq_Suggestion_Model->Read($id);
-		if ($suggestion === null) {
-			redirect(base_url('Faq_Suggestion'));
-			return;
+		$suggestion=$this->Faq_Suggestion_Model->Read($id);
+		if (!$suggestion) { show_404(); return; }
+		if (!in_array($suggestion->State,array('accepted','dismissed'),true)) {
+			$this->Faq_Workspace_Model->Refresh($id); $suggestion=$this->Faq_Suggestion_Model->Read($id);
 		}
-
-		$titles = array('tab_title' => 'HolidayGoGoGo | FAQ AI Suggestion', 'breadcrumb_title' => 'FAQ AI Suggestion >> Edit');
-		$data['suggestion'] = $suggestion;
-		$data['run_url']    = $this->Run_Url($id);
-		$data['evidence']   = $this->Faq_Suggestion_Model->Read_Evidence($id);
-		$data['run']        = !empty($suggestion->RunID) ? $this->Faq_Suggestion_Model->Read_Run((int) $suggestion->RunID) : null;
-		$data['items']      = Faq_Model::Decode_Items($suggestion->Description);
-		$data['tags']       = $this->Faq_Tag_Model->Read_Active();
-		$data['destinations'] = $this->Faq_Model->Read_Destinations();
-		// Existing FAQ titles for the Title picker: accepting under an existing title
-		// folds this suggestion into that FAQ instead of creating a duplicate.
-		$data['faq_titles'] = $this->Faq_Model->Read_Titles();
-		$data['selected_destination_ids'] = Faq_Suggestion_Model::Parse_Id_Csv($suggestion->DestinationIds);
-		$this->load->view('layout/header', $titles);
-		$this->load->view('faq_suggestion/form', $data);
-		$this->load->view('layout/footer');
+		$data=array('suggestion'=>$suggestion,'can_edit'=>$this->Can_Edit(),'can_manage_sources'=>$this->Can_Manage_Sources(),
+			'run_url'=>base_url('Faq?section=suggestions'),'evidence'=>$this->Faq_Suggestion_Model->Read_Evidence($id),
+			'run'=>!empty($suggestion->RunID)?$this->Faq_Suggestion_Model->Read_Run((int)$suggestion->RunID):null,
+			'items'=>Faq_Model::Decode_Items($suggestion->Description),'tags'=>$this->Faq_Tag_Model->Read_Active(),
+			'destinations'=>$this->Faq_Model->Read_Destinations(),'faq_titles'=>$this->Faq_Model->Read_Titles(),
+			'selected_destination_ids'=>Faq_Suggestion_Model::Parse_Id_Csv($suggestion->DestinationIds),
+			'audit'=>$this->Faq_Workspace_Model->Read_Review_History($id),
+			'knowledge_preview'=>$this->Faq_Workspace_Model->Knowledge_For_Candidate($id)['selection'],
+			'knowledge_last'=>$this->Faq_Workspace_Model->Last_Knowledge_Selection($id));
+		$this->load->view('layout/header',array('tab_title'=>'HolidayGoGoGo | Update FAQ Suggestion','breadcrumb_title'=>'FAQ AI Suggestion >> Update'));
+		$this->load->view('faq_suggestion/form',$data); $this->load->view('layout/footer');
 	}
 
 	// Promote a suggestion to a real FAQ. If its (possibly edited) Title matches an
@@ -161,68 +439,13 @@ class Faq_Suggestion extends MY_Controller
 			redirect(base_url('Faq_Suggestion'));
 			return;
 		}
-		$id = (int) $this->input->get('id');
-		$suggestion = $this->Faq_Suggestion_Model->Read($id);
-		if ($suggestion === null) {
-			redirect(base_url('Faq_Suggestion'));
-			return;
-		}
-		$back = $this->Run_Url($suggestion);
-		if ($suggestion->State === 'accepted') {
-			$this->session->set_flashdata('faq_error', 'This suggestion has already been accepted.');
-			redirect($back);
-			return;
-		}
-
-		$title = trim((string) $suggestion->Title);
-		if ($title === '' || trim((string) $suggestion->Description) === '') {
-			$this->session->set_flashdata('faq_error', 'This suggestion has no title or questions to accept. Edit it first.');
-			redirect(base_url('Faq_Suggestion/Update?id=') . $id);
-			return;
-		}
-
-		$sugg_dest_ids = Faq_Suggestion_Model::Parse_Id_Csv($suggestion->DestinationIds);
-
-		// If a FAQ already exists under this title, fold the suggestion's sub-Q&As
-		// into it rather than creating a duplicate (the Title picker's existing-title
-		// options exist for exactly this).
-		$existing = $this->Faq_Model->Read_By_Title($title);
-		if ($existing !== null) {
-			$merged_items = array_merge(
-				Faq_Model::Decode_Items((string) $existing->Description),
-				Faq_Model::Decode_Items((string) $suggestion->Description)
-			);
-			$this->Faq_Model->Update((int) $existing->FAQID, array(
-				'Title'       => (string) $existing->Title,
-				'Slug'        => (string) $existing->Slug,
-				'Description' => Faq_Model::Encode_Items($merged_items),
-				'Type'        => (string) $existing->Type,
-			));
-			// Union the destinations so the merged FAQ keeps both sets.
-			$union = array_values(array_unique(array_merge(
-				array_map('intval', $this->Faq_Model->Read_Destination_Ids((int) $existing->FAQID)),
-				array_map('intval', $sugg_dest_ids)
-			)));
-			$this->Faq_Model->Sync_Destinations((int) $existing->FAQID, $union);
-			$this->Faq_Suggestion_Model->Set_State($id, 'accepted', (int) $existing->FAQID);
-
-			$this->session->set_flashdata('faq_success', 'Suggestion added to the existing FAQ "' . $title . '".');
-			redirect($back);
-			return;
-		}
-
-		// No FAQ with this title yet — create a new one. The suggestion's Description
-		// is already stored in the FAQ JSON format; AI-suggested FAQs are 'external'.
-		$faq_id = $this->Faq_Model->Create(array(
-			'Title'       => $title,
-			'Slug'        => $this->Faq_Model->Generate_Slug($title, 0),
-			'Description' => (string) $suggestion->Description,
-			'Type'        => 'external',
-		));
-		$this->Faq_Model->Sync_Destinations($faq_id, $sugg_dest_ids);
-		$this->Faq_Suggestion_Model->Set_State($id, 'accepted', $faq_id);
-
-		$this->session->set_flashdata('faq_success', 'FAQ created from suggestion.');
+		if (!$this->Require_Workspace_Post()) { return; }
+		$id=(int)$this->input->post('suggestion_id');
+		$suggestion=$this->Faq_Suggestion_Model->Read($id);
+		$run_id=(int)$this->input->post('run_id');
+		$back=$suggestion && $run_id>0 && $run_id===(int)$suggestion->RunID?base_url('Faq_Suggestion/View?id=').$run_id:base_url('Faq_Suggestion/Update?id=').$id;
+		try { $this->Faq_Workspace_Model->Publish($id); $this->session->set_flashdata('faq_success','Suggestion approved into the FAQ Library.'); }
+		catch (Exception $e) { $this->session->set_flashdata('faq_error',$e->getMessage()); }
 		redirect($back);
 	}
 
@@ -232,30 +455,15 @@ class Faq_Suggestion extends MY_Controller
 			redirect(base_url('Faq_Suggestion'));
 			return;
 		}
-		$id = (int) $this->input->get('id');
+		if (!$this->Require_Workspace_Post()) { return; }
+		$id = (int) $this->input->post('suggestion_id');
 		$suggestion = $this->Faq_Suggestion_Model->Read($id);
-		$back = ($suggestion !== null) ? $this->Run_Url($suggestion) : base_url('Faq_Suggestion');
+		$back = base_url('Faq_Suggestion/Update?id=').$id;
 		if ($suggestion !== null) {
-			$this->Faq_Suggestion_Model->Set_State($id, 'dismissed');
-			$this->session->set_flashdata('faq_success', 'Suggestion dismissed.');
+			try { $this->Faq_Workspace_Model->Dismiss_Candidate($id); $this->session->set_flashdata('faq_success', 'Suggestion dismissed.'); }
+			catch (Exception $e) { $this->session->set_flashdata('faq_error',$e->getMessage()); }
 		}
 		redirect($back);
-	}
-
-	/**
-	 * The run-detail URL a per-suggestion action returns to. Accepts a suggestion
-	 * id (int, looked up) or a suggestion row; falls back to the runs listing
-	 * when the suggestion has no run (legacy rows).
-	 */
-	private function Run_Url($suggestion)
-	{
-		if (!is_object($suggestion)) {
-			$suggestion = $this->Faq_Suggestion_Model->Read((int) $suggestion);
-		}
-		$run_id = ($suggestion !== null && isset($suggestion->RunID)) ? (int) $suggestion->RunID : 0;
-		return $run_id > 0
-			? base_url('Faq_Suggestion/View?id=') . $run_id
-			: base_url('Faq_Suggestion');
 	}
 
 	// Soft-delete, wired to the shared Delete_Record() ajax helper (GET ?id=).
@@ -264,30 +472,36 @@ class Faq_Suggestion extends MY_Controller
 		if (!$this->Can_Edit()) {
 			return;
 		}
-		$id = (int) $this->input->get('id');
-		if ($this->Faq_Suggestion_Model->Read($id) !== null) {
+		if (!$this->Require_Workspace_Post()) { return; }
+		$id = (int) $this->input->post('id');
+		$suggestion=$this->Faq_Suggestion_Model->Read($id);
+		$run_id=(int)$this->input->post('run_id');
+		$back=$suggestion && $run_id>0 && $run_id===(int)$suggestion->RunID?base_url('Faq_Suggestion/View?id=').$run_id:base_url('Faq_Suggestion');
+		if ($suggestion !== null) {
 			$this->Faq_Suggestion_Model->Delete($id);
 		}
+		redirect($back);
 	}
 
-	// Manual "Generate" — runs the AI mining synchronously over the reviewer's
+	// Manual "Generate" — queues AI mining over the reviewer's
 	// chosen date range, optionally scoped to a single mobile number.
 	function Generate()
 	{
 		if (!$this->Can_Edit()) {
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
 		if (!$this->input->post()) {
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
+		if (!$this->Require_Workspace_Post()) { return; }
 
 		$this->load->helper('faq_suggestion');
 		$range = faq_suggestion_date_range($this->input->post('start_date'), $this->input->post('end_date'));
 		if ($range['error'] !== '') {
 			$this->session->set_flashdata('faq_error', $range['error']);
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
 		$mobile = trim((string) $this->input->post('mobile'));
@@ -304,24 +518,25 @@ class Faq_Suggestion extends MY_Controller
 			$scope .= ' for ' . $mobile;
 		}
 		$this->Dispatch_Run($run_id, 'chats', $scope);
-		redirect(base_url('Faq_Suggestion'));
+		redirect(base_url('Faq_Suggestion/View?id=').$run_id);
 	}
 
 	// Manual "Generate from PDF" — upload a document and mine FAQs from it.
 	function Generate_Pdf()
 	{
 		if (!$this->Can_Edit()) {
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
 		if ($this->Post_Exceeded_Limit()) {
 			$this->Flash_Upload_Too_Large();
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
+		if (!$this->Require_Workspace_Post()) { return; }
 		if (!isset($_FILES['file']) || $_FILES['file']['error'] === UPLOAD_ERR_NO_FILE) {
 			$this->session->set_flashdata('faq_error', 'Please choose a PDF file to upload.');
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
 
@@ -329,7 +544,7 @@ class Faq_Suggestion extends MY_Controller
 			$info = $this->Receive_Pdf();
 		} catch (Exception $e) {
 			$this->session->set_flashdata('faq_error', $e->getMessage());
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
 
@@ -339,7 +554,7 @@ class Faq_Suggestion extends MY_Controller
 			'StoredName' => $info['file_name'],
 		));
 		$this->Dispatch_Run($run_id, 'pdf', $info['orig_name']);
-		redirect(base_url('Faq_Suggestion'));
+		redirect(base_url('Faq_Suggestion/View?id=').$run_id);
 	}
 
 	// Manual "Generate from Chat File" — upload a WhatsApp .txt export (or a .zip
@@ -348,17 +563,18 @@ class Faq_Suggestion extends MY_Controller
 	function Generate_Chat_File()
 	{
 		if (!$this->Can_Edit()) {
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
 		if ($this->Post_Exceeded_Limit()) {
 			$this->Flash_Upload_Too_Large();
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
+		if (!$this->Require_Workspace_Post()) { return; }
 		if (!isset($_FILES['file']) || $_FILES['file']['error'] === UPLOAD_ERR_NO_FILE) {
 			$this->session->set_flashdata('faq_error', 'Please choose a .txt or .zip chat export to upload.');
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
 
@@ -366,7 +582,7 @@ class Faq_Suggestion extends MY_Controller
 			$info = $this->Receive_Chat_File();
 		} catch (Exception $e) {
 			$this->session->set_flashdata('faq_error', $e->getMessage());
-			redirect(base_url('Faq_Suggestion'));
+			redirect(base_url('Faq?section=suggestions'));
 			return;
 		}
 
@@ -376,7 +592,7 @@ class Faq_Suggestion extends MY_Controller
 			'StoredName' => $info['file_name'],
 		));
 		$this->Dispatch_Run($run_id, 'chatfile', $info['orig_name']);
-		redirect(base_url('Faq_Suggestion'));
+		redirect(base_url('Faq_Suggestion/View?id=').$run_id);
 	}
 
 	/**
@@ -418,10 +634,12 @@ class Faq_Suggestion extends MY_Controller
 		if (!$this->Can_Edit()) {
 			return;
 		}
-		$id = (int) $this->input->get('id');
+		if (!$this->Require_Workspace_Post()) { return; }
+		$id = (int) $this->input->post('id');
 		if ($this->Faq_Suggestion_Model->Read_Run($id) !== null) {
 			$this->Faq_Suggestion_Model->Delete_Run($id);
 		}
+		redirect(base_url('Faq?section=history'));
 	}
 
 	/**
@@ -458,7 +676,9 @@ class Faq_Suggestion extends MY_Controller
 	/** Flash a success / failure message for a completed generation run. */
 	private function Flash_Summary($summary, $source, $scope)
 	{
-		if ((int) $summary['created'] > 0) {
+		if ($summary['reason'] === 'error') {
+			$this->session->set_flashdata('faq_error', 'Generation failed: '.(!empty($summary['error']) ? $summary['error'] : 'Please open the run for details.'));
+		} elseif ((int) $summary['created'] > 0) {
 			$this->session->set_flashdata('faq_success', 'Generated ' . (int) $summary['created'] . ' new FAQ suggestion(s) from ' . $this->Source_Label($source) . ' (' . $scope . ').');
 		} elseif ($summary['reason'] === 'no_messages') {
 			$this->session->set_flashdata('faq_error', 'No usable messages found (' . $scope . ').');
@@ -473,7 +693,7 @@ class Faq_Suggestion extends MY_Controller
 	 * processed inline instead (blocks, but still completes). Flashes an
 	 * appropriate message either way.
 	 */
-	private function Dispatch_Run($run_id, $source, $scope)
+	protected function Dispatch_Run($run_id, $source, $scope)
 	{
 		$this->Prune_Logs();
 		if ($this->Spawn_Worker($run_id)) {
@@ -598,6 +818,7 @@ class Faq_Suggestion extends MY_Controller
 			}
 			$out[] = array(
 				'RunID'        => (int) $r->RunID,
+				'Source'       => (string) $r->Source,
 				'RunState'     => $state,
 				'Source'       => strtolower((string) $r->Source),
 				'FileName'     => (string) $r->FileName,
@@ -636,10 +857,31 @@ class Faq_Suggestion extends MY_Controller
 		return $this->upload->data();
 	}
 
+	private function Receive_Knowledge_Pdf()
+	{
+		$dir = FCPATH . Faq_Knowledge_Source_Model::UPLOAD_DIR; if (!is_dir($dir)) { @mkdir($dir,0755,true); }
+		$config=array('upload_path'=>$dir,'allowed_types'=>'pdf','max_size'=>20480,'encrypt_name'=>true); $this->load->library('upload',$config); $this->upload->initialize($config);
+		if(!$this->upload->do_upload('file')) { throw new Exception(trim(strip_tags($this->upload->display_errors('',' ')))); }
+		return $this->upload->data('file_name');
+	}
+
+	private function Receive_Knowledge_Csv()
+	{
+		$dir=FCPATH.Faq_Knowledge_Source_Model::UPLOAD_DIR; if (!is_dir($dir)) { @mkdir($dir,0755,true); }
+		$config=array('upload_path'=>$dir,'allowed_types'=>'csv','max_size'=>2048,'encrypt_name'=>true);
+		$this->load->library('upload',$config); $this->upload->initialize($config);
+		if (!$this->upload->do_upload('file')) { throw new Exception(trim(strip_tags($this->upload->display_errors('',' ')))); }
+		return $this->upload->data('file_name');
+	}
+
 	// Returns true on success, or an error message string on failure. Reuses the
 	// FAQ item builder (tags + reference links, no per-item audit trail).
 	private function Save_From_Post($id)
 	{
+		$review_status=$this->input->post('ReviewStatus');
+		if ($review_status!==null && (!is_string($review_status) || !in_array($review_status,array('draft_ready','need_context'),true))) {
+			return 'Choose Pending Approval or Needs Information.';
+		}
 		$title = trim((string) $this->input->post('Title'));
 		if ($title === '') {
 			return 'Failed to save. Title is required.';
@@ -656,21 +898,21 @@ class Faq_Suggestion extends MY_Controller
 			$this->input->post('sub_questions'),
 			$this->input->post('sub_answers'),
 			null, '', '',
-			$sub_tags, $link_labels, $link_urls
+			$sub_tags, $link_labels, $link_urls, true
 		);
 		if ($built['error'] !== null) {
 			return $built['error'];
 		}
 		if (empty($built['items'])) {
-			return 'Add at least one sub-question and answer.';
+			return 'Add at least one sub-question.';
 		}
 
 		$destination_ids = Faq_Model::Normalize_Ids($this->input->post('Destinations'));
-		$this->Faq_Suggestion_Model->Update($id, array(
+		try { $this->Faq_Workspace_Model->Edit_Draft($id, array(
 			'Title'          => $title,
 			'Description'    => Faq_Model::Encode_Items($built['items']),
 			'DestinationIds' => implode(',', $destination_ids),
-		));
+		), $review_status); } catch (Exception $e) { return $e->getMessage(); }
 		return true;
 	}
 }

@@ -17,6 +17,15 @@ class Faq extends MY_Controller
 			redirect(base_url('Dashboard'));
 			return;
 		}
+		$this->load->helper('faq_suggestion');
+		$section=$this->input->get('section');
+		if (is_string($section) && in_array($section,array('suggestions','workspace','history','sources'),true)) {
+			$this->load->library('FaqWorkspacePages');
+			if ($section==='workspace' || $section==='suggestions') { $this->faqworkspacepages->Workspace(); }
+			elseif ($section==='history') { $this->faqworkspacepages->History(); }
+			else { $this->faqworkspacepages->Sources(); }
+			return;
+		}
 
 		// Self-healing backfill: stamp a slug onto any FAQ created before the
 		// per-FAQ page existed, so every listed row has a working page link.
