@@ -95,6 +95,90 @@ if (!function_exists('costing_quote_hotel_title_presets')) {
     }
 }
 
+if (!function_exists('costing_quote_hotel_title_label_options')) {
+    /**
+     * Choices for the first ("row header") column title of the hotel pricing table
+     * (5 Oct 2026 feedback): a package can label that column either "Hotel" or
+     * "Room Type", depending on how the quotation is being sold.
+     *
+     * @return string[]
+     */
+    function costing_quote_hotel_title_label_options()
+    {
+        return array('Hotel', 'Room Type');
+    }
+}
+
+if (!function_exists('costing_quote_normalize_hotel_title_label')) {
+    /**
+     * Normalise the first-column title choice to one of the known options,
+     * defaulting to "Hotel" for blank / unknown / legacy values.
+     *
+     * @param mixed $value
+     * @return string
+     */
+    function costing_quote_normalize_hotel_title_label($value)
+    {
+        $value = trim((string) $value);
+        $options = costing_quote_hotel_title_label_options();
+        foreach ($options as $option) {
+            if (strcasecmp($value, $option) === 0) {
+                return $option;
+            }
+        }
+        return $options[0];
+    }
+}
+
+if (!function_exists('costing_quote_single_supp_enabled')) {
+    /**
+     * Whether the Single Supplement column is shown on the hotel pricing table
+     * (5 Oct 2026 feedback: it can be added on or removed). Defaults to ENABLED so
+     * legacy packages (NULL / missing column) keep showing it; only an explicit
+     * "0" / "false" turns it off.
+     *
+     * @param mixed $value
+     * @return bool
+     */
+    function costing_quote_single_supp_enabled($value)
+    {
+        $value = strtolower(trim((string) $value));
+        return $value !== '0' && $value !== 'false';
+    }
+}
+
+if (!function_exists('costing_quote_hotel_rows_have_single_supp')) {
+    /**
+     * Whether ANY hotel row actually carries a single-supplement value. The PDF
+     * uses this to auto-collapse the Single Supp column when no hotel provided a
+     * price (5 Oct 2026 feedback: some hotels don't give single supp, so a column
+     * full of dashes is dropped rather than shown). A row's single supp is read
+     * from the normalised 'single' key or the raw 'single_supp_price' field;
+     * blank / null / '-' all count as "no value".
+     *
+     * @param array $rows list of hotel rows (normalised {single:?float} or raw)
+     * @return bool
+     */
+    function costing_quote_hotel_rows_have_single_supp($rows)
+    {
+        if (!is_array($rows)) {
+            return false;
+        }
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $value = array_key_exists('single', $row)
+                ? $row['single']
+                : (isset($row['single_supp_price']) ? $row['single_supp_price'] : null);
+            if (costing_quote_price_normalize($value) !== null) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
 if (!function_exists('costing_quote_hotel_columns_normalize')) {
     /**
      * Normalise the hotel pricing-column labels (a JSON string or array) into a
@@ -278,14 +362,17 @@ if (!function_exists('costing_quote_prepare_extra_level')) {
      * costing_quote_prepare_level so that helper's stable 8-field contract holds.
      *
      * @param array $post
-     * @return array {quote_flight_mode:string, quote_hotel_columns:string(JSON)}
+     * @return array {quote_flight_mode:string, quote_hotel_columns:string(JSON),
+     *                quote_hotel_title_label:string, quote_show_single_supp:int}
      */
     function costing_quote_prepare_extra_level($post)
     {
         $post = (array) $post;
         return array(
-            'quote_flight_mode'   => costing_quote_normalize_flight_mode(isset($post['quote_flight_mode']) ? $post['quote_flight_mode'] : null),
-            'quote_hotel_columns' => json_encode(costing_quote_hotel_columns_normalize(isset($post['quote_hotel_columns']) ? $post['quote_hotel_columns'] : null)),
+            'quote_flight_mode'       => costing_quote_normalize_flight_mode(isset($post['quote_flight_mode']) ? $post['quote_flight_mode'] : null),
+            'quote_hotel_columns'     => json_encode(costing_quote_hotel_columns_normalize(isset($post['quote_hotel_columns']) ? $post['quote_hotel_columns'] : null)),
+            'quote_hotel_title_label' => costing_quote_normalize_hotel_title_label(isset($post['quote_hotel_title_label']) ? $post['quote_hotel_title_label'] : null),
+            'quote_show_single_supp'  => costing_quote_single_supp_enabled(isset($post['quote_show_single_supp']) ? $post['quote_show_single_supp'] : null) ? 1 : 0,
         );
     }
 }
@@ -359,6 +446,13 @@ if (!function_exists('costing_quote_prepare_level')) {
                 continue;
             }
             $val = trim((string) (isset($post[$column]) ? $post[$column] : ''));
+            if ($column === 'quote_footer_notes') {
+                // Preserve a deliberately cleared footer as '' (not NULL) so the
+                // quote renders no footer; NULL stays reserved for "never saved"
+                // → default boilerplate (see costing_quote_footer_note_lines()).
+                $out[$column] = $val;
+                continue;
+            }
             $out[$column] = $val !== '' ? $val : null;
         }
         return $out;
@@ -388,17 +482,20 @@ if (!function_exists('costing_quote_default_footer_notes')) {
 if (!function_exists('costing_quote_footer_note_lines')) {
     /**
      * Split a stored footer-notes blob into trimmed, non-empty lines for display.
-     * Falls back to the default boilerplate when nothing is saved.
+     * NULL (never saved) falls back to the default boilerplate; a deliberately
+     * cleared footer ('') renders no lines at all.
      *
      * @param string|null $stored
      * @return string[]
      */
     function costing_quote_footer_note_lines($stored)
     {
-        $stored = trim((string) $stored);
-        if ($stored === '') {
+        // NULL = never saved → seed the standard boilerplate. '' (or whitespace)
+        // = the user cleared the footer → render no lines.
+        if ($stored === null) {
             $stored = costing_quote_default_footer_notes();
         }
+        $stored = trim((string) $stored);
         $lines = preg_split('/\r\n|\r|\n/', $stored);
         $out = array();
         foreach ($lines as $line) {

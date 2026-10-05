@@ -225,10 +225,15 @@ class Costing_Model extends CI_Model
                 'quote_flight_price'     => isset($package['quote_flight_price']) ? $package['quote_flight_price'] : '',
                 'quote_flight_fare_note' => isset($package['quote_flight_fare_note']) ? $package['quote_flight_fare_note'] : '',
                 'quote_flight_expiry'    => isset($package['quote_flight_expiry']) ? $package['quote_flight_expiry'] : '',
-                'quote_footer_notes'     => isset($package['quote_footer_notes']) ? $package['quote_footer_notes'] : '',
+                // Keep NULL distinct from '' so the editor/PDF can tell "never
+                // saved" (→ default boilerplate) from "deliberately cleared".
+                'quote_footer_notes'     => array_key_exists('quote_footer_notes', $package) ? $package['quote_footer_notes'] : null,
                 // 18 Sep 2026: flight mode (4.3) + hotel pricing columns (4.2).
                 'quote_flight_mode'      => isset($package['quote_flight_mode']) ? $package['quote_flight_mode'] : '',
                 'quote_hotel_columns'    => isset($package['quote_hotel_columns']) ? $package['quote_hotel_columns'] : '',
+                // 5 Oct 2026: first-column title (Hotel / Room Type) + Single Supp on/off.
+                'quote_hotel_title_label' => isset($package['quote_hotel_title_label']) ? $package['quote_hotel_title_label'] : '',
+                'quote_show_single_supp'  => isset($package['quote_show_single_supp']) ? $package['quote_show_single_supp'] : '',
             ),
             // 4.1: combination name + per-pax selling price, so the Hotel step can
             // auto-fill the hotel table from the Costing Template's combinations.
@@ -1195,7 +1200,7 @@ class Costing_Model extends CI_Model
         }
 
         $booking = $this->db
-            ->select('cb.*, cp.name AS package_name, cp.tour_code, cp.customer_name, cp.sales_admin_id, sales_admin.Name AS sales_admin_name, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns')
+            ->select('cb.*, cp.name AS package_name, cp.tour_code, cp.customer_name, cp.sales_admin_id, sales_admin.Name AS sales_admin_name, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns, cp.quote_hotel_title_label, cp.quote_show_single_supp')
             ->from('costing_bookings cb')
             ->join('costing_packages cp', 'cp.id = cb.package_id')
             ->join('admin sales_admin', 'sales_admin.AdminID = cp.sales_admin_id', 'left')
@@ -1278,9 +1283,13 @@ class Costing_Model extends CI_Model
                 'quote_flight_price'     => isset($booking['quote_flight_price']) ? $booking['quote_flight_price'] : null,
                 'quote_flight_fare_note' => isset($booking['quote_flight_fare_note']) ? $booking['quote_flight_fare_note'] : '',
                 'quote_flight_expiry'    => isset($booking['quote_flight_expiry']) ? $booking['quote_flight_expiry'] : '',
-                'quote_footer_notes'     => isset($booking['quote_footer_notes']) ? $booking['quote_footer_notes'] : '',
+                // Keep NULL distinct from '' so the PDF can tell "never saved"
+                // (→ default boilerplate) from "deliberately cleared" (no footer).
+                'quote_footer_notes'     => array_key_exists('quote_footer_notes', $booking) ? $booking['quote_footer_notes'] : null,
                 'quote_flight_mode'      => isset($booking['quote_flight_mode']) ? $booking['quote_flight_mode'] : '',
                 'quote_hotel_columns'    => isset($booking['quote_hotel_columns']) ? $booking['quote_hotel_columns'] : '',
+                'quote_hotel_title_label' => isset($booking['quote_hotel_title_label']) ? $booking['quote_hotel_title_label'] : '',
+                'quote_show_single_supp'  => isset($booking['quote_show_single_supp']) ? $booking['quote_show_single_supp'] : '',
             ),
             'items'         => $items,
             'combinations'  => $combo_summary['combinations'],

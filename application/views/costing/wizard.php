@@ -440,15 +440,22 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         $q_val = function ($key) use ($qm) {
             return isset($qm[$key]) && $qm[$key] !== null ? (string) $qm[$key] : '';
         };
-        // Seed the footer notes editor with the standard boilerplate when empty.
-        $footer_notes_val = trim($q_val('quote_footer_notes'));
-        if ($footer_notes_val === '') {
-            $footer_notes_val = costing_quote_default_footer_notes();
-        }
+        // Seed the editor with the standard boilerplate only for a brand-new quote
+        // (never saved → NULL). A deliberately cleared footer ('') stays empty so
+        // the user can actually remove it from the quotation.
+        $footer_notes_raw = isset($qm['quote_footer_notes']) ? $qm['quote_footer_notes'] : null;
+        $footer_notes_val = $footer_notes_raw === null
+            ? costing_quote_default_footer_notes()
+            : (string) $footer_notes_raw;
 
         // Hotel pricing columns (4.2) + flight mode (4.3), normalised.
         $hotel_columns = costing_quote_hotel_columns_normalize($q_val('quote_hotel_columns'));
         $flight_mode   = costing_quote_normalize_flight_mode($q_val('quote_flight_mode'));
+        // 5 Oct 2026: first-column title (Hotel / Room Type) + Single Supp on/off.
+        $hotel_title_label = costing_quote_normalize_hotel_title_label($q_val('quote_hotel_title_label'));
+        $show_single_supp  = costing_quote_single_supp_enabled(
+            isset($qm['quote_show_single_supp']) ? $qm['quote_show_single_supp'] : null
+        );
 
         // Hotel rows for the JS renderer (name + per-column prices + single supp).
         $hotel_state = array();
@@ -511,6 +518,28 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                         <small class="text-muted">Red note shown beside the travel date.</small>
                     </div>
                 </div>
+                <div class="row">
+                    <div class="col-md-6 mb-4">
+                        <label class="font-weight-bold mb-1">First column title</label>
+                        <select class="form-control" name="quote_hotel_title_label" id="cw-hotel-title-label">
+                            <?php foreach (costing_quote_hotel_title_label_options() as $opt) { ?>
+                                <option value="<?php echo html_escape($opt); ?>" <?php echo ($hotel_title_label === $opt) ? 'selected' : ''; ?>><?php echo html_escape($opt); ?></option>
+                            <?php } ?>
+                        </select>
+                        <small class="text-muted">Heading of the first column on the quotation (Hotel or Room Type).</small>
+                    </div>
+                    <div class="col-md-6 mb-4">
+                        <label class="font-weight-bold mb-1 d-block">Single Supplement</label>
+                        <span class="switch switch-sm">
+                            <label>
+                                <input type="hidden" name="quote_show_single_supp" value="0">
+                                <input type="checkbox" name="quote_show_single_supp" value="1" id="cw-hotel-single-toggle" <?php echo $show_single_supp ? 'checked' : ''; ?>>
+                                <span></span>
+                            </label>
+                        </span>
+                        <small class="text-muted d-block">Show the Single Supp (RM) column on the quotation.</small>
+                    </div>
+                </div>
                 <div class="d-flex flex-wrap mb-3" style="gap:8px;">
                     <button type="button" class="btn btn-sm btn-light-success font-weight-bold" id="cw-hotel-pull" data-toggle="tooltip" title="Fill hotels + prices from the Costing Template combinations"><i class="la la-download"></i>Pull from Costing</button>
                     <button type="button" class="btn btn-sm btn-light-primary font-weight-bold" id="cw-hotel-addcol"><i class="la la-columns"></i>Add Price Column</button>
@@ -562,6 +591,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             <script type="application/json" id="cw-logi-state"><?php echo json_encode(array(
                 'columns'      => $hotel_columns,
                 'hotels'       => $hotel_state,
+                'showSingleSupp' => $show_single_supp,
                 'flightMode'   => $flight_mode,
                 'options'      => $flight_option_state,
                 'comboPricing' => $combination_pricing,
@@ -1333,6 +1363,7 @@ jQuery(function () {
     S.comboPricing = S.comboPricing || [];
     S.airlines = S.airlines || {};
     S.titlePresets = S.titlePresets || [];
+    S.showSingleSupp = (S.showSingleSupp === undefined) ? true : !!S.showSingleSupp;
     S.flightMode = S.flightMode || 'fit';
     if (!S.hotels.length) { S.hotels = [blankHotel()]; }
     if (!S.options.length) { S.options = [blankOption()]; }
@@ -1367,14 +1398,19 @@ jQuery(function () {
         });
     }
 
+    var titleLabelSel = document.getElementById('cw-hotel-title-label');
+    var singleToggle = document.getElementById('cw-hotel-single-toggle');
+
     function renderHotels() {
-        var ths = '<tr><th>Hotel</th>';
+        var firstLabel = titleLabelSel ? titleLabelSel.value : 'Hotel';
+        var singleStyle = S.showSingleSupp ? '' : 'display:none;';
+        var ths = '<tr><th>' + esc(firstLabel) + '</th>';
         S.columns.forEach(function (label, c) {
             ths += '<th style="width:160px;"><input type="text" class="form-control form-control-sm cw-hcol-label" name="quote_hotel_columns[]" list="' + titleListId + '" value="' + esc(label) + '" placeholder="Column title">' +
                 (S.columns.length > 1 ? '<button type="button" class="btn btn-icon btn-sm btn-light-danger mt-1 cw-hcol-remove" data-c="' + c + '" data-toggle="tooltip" title="Remove column"><i class="la la-times"></i></button>' : '') +
                 '</th>';
         });
-        ths += '<th class="text-right" style="width:150px;">Single Supp (RM)</th><th style="width:44px;"></th></tr>';
+        ths += '<th class="text-right cw-single-col" style="width:150px;' + singleStyle + '">Single Supp (RM)</th><th style="width:44px;"></th></tr>';
         hotelThead.innerHTML = ths;
 
         hotelTbody.innerHTML = S.hotels.map(function (h, i) {
@@ -1385,7 +1421,7 @@ jQuery(function () {
             return '<tr class="cw-hotel-row">' +
                 '<td><input type="text" class="form-control cw-hotel-name" name="hotels[' + i + '][hotel_name]" value="' + esc(h.hotel_name || '') + '" placeholder="e.g. 4* Hotel or similar"></td>' +
                 priceCells +
-                '<td><input type="text" class="form-control text-right cw-hotel-single" name="hotels[' + i + '][single_supp_price]" value="' + esc(h.single_supp_price || '') + '" placeholder="0.00"></td>' +
+                '<td class="cw-single-col" style="' + singleStyle + '"><input type="text" class="form-control text-right cw-hotel-single" name="hotels[' + i + '][single_supp_price]" value="' + esc(h.single_supp_price || '') + '" placeholder="0.00"></td>' +
                 '<td class="text-center"><button type="button" class="btn btn-icon btn-light-danger btn-sm cw-hotel-remove" data-i="' + i + '" data-toggle="tooltip" title="Remove hotel"><i class="la la-trash"></i></button></td>' +
                 '</tr>';
         }).join('');
@@ -1399,6 +1435,8 @@ jQuery(function () {
         if (rmRow) { readHotels(); S.hotels.splice(+rmRow.getAttribute('data-i'), 1); if (!S.hotels.length) { S.hotels = [blankHotel()]; } renderHotels(); return; }
     });
     document.getElementById('cw-hotel-add').addEventListener('click', function () { readHotels(); S.hotels.push(blankHotel()); renderHotels(); });
+    if (titleLabelSel) { titleLabelSel.addEventListener('change', function () { readHotels(); renderHotels(); }); }
+    if (singleToggle) { singleToggle.addEventListener('change', function () { readHotels(); S.showSingleSupp = singleToggle.checked; renderHotels(); }); }
     document.getElementById('cw-hotel-addcol').addEventListener('click', function () { readHotels(); S.columns.push(''); S.hotels.forEach(function (h) { h.prices.push(''); }); renderHotels(); });
 
     // 4.1 — pull hotel names + first-column selling rate from the Costing combinations.

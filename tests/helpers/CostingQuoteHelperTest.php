@@ -87,11 +87,23 @@ $assertions['level blank null']      = $level['quote_hotel_note'] === null;
 $assertions['level no bogus key']    = !array_key_exists('bogus_field', $level);
 $assertions['level only known keys'] = (array_keys($level) === $fields);
 
+// Footer notes are special-cased: a deliberately cleared footer is persisted as
+// '' (not NULL) so the quote renders no footer. NULL stays reserved for "never
+// saved" → default boilerplate.
+$levelClearedFooter = costing_quote_prepare_level(array('quote_footer_notes' => '   '));
+$assertions['level cleared footer -> empty string'] = $levelClearedFooter['quote_footer_notes'] === '';
+$levelKeptFooter = costing_quote_prepare_level(array('quote_footer_notes' => "Custom note"));
+$assertions['level custom footer kept'] = $levelKeptFooter['quote_footer_notes'] === 'Custom note';
+
 // --- costing_quote_default_footer_notes / footer_note_lines ----------------
 $default = costing_quote_default_footer_notes();
 $assertions['default footer non-empty'] = trim($default) !== '';
-$defaultLines = costing_quote_footer_note_lines('');
-$assertions['blank footer -> default lines'] = count($defaultLines) === 5;
+// NULL (never saved) falls back to the default boilerplate...
+$defaultLines = costing_quote_footer_note_lines(null);
+$assertions['null footer -> default lines'] = count($defaultLines) === 5;
+// ...but a deliberately cleared ('') footer renders no lines at all.
+$assertions['empty footer -> no lines'] = costing_quote_footer_note_lines('') === array();
+$assertions['whitespace footer -> no lines'] = costing_quote_footer_note_lines("  \n ") === array();
 
 $customLines = costing_quote_footer_note_lines("Line one\n\n  Line two  \nLine three");
 $assertions['custom footer trims blanks'] = $customLines === array('Line one', 'Line two', 'Line three');
@@ -154,11 +166,50 @@ $optBlank = costing_quote_flight_option_prepare(array('title' => '', 'price' => 
 $assertions['opt: all blank empty'] = $optBlank['is_empty'] === true;
 $assertions['opt: blank null title'] = $optBlank['title'] === null;
 
-// --- extra level (mode + hotel columns) ------------------------------------
-$extra = costing_quote_prepare_extra_level(array('quote_flight_mode' => 'git', 'quote_hotel_columns' => array('Twin', 'Triple')));
+// --- first-column title label + single-supp toggle (5 Oct 2026) -------------
+$titleOpts = costing_quote_hotel_title_label_options();
+$assertions['title opts: hotel + room type'] = $titleOpts === array('Hotel', 'Room Type');
+$assertions['title: default hotel']   = costing_quote_normalize_hotel_title_label('') === 'Hotel';
+$assertions['title: junk -> hotel']   = costing_quote_normalize_hotel_title_label('zzz') === 'Hotel';
+$assertions['title: room type kept']  = costing_quote_normalize_hotel_title_label('Room Type') === 'Room Type';
+$assertions['title: case-insensitive'] = costing_quote_normalize_hotel_title_label('room type') === 'Room Type';
+
+$assertions['single: default on (null)']  = costing_quote_single_supp_enabled(null) === true;
+$assertions['single: default on (blank)'] = costing_quote_single_supp_enabled('') === true;
+$assertions['single: on when 1']          = costing_quote_single_supp_enabled('1') === true;
+$assertions['single: off when 0']         = costing_quote_single_supp_enabled('0') === false;
+$assertions['single: off when false']     = costing_quote_single_supp_enabled('false') === false;
+
+// --- costing_quote_hotel_rows_have_single_supp (auto-collapse when all blank) ---
+$assertions['any single: none normalised'] = costing_quote_hotel_rows_have_single_supp(array(
+    array('name' => 'A', 'single' => null),
+    array('name' => 'B', 'single' => null),
+)) === false;
+$assertions['any single: one has value']   = costing_quote_hotel_rows_have_single_supp(array(
+    array('name' => 'A', 'single' => null),
+    array('name' => 'B', 'single' => 300.0),
+)) === true;
+$assertions['any single: raw field']       = costing_quote_hotel_rows_have_single_supp(array(
+    array('single_supp_price' => 'RM 500'),
+)) === true;
+$assertions['any single: raw blank/dash']  = costing_quote_hotel_rows_have_single_supp(array(
+    array('single_supp_price' => ''),
+    array('single_supp_price' => '-'),
+)) === false;
+$assertions['any single: empty list']      = costing_quote_hotel_rows_have_single_supp(array()) === false;
+$assertions['any single: non-array']       = costing_quote_hotel_rows_have_single_supp('nope') === false;
+
+// --- extra level (mode + hotel columns + title + single supp) ---------------
+$extra = costing_quote_prepare_extra_level(array('quote_flight_mode' => 'git', 'quote_hotel_columns' => array('Twin', 'Triple'), 'quote_hotel_title_label' => 'Room Type', 'quote_show_single_supp' => '0'));
 $assertions['extra: mode normalized'] = $extra['quote_flight_mode'] === 'git';
 $assertions['extra: columns json']    = $extra['quote_hotel_columns'] === json_encode(array('Twin', 'Triple'));
-$assertions['extra: only two keys']   = (array_keys($extra) === array('quote_flight_mode', 'quote_hotel_columns'));
+$assertions['extra: title kept']      = $extra['quote_hotel_title_label'] === 'Room Type';
+$assertions['extra: single off -> 0'] = $extra['quote_show_single_supp'] === 0;
+$assertions['extra: four keys']       = (array_keys($extra) === array('quote_flight_mode', 'quote_hotel_columns', 'quote_hotel_title_label', 'quote_show_single_supp'));
+// Defaults when nothing posted: title -> Hotel, single supp -> 1 (on).
+$extraDefault = costing_quote_prepare_extra_level(array());
+$assertions['extra default: title hotel'] = $extraDefault['quote_hotel_title_label'] === 'Hotel';
+$assertions['extra default: single on -> 1'] = $extraDefault['quote_show_single_supp'] === 1;
 // Legacy level contract unchanged.
 $assertions['level still eight fields'] = count(costing_quote_level_fields()) === 8;
 

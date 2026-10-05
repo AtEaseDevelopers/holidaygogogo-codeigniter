@@ -79,6 +79,11 @@ $CustomerName   = isset($package['customer_name']) && $package['customer_name'] 
 $PricingBasis   = $qv('quote_pricing_basis');
 $TravelDateNote = $qv('quote_travel_date_note');
 $HotelNote      = $qv('quote_hotel_note');
+// 5 Oct 2026: first-column title (Hotel / Room Type) + Single Supp on/off.
+$HotelTitleLabel = costing_quote_normalize_hotel_title_label($qv('quote_hotel_title_label'));
+$ShowSingleSupp  = costing_quote_single_supp_enabled(
+    isset($qm['quote_show_single_supp']) ? $qm['quote_show_single_supp'] : null
+);
 $money2 = function ($value) {
     return 'RM ' . number_format((float) $value, 2, '.', ',');
 };
@@ -108,6 +113,9 @@ foreach ($quote_hotels as $h) {
     if ($hname === '' && $all_null) { continue; }
     $HotelRows[] = array('name' => $hname, 'prices' => $prices, 'single' => $single);
 }
+// Auto-collapse the Single Supp column when no hotel actually provided a value
+// (5 Oct 2026: some hotels don't give single supp — drop the all-dash column).
+$ShowSingleSupp = $ShowSingleSupp && costing_quote_hotel_rows_have_single_supp($HotelRows);
 
 // 4.4 Flight OPTIONS (each: title/airline + own schedule + pricing). Legacy data
 // without options falls back to a single option built from the package-level
@@ -162,10 +170,14 @@ if (empty($FlightOptions)) {
 }
 
 // The hotel/flight page is always appended to the quotation. Empty tables show a
-// "to be confirmed" placeholder row and the footer falls back to the default
-// boilerplate, so the section is a consistent part of every quotation.
+// "to be confirmed" placeholder row. The footer falls back to the default
+// boilerplate only when it was never saved (NULL); a deliberately cleared footer
+// ('') renders nothing. Pass the raw value — $qv collapses NULL to '' — so the
+// splitter can still tell the two apart.
 $ShowLogisticsPage = true;
-$FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
+$FooterLines = costing_quote_footer_note_lines(
+    array_key_exists('quote_footer_notes', $qm) ? $qm['quote_footer_notes'] : null
+);
 ?>
 <html><head>
     <meta charset="utf-8">
@@ -286,15 +298,15 @@ $FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
         <div class="section-title">
             Pricing per person<?php if ($PricingBasis !== '') { ?> (Quoted based on <span class="red"><?php echo html_escape($PricingBasis); ?></span>)<?php } ?>
         </div>
-        <?php $hotel_colspan = 1 + $HotelColCount + 1; ?>
+        <?php $hotel_colspan = 1 + $HotelColCount + ($ShowSingleSupp ? 1 : 0); ?>
         <table class="data">
             <thead>
                 <tr>
-                    <th style="text-align:left;">Hotel</th>
+                    <th style="text-align:left;"><?php echo html_escape($HotelTitleLabel); ?></th>
                     <?php foreach ($HotelColumns as $col_label) { ?>
                         <th><?php echo html_escape($col_label); ?> (RM)</th>
                     <?php } ?>
-                    <th>Single Supp (RM)</th>
+                    <?php if ($ShowSingleSupp) { ?><th>Single Supp (RM)</th><?php } ?>
                 </tr>
             </thead>
             <tbody>
@@ -306,7 +318,7 @@ $FooterLines = costing_quote_footer_note_lines($qv('quote_footer_notes'));
                         <?php foreach ($h['prices'] as $price) { ?>
                             <td class="text-center"><?php echo $price !== null ? $money2($price) : '-'; ?></td>
                         <?php } ?>
-                        <td class="text-center"><?php echo $h['single'] !== null ? $money2($h['single']) : '-'; ?></td>
+                        <?php if ($ShowSingleSupp) { ?><td class="text-center"><?php echo $h['single'] !== null ? $money2($h['single']) : '-'; ?></td><?php } ?>
                     </tr>
                 <?php } } ?>
                 <?php if ($HotelNote !== '') { ?>

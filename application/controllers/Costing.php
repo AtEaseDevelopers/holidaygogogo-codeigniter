@@ -207,6 +207,9 @@ class Costing extends MY_Controller
             // 18 Sep 2026 rework: flight mode (4.3) + hotel pricing columns (4.2).
             'quote_flight_mode'      => $this->input->post('quote_flight_mode'),
             'quote_hotel_columns'    => (array) $this->input->post('quote_hotel_columns'),
+            // 5 Oct 2026: first-column title (Hotel / Room Type) + Single Supp on/off.
+            'quote_hotel_title_label' => $this->input->post('quote_hotel_title_label'),
+            'quote_show_single_supp'  => $this->input->post('quote_show_single_supp'),
         );
 
         if ($package_id > 0 && $this->Costing_Model->Save_Quote_Details(
