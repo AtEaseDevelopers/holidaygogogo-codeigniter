@@ -1,4 +1,8 @@
-<?php $esc=function($v){return htmlspecialchars((string)$v,ENT_QUOTES,'UTF-8');}; $types=array('pdf'=>'Import PDF','csv'=>'Import CSV','url'=>'Read / Crawl URL','manual'=>'Manual Entry'); ?>
+<?php 
+    $esc=function($v){return htmlspecialchars((string)$v,ENT_QUOTES,'UTF-8');}; 
+    // $types=array('pdf'=>'Import PDF','csv'=>'Import CSV','url'=>'Read / Crawl URL','manual'=>'Manual Entry'); 
+    $types=array('pdf'=>'Import PDF','csv'=>'Import CSV','manual'=>'Manual Entry'); 
+?>
 <div class="d-flex flex-column-fluid"><div class="container-fluid">
     <?php $this->load->view('faq/sections',array('active_section'=>'sources')); ?>
     <div class="card card-custom mb-5"><div class="card-header"><div class="card-title"><h3 class="card-label">Add Source</h3></div><div class="card-toolbar"><a class="btn btn-light" href="<?php echo base_url('Faq?section=sources'); ?>">Back to List</a></div></div><div class="card-body">
