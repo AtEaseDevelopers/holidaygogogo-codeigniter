@@ -6291,7 +6291,7 @@ class Booking extends MY_Controller
     {
         // Read raw JSON body
 		$input = json_decode($this->input->raw_input_stream, true);
-		$booking_ids = $input['booking_ids'] ? $input['booking_ids'] : [];
+		$booking_ids = !empty($input['booking_ids']) ? $input['booking_ids'] : [];
 
 		if (empty($booking_ids)) {
 			$this->output
@@ -6303,170 +6303,83 @@ class Booking extends MY_Controller
 			return;
 		}
 
-        $results = [];
+		// Run the SAME enrichment + sync the nightly Cron uses, so the button
+		// recomputes every AutoCount field — crucially the remark3 pax line from
+		// rooms/guest_list (see enrich_autocount_booking / booking_pax_helper).
+		// The old button built its own payload, never set remark3 and skipped
+		// already-synced ('S') bookings, so a re-sync could never fix the pax.
+		//
+		// Reset the selected bookings to Pending first (same gate the Cron query
+		// consumes), then push them immediately for instant feedback.
+		$this->Booking_Model->Update_Autocount_Status_To_Pending_With_Reset($booking_ids);
 
-        foreach ($booking_ids as $booking_id) {
-            try {
-				$booking = $this->Booking_Model->find($booking_id);
-                if (!$booking) {
-                    $results[$booking_id] = 'Not Found';
-                    continue;
-                }
+		$this->load->library('BookingSync');
+		$this->load->helper('autocount');
+		$this->load->helper('autocount_booking');
 
-				$bookingData = $this->Booking_Model->getAllBookingsWithGuests($booking_id);
-				if (!empty($bookingData)) {
-					$bookingData = (array) $bookingData[0]; 
+		$bookings = $this->Booking_Model->getPendingBookingsWithDetails($booking_ids);
+
+		$results = [];
+		foreach ($bookings as $booking) {
+			$booking_id = $booking['BookingID'];
+			try {
+				$booking = enrich_autocount_booking($this, $booking);
+
+				switch ($booking['AutocountSyncAction']) {
+					case 'C':
+						$respond = $this->bookingsync->autocount_create($booking);
+						break;
+					case 'U':
+						$respond = $this->bookingsync->autocount_update($booking);
+						break;
+					case 'S':
+						$respond = $this->bookingsync->autocount_update_status($booking);
+						break;
+					case 'D':
+						$respond = $this->bookingsync->autocount_delete($booking);
+						break;
+					default:
+						$respond = ['status' => 0, 'error' => 'Unknown sync action'];
 				}
 
-				$bookingProducts = $this->Booking_Model->getAllBookingsWithProducts($booking_id);
-				$bookingProducts = array_map('get_object_vars', $bookingProducts); // convert to array
-
-				$this->load->helper('autocount');
-				$config = get_autocount_config();
-				$statuses = !empty($config['booking_sync_status']) ? $config['booking_sync_status'] : ['BOOKING CONFIRMATION'];
-
-				if (in_array($bookingData['BookingConfirmationTitle'], $statuses)) {
-					switch ($bookingData['AutocountSyncStatus']) {
-						case 'N': // new → create
-							$quotationData = [
-								'BookingNumber'   => $bookingData['BookingNumber'] ?? '',
-								'InsertDate'      => $bookingData['InsertDate'] ?? date('Y-m-d'),
-								'Customer'        => $bookingData['Customer'] ?? '',
-								'guest_email'     => $bookingData['guest_email'] ?? '',
-								'guest_address'   => $bookingData['guest_address'] ?? '',
-								'guest_phone'     => $bookingData['guest_phone'] ?? '',
-								'BokingRemark'    => $bookingData['BokingRemark'] ?? '',
-								
-								// Fields not in DB → set default or null
-								'credit_term'     => null,
-								'sales_location'  => '',
-								'currency_rate'   => 1,
-								'inclusive_tax'   => false,
-								'is_round_adj'    => false,
-								'tax_code'        => '',
-
-								// Details
-								'booking_product' => $bookingProducts
-							];
-
-							$respond = $this->autocount_create($quotationData);
-							if ($booking != null && $respond != null) {
-								if ($respond['error']) {
-									$this->Booking_Model->update_by_id($booking_id, [
-										'AutocountSyncMessage' => json_encode($respond),
-									]);
-									$results[$booking->BookingID] = $respond['error'];
-								} elseif ($respond['status'] === 201 || $respond['status'] === 204) {
-									$this->Booking_Model->update_by_id($booking_id, [
-										'AutocountSyncMessage' => json_encode($respond),
-										'AutocountSyncStatus' => 'C'
-									]);
-								} 
-							}	
-							$results[$booking->BookingID] = 'Created';
-							break;
-
-						case 'U': // update
-						case 'C': // created → still allow update
-							$quotationData = [
-								'BookingNumber'   => $bookingData['BookingNumber'],
-								'DocNo'           => $bookingData['BookingNumber'], // Fallback
-								'master'          => [
-									'DocDate'        => date('Y-m-d', strtotime($bookingData['InsertDate'])),
-									'DebtorName'     => $bookingData['Customer'],
-									'Email'          => $bookingData['guest_email'],
-									'Address'        => $bookingData['guest_address'],
-									'Phone1'         => $bookingData['guest_phone'],
-									'DeliverAddress' => $bookingData['guest_address'],
-									'DeliverContact' => $bookingData['Customer'],
-									'DeliverPhone1'  => $bookingData['guest_phone'],
-									'Remark1'        => $bookingData['BokingRemark'],
-								],
-								'booking_product' => $bookingProducts,
-								'tax_code'        => '', // Default tax code if missing
-								'saveApprove'     => null
-							];
-							$respond = $this->autocount_update($booking);
-							if ($booking != null && $respond != null) {
-								if ($respond['error']) {
-									$this->Booking_Model->update_by_id($booking_id, [
-										'AutocountSyncMessage' => json_encode($respond),
-									]);
-									$results[$booking->BookingID] = $respond['error'];
-								} elseif ($respond['status'] === 201 || $respond['status'] === 204) {
-									$this->Booking_Model->update_by_id($booking_id, [
-										'AutocountSyncMessage' => json_encode($respond),
-										'AutocountSyncStatus' => 'U'
-									]);
-								} 
-							}	
-							$results[$booking->BookingID] = 'Updated';
-							break;
-
-						case 'D': // delete
-							$bookingNumber = (!empty($booking) && !empty($booking->BookingNumber)) ? $booking->BookingNumber : '';
-
-							if (!empty($booking) && $booking->status == 'N') {
-								if (!empty($bookingNumber)) {
-									$respond = $this->autocount_delete([
-										'BookingNumber' => $bookingNumber
-									]);
-									if ($booking != null && $respond != null) {
-										if ($respond['error']) {
-											$this->Booking_Model->update_by_id($booking_id, [
-												'AutocountSyncMessage' => json_encode($respond),
-											]);
-											$results[$booking->BookingID] = $respond['error'];
-										} elseif ($respond['status'] === 201 || $respond['status'] === 204) {
-											$this->Booking_Model->update_by_id($booking_id, [
-												'AutocountSyncMessage' => json_encode($respond),
-												'AutocountSyncStatus' => 'D'
-											]);
-										} 
-									}	
-									$results[$booking->BookingID] = 'Deleted';
-									break;
-								}
-							}
-						case 'V': // void
-							$bookingNumber = (!empty($booking) && !empty($booking->BookingNumber)) ? $booking->BookingNumber : '';
-
-							if (!empty($bookingNumber)) {
-								$respond = $this->autocount_void($booking);
-								if ($booking != null && $respond != null) {
-									if ($respond['error']) {
-										$this->Booking_Model->update_by_id($booking_id, [
-											'AutocountSyncMessage' => json_encode($respond),
-										]);
-										$results[$booking->BookingID] = $respond['error'];
-									} elseif ($respond['status'] === 201 || $respond['status'] === 204) {
-										$this->Booking_Model->update_by_id($booking_id, [
-											'AutocountSyncMessage' => json_encode($respond),
-											'AutocountSyncStatus' => 'V'
-										]);
-									} 
-								}
-								$results[$booking->BookingID] = 'Voided';
-								break;
-							}
-							
-
-						default:
-							$results[$booking->BookingID] = 'Skipped';
-							break;
-					}
+				if (isset($respond['status']) && ($respond['status'] == 201 || $respond['status'] == 204) && empty($respond['error'])) {
+					$this->Booking_Model->update_by_id($booking_id, [
+						'AutocountSyncStatus'  => 'S',
+						'AutocountSyncMessage' => json_encode($respond),
+					]);
+					$results[$booking_id] = 'Synced';
+				} else {
+					$this->Booking_Model->update_by_id($booking_id, [
+						'AutocountSyncStatus'  => 'F',
+						'AutocountSyncMessage' => json_encode($respond),
+					]);
+					$results[$booking_id] = 'Failed: ' . (isset($respond['error']) ? $respond['error'] : 'unknown error');
 				}
+			} catch (\Exception $e) {
+				$this->Booking_Model->update_by_id($booking_id, [
+					'AutocountSyncStatus'  => 'F',
+					'AutocountSyncMessage' => $e->getMessage(),
+				]);
+				$results[$booking_id] = 'Error: ' . $e->getMessage();
+			}
+		}
 
-            } catch (\Exception $e) {
-                $results[$bookingData['BookingID']] = 'Error: ' . $e->getMessage();
-            }
-        }
+		// Bookings the sync query filtered out (no CustomerCode, wrong document
+		// title, or no sync action) never appear above — report why so the user
+		// isn't left thinking a silent success occurred.
+		foreach ($booking_ids as $bid) {
+			if (!isset($results[$bid])) {
+				$results[$bid] = 'Skipped (not eligible: needs a Customer Code, "BOOKING CONFIRMATION" title, a sync action, and a booking date after the sync cut-off)';
+			}
+		}
 
 		$this->output
         ->set_content_type('application/json')
         ->set_output(json_encode([
             'success' => true,
-            'message' => implode("\n", $results) // return as plain text
+            'message' => implode("\n", array_map(function ($id, $msg) {
+            	return "#$id: $msg";
+            }, array_keys($results), $results))
         ]));
     }
 

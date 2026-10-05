@@ -2099,8 +2099,15 @@ class Booking_Model extends CI_Model
 			->where_in('booking.AutocountSyncStatus', $statuses)
 			->where_in('booking.BookingConfirmationTitle', $titles)
 			->where('booking.AutocountSyncAction IS NOT NULL')
-			->order_by('booking.BookingID', 'ASC')
-			->limit($booking_qty_cront);
+			->order_by('booking.BookingID', 'ASC');
+
+		// The nightly cron throttles to a batch; but when an explicit set of
+		// booking_ids is passed (interactive "Sync Autocount" button) the caller
+		// has already bounded the work, so sync them all instead of silently
+		// dropping any past the batch size.
+		if (empty($booking_ids)) {
+			$this->db->limit($booking_qty_cront);
+		}
 
 			// new condition remove have payment only can sync : ->where("EXISTS (SELECT 1 FROM payment WHERE payment.BookingID = booking.BookingID AND payment.Status = 'Y')")
 

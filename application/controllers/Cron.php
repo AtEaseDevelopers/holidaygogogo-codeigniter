@@ -1911,61 +1911,10 @@ class Cron extends CI_Controller
 
 	private function enrichBooking($booking)
 	{
-		// Sales agent
-		if (!empty($booking['SalesAgent'])) {
-			$sale_agent = $this->Admin_Model->find($booking['SalesAgent']);
-			if ($sale_agent) {
-				$booking['salesAgent'] = $sale_agent->Name;
-			}
-		}
-
-		//validity
-		if (!empty($booking['StartDate']) && !empty($booking['EndDate'])) {
-			$booking['validity'] = $booking['StartDate'] . ' - ' . $booking['EndDate'];
-			$booking['BokingRemark'] = $booking['StartDate'] . ' - ' . $booking['EndDate'];
-		}
-
-		// yourRef
-		if (!empty($booking['ReservationNumber'])) {
-			$booking['yourRef'] = $booking['ReservationNumber'];
-			$booking['remark2'] = $booking['ReservationNumber'];
-		}
-
-		// cc — pax head-count for the e-invoice "Remark 3" line.
-		// The authoritative count lives in Room Management (guest_list_room)
-		// with a guest_list fallback, NOT in booking.Adult/Children/Infant
-		// (those stay frozen when rooms change — see feedback_booking_pax), so
-		// mirror the Booking Confirmation / Travel Voucher logic here.
-		$this->load->helper('booking_pax');
-		$this->load->model('Guest_List_Room_Model');
-		$this->load->model('Guest_List_Model');
-		$rooms  = $this->Guest_List_Room_Model->Read_Rooms_By_Booking_ID($booking['BookingID']);
-		$guests = empty($rooms) ? $this->Guest_List_Model->Read_Guests_By_Booking_ID($booking['BookingID']) : array();
-		// Legacy bookings (pre-Room-Management) have neither rooms nor roster;
-		// fall back to the booking's own Adult/Children/Infant columns.
-		$booking['cc'] = booking_pax_remark($rooms, $guests, $booking);
-		$booking['remark3'] = $booking['cc'];
-
-		// deliveryTerm  
-		if (!empty($booking['Destination'])) {
-			$Destination = $this->Category_Model->find($booking['Destination']);
-			if ($Destination) {
-				$booking['Destination'] = $Destination->Name;
-				$booking['deliveryTerm'] = $booking['Destination'];
-				$booking['remark4'] = $booking['Destination'];
-			}
-		}
-
-		if (!empty($booking['CustomerID'])) {
-			$customer = $this->Customer_Model->find($booking['CustomerID']);
-			if (!empty($customer)) {
-				if (!empty($customer->CustomerCode) && $customer->CustomerCode != null) {
-					$booking['CustomerCode'] = $customer->CustomerCode;
-				}
-			}
-		}
-
-		return $booking;
+		// Shared with the interactive "Sync Autocount" button so both re-sync
+		// paths compute identical AutoCount fields (incl. the remark3 pax line).
+		$this->load->helper('autocount_booking');
+		return enrich_autocount_booking($this, $booking);
 	}
 
     /**
