@@ -144,7 +144,11 @@ class Category_Model extends CI_Model
 	
 	function Detect()
 	{
+		// Only active rows count as redundant; soft-deleted (Status='N')
+		// categories are hidden from the listing, so they must not block
+		// re-creating a name the user can no longer see.
 		$this->db->where('Name', $this->input->post('name'));
+		$this->db->where('Status', 'Y');
 		if($this->db->get('category')->row()) {
 			return true;
 		} else {
