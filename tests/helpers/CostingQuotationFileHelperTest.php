@@ -57,6 +57,17 @@ $assertions['kind image'] = costing_quotation_file_kind('a.webp') === 'image';
 $assertions['kind other'] = costing_quotation_file_kind('a.zip') === 'file';
 $assertions['kind noext'] = costing_quotation_file_kind('README') === 'file';
 
+// --- note-only entry (file OR note) ----------------------------------------
+$assertions['note-only empty']   = costing_quotation_is_note_only('') === true;
+$assertions['note-only spaces']  = costing_quotation_is_note_only('   ') === true;
+$assertions['note-only null']    = costing_quotation_is_note_only(null) === true;
+$assertions['note-only file']    = costing_quotation_is_note_only('rates.pdf') === false;
+$assertions['entry kind note']   = costing_quotation_entry_kind('') === 'note';
+$assertions['entry kind pdf']    = costing_quotation_entry_kind('a.pdf') === 'pdf';
+$assertions['entry kind xlsx']   = costing_quotation_entry_kind('a.xlsx') === 'excel';
+$assertions['entry icon note']   = costing_quotation_entry_icon('') === 'la la-sticky-note';
+$assertions['entry icon pdf']    = costing_quotation_entry_icon('a.pdf') === 'la la-file-pdf';
+
 // --- supplier matching key -------------------------------------------------
 $assertions['key trims/lowers'] = costing_quotation_supplier_key('  Hotel ABC ') === 'hotel abc';
 $assertions['key empty']        = costing_quotation_supplier_key('') === '';

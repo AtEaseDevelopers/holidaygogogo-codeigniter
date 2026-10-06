@@ -123,6 +123,39 @@ function costing_quotation_file_kind($filename)
 }
 
 /**
+ * Whether a quotation entry is note-only — i.e. the user saved just a note /
+ * title against the package with no file attached. A blank (or whitespace-only)
+ * original filename means no file. Non-strings count as note-only.
+ */
+function costing_quotation_is_note_only($original_name)
+{
+    return trim((string) $original_name) === '';
+}
+
+/**
+ * Display "kind" for a quotation ENTRY (file OR note). A note-only entry gets
+ * its own 'note' kind (drives the amber sticky-note badge); otherwise it falls
+ * back to the file kind. Keeps the file/note branch in one tested place.
+ */
+function costing_quotation_entry_kind($original_name)
+{
+    return costing_quotation_is_note_only($original_name)
+        ? 'note'
+        : costing_quotation_file_kind($original_name);
+}
+
+/**
+ * Line-Awesome icon for a quotation ENTRY — a sticky-note glyph for a note-only
+ * entry, otherwise the file-type icon.
+ */
+function costing_quotation_entry_icon($original_name)
+{
+    return costing_quotation_is_note_only($original_name)
+        ? 'la la-sticky-note'
+        : costing_quotation_file_icon($original_name);
+}
+
+/**
  * Normalised key used to match a cost item's free-text supplier against an
  * uploaded quotation's supplier (trim + lowercase). Both sides run through this
  * so "Hotel ABC", "hotel abc" and " Hotel ABC " all match. Non-strings => ''.

@@ -397,60 +397,81 @@ class Costing extends MY_Controller
             return $out(array('ok' => false, 'message' => 'Costing package not found.'));
         }
 
-        if (!isset($_FILES['quotation_file'])) {
-            return $out(array('ok' => false, 'message' => 'No file was uploaded.'));
-        }
-        $upload_err = (int) $_FILES['quotation_file']['error'];
-        if ($upload_err !== UPLOAD_ERR_OK) {
-            // Distinguish "too big for the server" from "nothing selected" so the
-            // user gets an actionable message (our own 20MB cap may be below the
-            // php.ini upload_max_filesize / post_max_size).
-            if (in_array($upload_err, array(UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE), true)) {
-                return $out(array('ok' => false, 'message' => 'File is too large to upload.'));
-            }
-            if ($upload_err === UPLOAD_ERR_PARTIAL) {
-                return $out(array('ok' => false, 'message' => 'Upload was interrupted. Please try again.'));
-            }
-            return $out(array('ok' => false, 'message' => 'No file was uploaded.'));
-        }
-
         $this->load->helper('costing_quotation');
-        $original = (string) $_FILES['quotation_file']['name'];
-        if (!costing_quotation_is_allowed_file($original)) {
-            return $out(array('ok' => false, 'message' => 'Unsupported file type. Allowed: PDF, Word, Excel, image.'));
+
+        // An entry may be a FILE, a NOTE, or both. A file input left empty sends
+        // nothing (our hidden input has no name) or UPLOAD_ERR_NO_FILE — treat
+        // either as "no file" rather than an error, so a note-only save is valid.
+        $has_file = isset($_FILES['quotation_file'])
+            && isset($_FILES['quotation_file']['error'])
+            && (int) $_FILES['quotation_file']['error'] !== UPLOAD_ERR_NO_FILE
+            && (string) $_FILES['quotation_file']['name'] !== '';
+
+        $note = trim((string) $this->input->post('note'));
+
+        $original  = '';
+        $rel_path  = '';
+        $file_size = null;
+
+        if ($has_file) {
+            $upload_err = (int) $_FILES['quotation_file']['error'];
+            if ($upload_err !== UPLOAD_ERR_OK) {
+                // Distinguish "too big for the server" from "nothing selected" so the
+                // user gets an actionable message (our own 20MB cap may be below the
+                // php.ini upload_max_filesize / post_max_size).
+                if (in_array($upload_err, array(UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE), true)) {
+                    return $out(array('ok' => false, 'message' => 'File is too large to upload.'));
+                }
+                if ($upload_err === UPLOAD_ERR_PARTIAL) {
+                    return $out(array('ok' => false, 'message' => 'Upload was interrupted. Please try again.'));
+                }
+                return $out(array('ok' => false, 'message' => 'No file was uploaded.'));
+            }
+
+            $original = (string) $_FILES['quotation_file']['name'];
+            if (!costing_quotation_is_allowed_file($original)) {
+                return $out(array('ok' => false, 'message' => 'Unsupported file type. Allowed: PDF, Word, Excel, image.'));
+            }
+
+            $config = array(
+                'upload_path'   => costing_quotation_ensure_upload_dir(),
+                'allowed_types' => costing_quotation_allowed_types(),
+                'max_size'      => costing_quotation_max_size_kb(),
+                'encrypt_name'  => true,
+            );
+            $this->load->library('upload', $config);
+            $this->upload->initialize($config);
+
+            if (!$this->upload->do_upload('quotation_file')) {
+                $error = trim(strip_tags($this->upload->display_errors('', '')));
+                return $out(array('ok' => false, 'message' => 'Upload failed: ' . $error));
+            }
+
+            $data = $this->upload->data();
+            $rel_path  = costing_quotation_upload_reldir() . $data['file_name'];
+            $file_size = (int) round(((float) $data['file_size']) * 1024); // CI reports KB (2dp)
+        } elseif ($note === '') {
+            // Neither a file nor a note — nothing to save.
+            return $out(array('ok' => false, 'message' => 'Attach a file or enter a note.'));
         }
-
-        $config = array(
-            'upload_path'   => costing_quotation_ensure_upload_dir(),
-            'allowed_types' => costing_quotation_allowed_types(),
-            'max_size'      => costing_quotation_max_size_kb(),
-            'encrypt_name'  => true,
-        );
-        $this->load->library('upload', $config);
-        $this->upload->initialize($config);
-
-        if (!$this->upload->do_upload('quotation_file')) {
-            $error = trim(strip_tags($this->upload->display_errors('', '')));
-            return $out(array('ok' => false, 'message' => 'Upload failed: ' . $error));
-        }
-
-        $data = $this->upload->data();
-        $rel_path = costing_quotation_upload_reldir() . $data['file_name'];
 
         $this->load->model('Costing_Quotation_File_Model');
         $id = $this->Costing_Quotation_File_Model->Add(array(
             'costing_package_id' => $package_id,
             'supplier'           => $this->input->post('supplier'),
             'title'              => $this->input->post('title'),
+            'note'               => $note,
             'original_name'      => $original,
             'stored_path'        => $rel_path,
-            'file_size'          => (int) round(((float) $data['file_size']) * 1024), // CI reports KB (2dp)
+            'file_size'          => $file_size,
             'created_by'         => $this->session->userdata('admin_id'),
         ));
 
         if ($id <= 0) {
             // Persist failed — reclaim the orphaned upload rather than leak it.
-            costing_quotation_delete_file($rel_path);
+            if ($rel_path !== '') {
+                costing_quotation_delete_file($rel_path);
+            }
             return $out(array('ok' => false, 'message' => 'Could not save the attachment. Please try again.'));
         }
 
@@ -460,10 +481,12 @@ class Costing extends MY_Controller
                 'id'            => $id,
                 'supplier'      => trim((string) $this->input->post('supplier')),
                 'title'         => trim((string) $this->input->post('title')),
+                'note'          => $note,
                 'original_name' => $original,
-                'icon'          => costing_quotation_file_icon($original),
-                'kind'          => costing_quotation_file_kind($original),
-                'view_url'      => base_url('Costing/Quotation_File/' . $id),
+                'icon'          => costing_quotation_entry_icon($original),
+                'kind'          => costing_quotation_entry_kind($original),
+                // A note-only entry has no file to stream, so no view URL.
+                'view_url'      => $original !== '' ? base_url('Costing/Quotation_File/' . $id) : '',
                 'can_delete'    => true,
             ),
         ));

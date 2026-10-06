@@ -145,11 +145,20 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     .cw-quote-ficon.ft-excel { background: #e9f8f1; color: #0b8f88; }
     .cw-quote-ficon.ft-image { background: #fff4e6; color: #FF9800; }
     .cw-quote-ficon.ft-file { background: #eef1f7; color: #6082B6; }
+    .cw-quote-ficon.ft-note { background: #fff8e1; color: #f0a500; }
     .cw-quote-info { flex: 1 1 auto; min-width: 0; }
     .cw-quote-fname { font-weight: 600; color: #3f4254; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cw-quote-fname:hover { color: #6082B6; }
     .cw-quote-sub { font-size: 12px; color: #9aa0b3; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cw-quote-sub .sep { margin: 0 7px; opacity: .45; }
+    .cw-quote-note-wrap { margin-top: 4px; }
+    .cw-quote-note { font-size: 12px; color: #6b6f80; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+    .cw-quote-note.is-clamped { max-height: 4.2em; overflow: hidden; } /* ~3 lines */
+    .cw-quote-note-tools { display: flex; gap: 14px; align-items: center; margin-top: 3px; }
+    .cw-note-toggle, .cw-note-copy { border: 0; background: none; padding: 0; font-size: 11px; font-weight: 600; color: #6082B6; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+    .cw-note-toggle:hover, .cw-note-copy:hover { text-decoration: underline; }
+    .cw-note-copy .la { font-size: 13px; }
+    .cw-note-copy.is-copied { color: #1BC5BD; }
     .cw-quote-del-wrap { flex: 0 0 auto; }
 </style>
 
@@ -378,7 +387,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                  form — uploads/deletes go via AJAX. -->
             <div class="cw-panel" id="cw-quote-panel" data-package="<?php echo $package_id; ?>">
                 <div class="cw-panel-title">Supplier Quotations</div>
-                <div class="cw-panel-sub">Attach the quotation a supplier gave you so you can refer back to it later if prices change. Tag each file with a supplier and the matching cost items above will show a link to it.</div>
+                <div class="cw-panel-sub">Attach the quotation a supplier gave you — or just jot a note — so you can refer back to it later if prices change. A file is optional: you may save a note on its own. Tag each entry with a supplier and the matching cost items above will link to it.</div>
 
                 <div class="cw-quote-grid">
                     <!-- Drag-and-drop dropzone (the whole card is a label for the
@@ -388,7 +397,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                         <div class="cw-dropzone-inner" id="cw-quote-prompt">
                             <i class="la la-cloud-upload-alt cw-dropzone-icon"></i>
                             <div class="cw-dropzone-main"><span class="cw-dropzone-cta">Click to browse</span> or drag &amp; drop</div>
-                            <div class="cw-dropzone-hint">PDF, Word, Excel or image &middot; up to 20&nbsp;MB</div>
+                            <div class="cw-dropzone-hint">PDF, Word, Excel or image &middot; up to 20&nbsp;MB &middot; optional</div>
                         </div>
                         <div class="cw-dropzone-file" id="cw-quote-chosen" style="display:none;">
                             <i class="la la-file-alt"></i>
@@ -403,10 +412,14 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                             <input type="text" class="form-control form-control-sm" id="cw-quote-supplier" list="cw-supplier-list" placeholder="Supplier (optional)">
                         </div>
                         <div class="form-group mb-2">
-                            <label class="font-weight-bold mb-1" style="font-size:12px;">Note / title</label>
+                            <label class="font-weight-bold mb-1" style="font-size:12px;">Title</label>
                             <input type="text" class="form-control form-control-sm" id="cw-quote-title" placeholder="e.g. 2026 contracted rates (optional)">
                         </div>
-                        <button type="button" class="btn btn-sm btn-primary font-weight-bold btn-block" id="cw-quote-upload" disabled><i class="la la-upload"></i>Upload Quotation</button>
+                        <div class="form-group mb-2">
+                            <label class="font-weight-bold mb-1" style="font-size:12px;">Note</label>
+                            <textarea class="form-control form-control-sm" id="cw-quote-note" rows="2" placeholder="Any context — validity, contact, what changed (optional)"></textarea>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary font-weight-bold btn-block" id="cw-quote-upload" disabled><i class="la la-save"></i>Save Quotation</button>
                         <div class="cw-quote-status" id="cw-quote-status" style="display:none;"></div>
                     </div>
                 </div>
@@ -420,11 +433,25 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                             if ($qf['supplier'] !== null && $qf['supplier'] !== '') { $sub_parts[] = html_escape($qf['supplier']); }
                             if ($qf['title'] !== null && $qf['title'] !== '') { $sub_parts[] = html_escape($qf['title']); }
                     ?>
+                        <?php $qf_is_note = costing_quotation_is_note_only($qf['original_name']); ?>
                         <div class="cw-quote-item" data-id="<?php echo (int) $qf['id']; ?>">
-                            <span class="cw-quote-ficon ft-<?php echo costing_quotation_file_kind($qf['original_name']); ?>"><i class="<?php echo costing_quotation_file_icon($qf['original_name']); ?>"></i></span>
+                            <span class="cw-quote-ficon ft-<?php echo costing_quotation_entry_kind($qf['original_name']); ?>"><i class="<?php echo costing_quotation_entry_icon($qf['original_name']); ?>"></i></span>
                             <div class="cw-quote-info">
+                                <?php if ($qf_is_note) { ?>
+                                <span class="cw-quote-fname">Note</span>
+                                <?php } else { ?>
                                 <a href="<?php echo base_url('Costing/Quotation_File/' . (int) $qf['id']); ?>" target="_blank" rel="noopener" class="cw-quote-fname" title="<?php echo html_escape($qf['original_name']); ?>"><?php echo html_escape($qf['original_name']); ?></a>
+                                <?php } ?>
                                 <div class="cw-quote-sub"><?php echo $sub_parts ? implode('<span class="sep">&middot;</span>', $sub_parts) : 'No supplier tagged'; ?></div>
+                                <?php if (isset($qf['note']) && $qf['note'] !== null && $qf['note'] !== '') { ?>
+                                <div class="cw-quote-note-wrap">
+                                    <div class="cw-quote-note is-clamped"><?php echo str_replace(array("\r\n", "\r", "\n"), '<br>', html_escape($qf['note'])); ?></div>
+                                    <div class="cw-quote-note-tools">
+                                        <button type="button" class="cw-note-toggle" style="display:none;">Show more</button>
+                                        <button type="button" class="cw-note-copy" title="Copy note" data-note="<?php echo html_escape($qf['note']); ?>"><i class="la la-copy"></i>Copy</button>
+                                    </div>
+                                </div>
+                                <?php } ?>
                             </div>
                             <div class="cw-quote-del-wrap">
                                 <?php if (!empty($qf['CanDelete'])) { ?>
@@ -814,10 +841,11 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 'id'            => (int) $qf['id'],
                 'supplier'      => (string) (isset($qf['supplier']) ? $qf['supplier'] : ''),
                 'title'         => (string) (isset($qf['title']) ? $qf['title'] : ''),
+                'note'          => (string) (isset($qf['note']) ? $qf['note'] : ''),
                 'original_name' => (string) $qf['original_name'],
-                'icon'          => costing_quotation_file_icon($qf['original_name']),
-                'kind'          => costing_quotation_file_kind($qf['original_name']),
-                'view_url'      => base_url('Costing/Quotation_File/' . (int) $qf['id']),
+                'icon'          => costing_quotation_entry_icon($qf['original_name']),
+                'kind'          => costing_quotation_entry_kind($qf['original_name']),
+                'view_url'      => costing_quotation_is_note_only($qf['original_name']) ? '' : base_url('Costing/Quotation_File/' . (int) $qf['id']),
                 'can_delete'    => !empty($qf['CanDelete']),
             );
         }
@@ -846,6 +874,11 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         var k = supplierKey(supplier);
         if (k === '' || !quotesBySupplier[k]) { return ''; }
         return '<i class="la la-paperclip text-primary"></i> ' + quotesBySupplier[k].map(function (q) {
+            // A note-only entry has no file to open — show its label as plain
+            // text with the note as a tooltip instead of a (broken) link.
+            if (!q.view_url) {
+                return '<span title="' + escHtml(q.note || q.title || '') + '">' + escHtml(q.title || 'Note') + '</span>';
+            }
             return '<a href="' + q.view_url + '" target="_blank" rel="noopener" title="' + escHtml(q.title || q.original_name) + '">' + escHtml(q.original_name) + '</a>';
         }).join(', ');
     }
@@ -1432,6 +1465,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         var clearBtn = document.getElementById('cw-quote-clear');
         var supEl = document.getElementById('cw-quote-supplier');
         var titleEl = document.getElementById('cw-quote-title');
+        var noteEl = document.getElementById('cw-quote-note');
         var btn = document.getElementById('cw-quote-upload');
         var ACCEPT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'gif'];
 
@@ -1443,6 +1477,13 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         }
         function extOf(name) { var p = (name || '').split('.'); return p.length > 1 ? p.pop().toLowerCase() : ''; }
 
+        // Save is allowed with a file OR a note (an entry may be either/both).
+        function refreshBtn() {
+            var hasFile = fileEl.files && fileEl.files.length;
+            var hasNote = noteEl.value.trim() !== '';
+            btn.disabled = !(hasFile || hasNote);
+        }
+
         // Reflect the chosen file in the dropzone (or reset to the empty prompt).
         function showChosen() {
             var f = fileEl.files && fileEl.files[0];
@@ -1452,15 +1493,17 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 promptEl.style.display = 'none';
                 chosenEl.style.display = '';
                 dropEl.classList.add('has-file');
-                btn.disabled = false;
             } else {
                 promptEl.style.display = '';
                 chosenEl.style.display = 'none';
                 dropEl.classList.remove('has-file');
-                btn.disabled = true;
             }
+            refreshBtn();
         }
         function resetPicker() { fileEl.value = ''; showChosen(); }
+
+        // Typing a note (with no file) is enough to enable Save.
+        noteEl.addEventListener('input', refreshBtn);
 
         fileEl.addEventListener('change', function () {
             var f = fileEl.files && fileEl.files[0];
@@ -1505,42 +1548,132 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             if (title) { parts.push(escHtml(title)); }
             return parts.length ? parts.join('<span class="sep">&middot;</span>') : 'No supplier tagged';
         }
+        // Escaped note with newlines converted to <br> (identical to the PHP
+        // render — NOT nl2br, which would keep the raw \n and double-break under
+        // white-space:pre-wrap), wrapped with the show-more/less toggle + copy
+        // button. data-note is set
+        // on the copy button after insertion (see addListRow) to avoid attribute
+        // escaping of the raw text.
+        function noteHtml(note) {
+            note = (note || '').toString();
+            if (!note) { return ''; }
+            return '<div class="cw-quote-note-wrap">' +
+                '<div class="cw-quote-note is-clamped">' + escHtml(note).replace(/\r\n|\r|\n/g, '<br>') + '</div>' +
+                '<div class="cw-quote-note-tools">' +
+                    '<button type="button" class="cw-note-toggle" style="display:none;">Show more</button>' +
+                    '<button type="button" class="cw-note-copy" title="Copy note"><i class="la la-copy"></i>Copy</button>' +
+                '</div>' +
+            '</div>';
+        }
         function addListRow(f) {
             var empty = document.getElementById('cw-quote-empty');
             if (empty) { empty.remove(); }
             var item = document.createElement('div');
             item.className = 'cw-quote-item';
             item.setAttribute('data-id', f.id);
+            // Note-only entries (no view_url) show a plain "Note" heading; file
+            // entries keep the clickable filename. Mirrors the PHP card render.
+            var head = f.view_url
+                ? '<a href="' + f.view_url + '" target="_blank" rel="noopener" class="cw-quote-fname" title="' + escHtml(f.original_name) + '">' + escHtml(f.original_name) + '</a>'
+                : '<span class="cw-quote-fname">Note</span>';
             item.innerHTML =
                 '<span class="cw-quote-ficon ft-' + (f.kind || 'file') + '"><i class="' + f.icon + '"></i></span>' +
                 '<div class="cw-quote-info">' +
-                    '<a href="' + f.view_url + '" target="_blank" rel="noopener" class="cw-quote-fname" title="' + escHtml(f.original_name) + '">' + escHtml(f.original_name) + '</a>' +
+                    head +
                     '<div class="cw-quote-sub">' + metaLine(f.supplier, f.title) + '</div>' +
+                    noteHtml(f.note) +
                 '</div>' +
                 '<div class="cw-quote-del-wrap">' + (f.can_delete ? '<button type="button" class="btn btn-icon btn-light-danger btn-sm cw-quote-del" title="Delete attachment"><i class="la la-trash"></i></button>' : '') + '</div>';
             listEl.insertBefore(item, listEl.firstChild);
+            // Stash the raw note on the copy button + decide if the note needs a
+            // show-more toggle (can only be measured once it is in the DOM).
+            var copyBtn = item.querySelector('.cw-note-copy');
+            if (copyBtn) { copyBtn.setAttribute('data-note', f.note || ''); }
+            initNoteWrap(item.querySelector('.cw-quote-note-wrap'));
         }
 
+        // Show the "Show more" toggle only when the (clamped) note actually
+        // overflows; otherwise drop the clamp and leave the full note visible.
+        function initNoteWrap(wrap) {
+            if (!wrap) { return; }
+            var note = wrap.querySelector('.cw-quote-note');
+            var toggle = wrap.querySelector('.cw-note-toggle');
+            if (!note || !toggle) { return; }
+            note.classList.add('is-clamped');
+            if (note.scrollHeight > note.clientHeight + 1) {
+                toggle.style.display = '';
+                toggle.textContent = 'Show more';
+            } else {
+                toggle.style.display = 'none';
+                note.classList.remove('is-clamped');
+            }
+        }
+
+        // Copy text to the clipboard with a execCommand fallback for old/insecure
+        // contexts; flashes the button to confirm.
+        function copyNote(text, btn) {
+            var flash = function (ok) {
+                if (!btn) { return; }
+                var html = btn.innerHTML;
+                btn.classList.add('is-copied');
+                btn.innerHTML = ok ? '<i class="la la-check"></i>Copied' : '<i class="la la-times"></i>Failed';
+                setTimeout(function () { btn.innerHTML = html; btn.classList.remove('is-copied'); }, 1500);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(function () { flash(true); }, function () { legacyCopy(text, flash); });
+            } else {
+                legacyCopy(text, flash);
+            }
+        }
+        function legacyCopy(text, flash) {
+            var ta = document.createElement('textarea');
+            ta.value = text; ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.focus(); ta.select();
+            var ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            document.body.removeChild(ta);
+            flash(ok);
+        }
+
+        // Delegated: show-more/less toggle + copy, for both server- and live-rendered notes.
+        listEl.addEventListener('click', function (e) {
+            var toggle = e.target.closest('.cw-note-toggle');
+            if (toggle) {
+                var note = toggle.closest('.cw-quote-note-wrap').querySelector('.cw-quote-note');
+                note.classList.toggle('is-clamped');
+                toggle.textContent = note.classList.contains('is-clamped') ? 'Show more' : 'Show less';
+                return;
+            }
+            var copyBtn = e.target.closest('.cw-note-copy');
+            if (copyBtn) { copyNote(copyBtn.getAttribute('data-note') || '', copyBtn); }
+        });
+
+        // Initialise clamp/toggle for the server-rendered notes on load.
+        listEl.querySelectorAll('.cw-quote-note-wrap').forEach(initNoteWrap);
+
         btn.addEventListener('click', function () {
-            if (!fileEl.files || !fileEl.files.length) { setStatus('Choose a file to upload.', false); return; }
+            var hasFile = fileEl.files && fileEl.files.length;
+            if (!hasFile && noteEl.value.trim() === '') { setStatus('Attach a file or enter a note.', false); return; }
             var fd = new FormData();
             fd.append('package_id', pkgId);
             fd.append('supplier', supEl.value || '');
             fd.append('title', titleEl.value || '');
-            fd.append('quotation_file', fileEl.files[0]);
-            btn.disabled = true; setStatus('Uploading…', true);
+            fd.append('note', noteEl.value || '');
+            if (hasFile) { fd.append('quotation_file', fileEl.files[0]); }
+            btn.disabled = true; setStatus('Saving…', true);
             fetch(BASE + 'Upload_Quotation', { method: 'POST', body: fd, credentials: 'same-origin' })
                 .then(function (r) { return r.json(); })
                 .then(function (res) {
-                    if (!res || !res.ok) { btn.disabled = false; setStatus((res && res.message) || 'Upload failed.', false); return; }
+                    if (!res || !res.ok) { btn.disabled = false; setStatus((res && res.message) || 'Could not save.', false); return; }
                     QUOTE_FILES.push(res.file);
                     rebuildQuoteIndex();
                     addListRow(res.file);
                     refreshAllRowQuoteLinks();
-                    resetPicker(); supEl.value = ''; titleEl.value = '';
-                    setStatus('Uploaded.', true);
+                    resetPicker(); supEl.value = ''; titleEl.value = ''; noteEl.value = '';
+                    setStatus('Saved.', true);
                 })
-                .catch(function () { btn.disabled = false; setStatus('Upload failed. Please try again.', false); });
+                .catch(function () { btn.disabled = false; setStatus('Could not save. Please try again.', false); });
         });
 
         listEl.addEventListener('click', function (e) {

@@ -15,7 +15,7 @@ class Costing_Quotation_File_Model extends CI_Model
     /**
      * Insert a quotation attachment row. Returns the new id (0 on failure).
      *
-     * @param array $data keys: costing_package_id, supplier, title,
+     * @param array $data keys: costing_package_id, supplier, title, note,
      *                    original_name, stored_path, file_size, created_by
      */
     public function Add($data)
@@ -24,6 +24,7 @@ class Costing_Quotation_File_Model extends CI_Model
             'costing_package_id' => (int) (isset($data['costing_package_id']) ? $data['costing_package_id'] : 0),
             'supplier'           => isset($data['supplier']) ? (trim((string) $data['supplier']) ?: null) : null,
             'title'              => isset($data['title']) ? (trim((string) $data['title']) ?: null) : null,
+            'note'               => isset($data['note']) ? (trim((string) $data['note']) ?: null) : null,
             'original_name'      => (string) (isset($data['original_name']) ? $data['original_name'] : ''),
             'stored_path'        => (string) (isset($data['stored_path']) ? $data['stored_path'] : ''),
             'file_size'          => isset($data['file_size']) && $data['file_size'] !== null ? (int) $data['file_size'] : null,
@@ -31,7 +32,12 @@ class Costing_Quotation_File_Model extends CI_Model
             'created_by'         => isset($data['created_by']) && $data['created_by'] !== null ? (int) $data['created_by'] : null,
         );
 
-        if ($row['costing_package_id'] <= 0 || $row['original_name'] === '' || $row['stored_path'] === '') {
+        // An entry must belong to a package and carry SOMETHING — either a file
+        // (original_name + stored_path) or a note. A bare row (no file, no note)
+        // is rejected.
+        $has_file = $row['original_name'] !== '' && $row['stored_path'] !== '';
+        $has_note = $row['note'] !== null && $row['note'] !== '';
+        if ($row['costing_package_id'] <= 0 || (!$has_file && !$has_note)) {
             return 0;
         }
 
@@ -54,7 +60,7 @@ class Costing_Quotation_File_Model extends CI_Model
             return array();
         }
 
-        $this->db->select('id, costing_package_id, supplier, title, original_name, stored_path, file_size, created_by, created_at');
+        $this->db->select('id, costing_package_id, supplier, title, note, original_name, stored_path, file_size, created_by, created_at');
         $this->db->where('costing_package_id', $package_id);
         $this->db->where('status', 'Y');
         $this->db->order_by('id', 'DESC');
