@@ -1,9 +1,16 @@
 <?php
 	$submit_url = base_url('Faq_Suggestion/Update?id=') . (int)$suggestion->SuggestionID;
-	$accept_url = base_url('Faq_Suggestion/Accept?id=') . (int)$suggestion->SuggestionID;
+	$completed=in_array($suggestion->State,array('accepted','dismissed'),true);
+	$editable=!empty($can_edit)&&!$completed;
+	$esc=function($value){return htmlspecialchars((string)$value,ENT_QUOTES,'UTF-8');};
+	$citations=json_decode((string)$suggestion->DraftSourcesJson,true);
 ?>
 <div class="d-flex flex-column-fluid">
 	<div class="container-fluid">
+		<?php $this->load->view('faq/sections',array('active_section'=>'suggestions')); ?>
+		<?php foreach(array('faq_success'=>'success','faq_error'=>'danger') as $key=>$color) { if($this->session->flashdata($key)) { ?>
+			<div class="alert alert-light-<?php echo $color; ?>"><?php echo $esc($this->session->flashdata($key)); ?></div>
+		<?php } } ?>
 		<style>
 			.faq-evidence-item { border:1px solid #b6c9df; border-radius:7px; margin-top:14px; overflow:hidden; box-shadow:0 1px 2px rgba(50, 85, 125, .06); }
 			.faq-evidence-head { background:#edf3fa; border-bottom:1px solid #b6c9df; padding:10px 14px; }
@@ -11,33 +18,42 @@
 			.faq-evidence-field label { display:block; color:#7e8299; font-size:11px; font-weight:600; letter-spacing:.02em; margin:0 0 2px; text-transform:uppercase; }
 			.faq-evidence-field div { font-size:13px; overflow-wrap:anywhere; }
 			.faq-evidence-quote { background:#fcfcfd; border-top:1px solid #e4e6ef; color:#464e5f; padding:12px 14px; white-space:pre-wrap; word-break:break-word; }
+			.faq-review-history { font-size:12px; }
+			.faq-review-history .table th, .faq-review-history .table td { padding:6px 10px; line-height:1.35; vertical-align:top; }
+			.faq-review-history .small { font-size:11px; }
 			@media (max-width:575px) { .faq-evidence-grid { grid-template-columns:1fr; } }
 		</style>
 		<form id="faq_form" method="post" action="<?php echo $submit_url; ?>">
+			<?php echo faq_workspace_csrf_field($this->session); ?>
 			<input type="hidden" name="suggestion_id" value="<?php echo (int)$suggestion->SuggestionID; ?>">
+			<input type="hidden" name="expected_version" value="<?php echo $esc(faq_workspace_review_version($suggestion)); ?>">
 
 			<div class="card card-custom mb-5">
 				<div class="card-header flex-wrap py-3" style="background-color:#D7E2F2;">
 					<div class="card-title">
 						<h3 class="card-label" style="color:#6082B6;">
-							<strong>Edit FAQ Suggestion</strong>
+							<strong>Update FAQ Suggestion</strong><small class="d-block mt-2">#<?php echo (int)$suggestion->SuggestionID; ?> <span class="label label-inline label-light-<?php echo $suggestion->State==='draft_ready'?'primary':($suggestion->State==='accepted'?'success':($suggestion->State==='dismissed'?'danger':'warning')); ?> font-weight-bold ml-2"><?php echo $esc(faq_workspace_review_label($suggestion->State)); ?></span></small>
 						</h3>
 					</div>
 					<div class="card-toolbar">
 						<a href="<?php echo isset($run_url) ? $run_url : base_url('Faq_Suggestion'); ?>" class="btn btn-light font-weight-bold" style="margin-right:6px;">
 							<i class="la la-arrow-left"></i>Back
 						</a>
-						<button type="submit" class="btn btn-primary font-weight-bold" style="margin-right:6px;" data-toggle="tooltip" title="Save your edits to this suggestion">
-							<i class="la la-save"></i>Save Changes
-						</button>
-						<a href="<?php echo $accept_url; ?>" onclick="return confirm('Save your changes first, then click Accept. Accept this suggestion as a real FAQ now?');" class="btn btn-success font-weight-bold" data-toggle="tooltip" title="Accept — create a FAQ from this suggestion">
-							<i class="la la-check"></i>Accept as FAQ
-						</a>
+						<?php if($editable) { ?>
+							<button type="submit" name="review_action" value="save" class="btn btn-primary font-weight-bold mr-2"><i class="la la-save"></i>Save Changes</button>
+							<button type="submit" name="review_action" value="approve" class="btn btn-success font-weight-bold mr-2"><i class="la la-check"></i>Save &amp; Approve</button>
+							<button type="submit" name="review_action" value="reevaluate" class="btn btn-info font-weight-bold mr-2"><i class="la la-magic"></i>Save &amp; Re-evaluate</button>
+							<button type="submit" form="faq-reject-form" class="btn btn-light-danger font-weight-bold">Reject</button>
+						<?php } else { ?>
+							<?php if(!empty($can_edit)) { ?><button type="submit" name="review_action" value="approve" class="btn btn-success font-weight-bold mr-2"><i class="la la-check"></i>Approve</button><?php } ?>
+							<?php if(!empty($suggestion->AcceptedFAQID)) { ?><a class="btn btn-light-success" href="<?php echo !empty($can_edit)?base_url('Faq/Update?faq_id=').(int)$suggestion->AcceptedFAQID:base_url('Faq'); ?>">Open approved FAQ</a><?php } ?>
+						<?php } ?>
 					</div>
 				</div>
 				<div class="card-body">
+					<?php if(!empty($suggestion->ReviewReason)) { ?><div class="alert alert-light-<?php echo !$completed&&$suggestion->State!=='draft_ready'?'warning':'info'; ?>"><?php echo $esc($suggestion->ReviewReason); ?></div><?php } ?>
 					<div class="alert alert-light-info" role="alert" style="border-left:4px solid #8950fc;">
-						<i class="la la-magic"></i> This is an AI-suggested FAQ mined from recent chats. Edit it to your standards, <strong>Save Changes</strong>, then <strong>Accept as FAQ</strong> to publish it to the library.
+						<i class="la la-magic"></i> Review edits against the supporting evidence before approval. Re-evaluate if the answer needs additional information.
 						<?php if(!empty($suggestion->Reason)) { ?>
 							<div class="mt-2"><strong>Why suggested:</strong> <?php echo htmlspecialchars($suggestion->Reason); ?></div>
 						<?php } ?>
@@ -53,6 +69,7 @@
 							</button>
 						<?php } ?>
 					</div>
+					<fieldset <?php echo $editable?'':'disabled'; ?>>
 					<strong>FAQ Information :</strong>
 					<br><br>
 					<div class="row">
@@ -83,6 +100,20 @@
 										<option data-icon="la la-map-pin font-size-lg bs-icon" value="<?php echo (int)$d->CategoryID; ?>" <?php if(in_array((int)$d->CategoryID, $selected_destination_ids, true)) { echo 'selected'; } ?>><?php echo htmlspecialchars($d->Name); ?></option>
 									<?php } ?>
 								</select>
+							</div>
+						</div>
+						<div class="col-md-4">
+							<div class="form-group">
+								<label for="faq-review-status">Review status</label>
+								<select id="faq-review-status" name="ReviewStatus" class="form-control">
+									<?php if($completed) { ?>
+										<option value="<?php echo $esc($suggestion->State); ?>" selected><?php echo $esc(faq_workspace_review_label($suggestion->State)); ?></option>
+									<?php } else { ?>
+										<option value="draft_ready" <?php echo $suggestion->State==='draft_ready'?'selected':''; ?>>Pending Approval</option>
+										<option value="need_context" <?php echo $suggestion->State!=='draft_ready'?'selected':''; ?>>Needs Information</option>
+									<?php } ?>
+								</select>
+								<?php if($editable) { ?><small class="form-text text-muted">Choose a status, then click Save Changes.</small><?php } ?>
 							</div>
 						</div>
 						<div class="col-md-12">
@@ -135,13 +166,42 @@
 										</div>
 									<?php } ?>
 								</div>
-								<small class="form-text text-muted">Each sub-question and its sub-answer are required.</small>
+								<small class="form-text text-muted">Each sub-question is required. Incomplete answers can be saved and re-evaluated.</small>
 							</div>
 						</div>
 					</div>
+					</fieldset>
+					<?php if(!$completed) { ?><div class="mt-3"><button type="button" class="btn btn-light-info btn-sm faq-knowledge-preview" data-mode="update" data-suggestion-id="<?php echo (int)$suggestion->SuggestionID; ?>" data-target="#faq-knowledge-preview" data-url="<?php echo base_url('Faq_Suggestion/Knowledge_Preview'); ?>" data-source-url="<?php echo base_url('Faq_Suggestion/Source_Detail?id='); ?>">Refresh matching sources</button><div id="faq-knowledge-preview">
+					<?php $this->load->view('faq_suggestion/knowledge_selection',array('selection'=>$knowledge_preview??array('sources'=>array()),'can_manage_sources'=>$can_manage_sources??false)); ?></div></div><?php } ?>
 				</div>
 			</div>
 		</form>
+
+		<?php if($editable) { ?><form id="faq-reject-form" method="post" action="<?php echo base_url('Faq_Suggestion/Dismiss'); ?>"><?php echo faq_workspace_csrf_field($this->session); ?><input type="hidden" name="suggestion_id" value="<?php echo (int)$suggestion->SuggestionID; ?>"></form><?php } ?>
+		<div class="card card-custom mb-5"><div class="card-body"><h5>Supporting evidence</h5>
+			<?php if(!empty($knowledge_last)) { $this->load->view('faq_suggestion/knowledge_selection',array('selection'=>$knowledge_last,'historical'=>true,'can_manage_sources'=>$can_manage_sources??false)); } ?>
+			<?php foreach((array)$citations as $citation) { ?><div class="border rounded p-4 mb-3"><strong><?php echo $esc($citation['reference'].' · '.($citation['kind']==='knowledge'?'Approved Knowledge Source':'Draft evidence').' · '.$citation['title']); ?></strong><blockquote class="mt-3 mb-0" style="white-space:pre-wrap"><?php echo $esc($citation['excerpt']); ?></blockquote></div><?php } ?>
+			<?php if(!$citations) { ?><p class="text-muted">Answer evidence has not been identified yet.</p><?php } ?>
+			<?php if(!empty($can_manage_sources)) { ?><a class="btn btn-light-primary" href="<?php echo base_url('Faq?section=sources'); ?>">Review Knowledge Sources</a><?php } ?>
+		</div></div>
+		<details class="card card-custom mb-5 faq-review-history" open><summary class="px-3 py-2 font-weight-bold">Review history<span class="small text-muted font-weight-normal ml-2">Malaysia time · latest first</span></summary><div class="card-body px-3 pb-3 pt-0">
+			<?php $review_history=faq_workspace_review_history($audit??array()); if($review_history) { ?>
+				<div class="table-responsive">
+					<table class="table table-sm table-bordered mb-0">
+						<thead class="thead-light"><tr><th scope="col">Who</th><th scope="col">What happened</th><th scope="col">When</th></tr></thead>
+						<tbody>
+							<?php foreach($review_history as $entry) { ?>
+								<tr>
+									<td><strong><?php echo $esc($entry['who']); ?></strong><?php if($entry['requested_by']!=='') { ?><span class="small text-muted"> · Requested by <?php echo $esc($entry['requested_by']); ?></span><?php } ?></td>
+									<td><?php echo $esc($entry['action']); ?><?php foreach($entry['details'] as $detail) { ?><span class="small text-muted"> · <?php echo $esc($detail); ?></span><?php } ?></td>
+									<td class="text-nowrap"><?php echo $esc($entry['when']); ?></td>
+								</tr>
+							<?php } ?>
+						</tbody>
+					</table>
+				</div>
+			<?php } else { ?><p class="text-muted mb-0">No review actions have been recorded yet.</p><?php } ?>
+		</div></details>
 
 		<template id="faq-item-template">
 			<div class="faq-item card mb-3" style="border:1px solid #e4e6ef;">
@@ -331,3 +391,4 @@
 
 	$('[data-toggle="tooltip"]').tooltip();
 </script>
+<script src="<?php echo base_url('assets/js/faq_knowledge_preview.js'); ?>"></script>

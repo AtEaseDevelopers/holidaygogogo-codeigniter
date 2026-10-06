@@ -98,7 +98,7 @@ defined('LEAD_CONVERSION_TC2_CUTOFF_DATE') or define('LEAD_CONVERSION_TC2_CUTOFF
 // source table.
 defined('SELF_GEN_SOURCE_NAME') or define('SELF_GEN_SOURCE_NAME', 'SELF GEN');
 defined('ADMIN_STATUS')        or define('ADMIN_STATUS', serialize(array('Y' => 'ACTIVE', 'D' => 'DEACTIVATED')));
-defined('ACCESS_CONTROL')      or define('ACCESS_CONTROL', serialize(array('GB' => 'GENERATE BOOKING', 'VB' => 'VIEW BOOKING', 'AB' => 'AMEND BOOKING', 'RB' => 'REMOVE BOOKING', 'GP' => 'GENERATE PAYMENT', 'VP' => 'VIEW PAYMENT', 'AP' => 'AMEND PAYMENT', 'RP' => 'REMOVE PAYMENT', 'VR' => 'VIEW REPORT', 'ML' => 'MESSAGE LOG', 'FV' => 'FAQ VIEW ACCESS', 'FE' => 'FAQ EDIT ACCESS', 'VPR' => 'VIEW PRODUCT')));
+defined('ACCESS_CONTROL')      or define('ACCESS_CONTROL', serialize(array('GB' => 'GENERATE BOOKING', 'VB' => 'VIEW BOOKING', 'AB' => 'AMEND BOOKING', 'RB' => 'REMOVE BOOKING', 'GP' => 'GENERATE PAYMENT', 'VP' => 'VIEW PAYMENT', 'AP' => 'AMEND PAYMENT', 'RP' => 'REMOVE PAYMENT', 'VR' => 'VIEW REPORT', 'ML' => 'MESSAGE LOG', 'FV' => 'FAQ VIEW ACCESS', 'FE' => 'FAQ EDIT ACCESS', 'FKS' => 'FAQ KNOWLEDGE SOURCE MANAGER', 'VPR' => 'VIEW PRODUCT')));
 
 //Booking
 defined('BOOKING_STATUS')      or define('BOOKING_STATUS', serialize(array(

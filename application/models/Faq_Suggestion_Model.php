@@ -24,13 +24,19 @@ class Faq_Suggestion_Model extends CI_Model
 	function Read_Suggestions_For_Run($run_id)
 	{
 		$this->load->model('Faq_Model'); // Decode_Items() lives there
-		$this->db->select('SuggestionID, Title, Description, Reason, DestinationIds, State, AcceptedFAQID, RunID, RunKey, Model, CostUsd, InsertBy, InsertDate');
+		$this->db->select('SuggestionID, Title, Description, Reason, DestinationIds, State, AcceptedFAQID, RunID, RunKey, Model, CostUsd, InsertBy, InsertDate, DraftSourcesJson');
 		$this->db->from('faq_suggestions');
 		$this->db->where('Status', 'Y');
 		$this->db->where('RunID', (int) $run_id);
 		$this->db->order_by('SuggestionID', 'ASC');
 		$rows = $this->db->get()->result();
+		return $this->Decorate_Suggestions($rows);
+	}
 
+	/** Share destination and source details between the run page and the paginated list. */
+	function Decorate_Suggestions($rows)
+	{
+		if (!$rows) { return $rows; }
 		$dest_names = $this->Destination_Name_Map();
 		$ids = array();
 		foreach ($rows as $row) { $ids[] = (int) $row->SuggestionID; }
@@ -48,6 +54,12 @@ class Faq_Suggestion_Model extends CI_Model
 			$row->Destinations = implode('||', $names);
 			$row->Evidence = isset($evidence_by_suggestion[(int) $row->SuggestionID])
 				? $evidence_by_suggestion[(int) $row->SuggestionID] : array();
+			$citations = json_decode((string)($row->DraftSourcesJson ?? ''), true);
+			foreach (is_array($citations) ? $citations : array() as $citation) {
+				if (($citation['kind'] ?? '') !== 'knowledge') { continue; }
+				$row->Evidence[] = (object)array('SourceType'=>'knowledge', 'SourceRef'=>$citation['reference'] ?? '',
+					'SourceExcerpt'=>$citation['excerpt'] ?? '', 'SourceTitle'=>$citation['title'] ?? 'Knowledge Source');
+			}
 		}
 		return $rows;
 	}
@@ -73,9 +85,11 @@ class Faq_Suggestion_Model extends CI_Model
 		$this->db->select('fs.SuggestionID, fs.SourceType, fs.SourceRef, fs.GhlMessageID, fs.ChatFileID, fs.MessageIndex, fs.SourceExcerpt');
 		$this->db->select('gm.conversation_id AS ConversationID, gm.contact_id AS ContactID, gm.direction AS MessageDirection, gm.from_number AS FromNumber, gm.to_number AS ToNumber, gm.date_added AS MessageDate');
 		$this->db->select('chf.OriginalName AS ChatFileName, chf.dedup_key AS ChatContactKey');
+		$this->db->select('sr.FileName AS RunFileName');
 		$this->db->from('faq_suggestion_sources fs');
 		$this->db->join('ghl_messages gm', 'gm.id = fs.GhlMessageID', 'left');
 		$this->db->join('chat_history_files chf', 'chf.FileID = fs.ChatFileID', 'left');
+		$this->db->join('faq_suggestion_runs sr', 'sr.RunID = fs.RunID', 'left');
 		$this->db->where_in('fs.SuggestionID', $ids);
 		$this->db->order_by('fs.SuggestionID', 'ASC');
 		$this->db->order_by('fs.SourceID', 'ASC');
@@ -91,6 +105,17 @@ class Faq_Suggestion_Model extends CI_Model
 	// uploaded PDF). The listing shows runs; each opens to the suggestions
 	// inside it (mirrors the Competitor Analysis history → detail flow).
 	// ---------------------------------------------------------------------
+
+	/** Recent generations for the suggestion filter; re-evaluations keep the original candidate's RunID. */
+	function Read_Recent_Generation_Runs($limit = 20)
+	{
+		$this->load->helper('faq_suggestion');
+		$runs = $this->db->select('RunID, Source, StartDate, EndDate, Mobile, FileName, InsertDate')
+			->where('Status', 'Y')->where('Source !=', 'reevaluate')
+			->order_by('RunID', 'DESC')->limit(max(1, (int) $limit))->get('faq_suggestion_runs')->result();
+		foreach ($runs as $run) { $run->Scope = faq_suggestion_run_scope($run); }
+		return $runs;
+	}
 
 	/**
 	 * All active runs for the listing, newest first. Each row is decorated with
@@ -116,7 +141,7 @@ class Faq_Suggestion_Model extends CI_Model
 		$this->db->select('RunID, COUNT(*) AS c');
 		$this->db->from('faq_suggestions');
 		$this->db->where('Status', 'Y');
-		$this->db->where('State', 'pending');
+		$this->db->where_not_in('State', array('accepted','dismissed'));
 		$this->db->where('RunID IS NOT NULL', null, false);
 		$this->db->group_by('RunID');
 		foreach ($this->db->get()->result() as $r) {
@@ -198,21 +223,22 @@ class Faq_Suggestion_Model extends CI_Model
 	/** Soft-delete a run and every suggestion inside it. */
 	function Delete_Run($run_id)
 	{
+		$this->load->model('Faq_Workspace_Model');
+		$before=$this->Read_Run($run_id);
+		$ids=array();
+		foreach ($this->db->select('SuggestionID')->where('RunID',(int)$run_id)->get('faq_suggestions')->result() as $s) { $ids[]=(int)$s->SuggestionID; }
+		$this->db->trans_start();
+		if ($ids) {
+			foreach ($ids as $id) { $this->Faq_Workspace_Model->Audit($id,null,'run_deleted',$before,array('RunID'=>(int)$run_id)); }
+		}
 		$run_id  = (int) $run_id;
 		$admin_id = $this->session->userdata('admin_id');
 		$now      = date('Y-m-d H:i:s');
 		$this->db->where('RunID', $run_id);
 		$this->db->update('faq_suggestions', array('Status' => 'N', 'UpdateBy' => $admin_id, 'UpdateDate' => $now));
 		$this->db->where('RunID', $run_id);
-		return $this->db->update('faq_suggestion_runs', array('Status' => 'N', 'UpdateBy' => $admin_id, 'UpdateDate' => $now));
-	}
-
-	/** Count of pending suggestions (for the menu / listing badge). */
-	function Count_Pending()
-	{
-		$this->db->where('Status', 'Y');
-		$this->db->where('State', 'pending');
-		return (int) $this->db->count_all_results('faq_suggestions');
+		$this->db->update('faq_suggestion_runs', array('Status' => 'N', 'UpdateBy' => $admin_id, 'UpdateDate' => $now));
+		$this->db->trans_complete(); return $this->db->trans_status();
 	}
 
 	/** One active suggestion row, or null. */
@@ -232,7 +258,8 @@ class Faq_Suggestion_Model extends CI_Model
 			'Description'    => (string) $data['Description'],
 			'Reason'         => isset($data['Reason']) ? (string) $data['Reason'] : null,
 			'DestinationIds' => isset($data['DestinationIds']) ? (string) $data['DestinationIds'] : null,
-			'State'          => isset($data['State']) ? $data['State'] : 'pending',
+			'State'          => isset($data['State']) ? $data['State'] : 'pending_context',
+			'ReviewReason'   => isset($data['ReviewReason']) ? $data['ReviewReason'] : 'Add supporting information or re-evaluate the answer.',
 			'RunKey'         => isset($data['RunKey']) ? (string) $data['RunKey'] : null,
 			'RunID'          => isset($data['RunID']) ? (int) $data['RunID'] : null,
 			'Model'          => isset($data['Model']) ? (string) $data['Model'] : null,
@@ -247,50 +274,20 @@ class Faq_Suggestion_Model extends CI_Model
 		return (int) $this->db->insert_id();
 	}
 
-	/** Update a suggestion's editable fields (Title / Description / DestinationIds). */
-	function Update($id, $data)
-	{
-		$row = array(
-			'Title'          => (string) $data['Title'],
-			'Description'    => (string) $data['Description'],
-			'DestinationIds' => isset($data['DestinationIds']) ? (string) $data['DestinationIds'] : null,
-			'UpdateBy'       => $this->session->userdata('admin_id'),
-			'UpdateDate'     => date('Y-m-d H:i:s'),
-		);
-		$this->db->where('SuggestionID', (int) $id);
-		return $this->db->update('faq_suggestions', $row);
-	}
-
-	/**
-	 * Move a suggestion through its lifecycle. When accepting, $faq_id links the
-	 * real FAQ that was created from it (kept for audit).
-	 */
-	function Set_State($id, $state, $faq_id = null)
-	{
-		if (!in_array($state, array('pending', 'accepted', 'dismissed'), true)) {
-			return false;
-		}
-		$row = array(
-			'State'    => $state,
-			'UpdateBy' => $this->session->userdata('admin_id'),
-			'UpdateDate' => date('Y-m-d H:i:s'),
-		);
-		if ($faq_id !== null) {
-			$row['AcceptedFAQID'] = (int) $faq_id;
-		}
-		$this->db->where('SuggestionID', (int) $id);
-		return $this->db->update('faq_suggestions', $row);
-	}
-
 	/** Soft-delete (Status -> 'N'), the app-wide delete convention. */
 	function Delete($id)
 	{
+		$this->load->model('Faq_Workspace_Model');
+		$before=$this->Read($id);
+		$this->db->trans_start();
+		$this->Faq_Workspace_Model->Audit((int)$id,null,'candidate_deleted',$before,array('Status'=>'N'));
 		$this->db->where('SuggestionID', (int) $id);
-		return $this->db->update('faq_suggestions', array(
+		$this->db->update('faq_suggestions', array(
 			'Status'   => 'N',
 			'UpdateBy' => $this->session->userdata('admin_id'),
 			'UpdateDate' => date('Y-m-d H:i:s'),
 		));
+		$this->db->trans_complete(); return $this->db->trans_status();
 	}
 
 	// ---------------------------------------------------------------------
@@ -331,8 +328,9 @@ class Faq_Suggestion_Model extends CI_Model
 		$dest_map      = $this->Destination_Name_Map();
 		$dest_names    = array_values($dest_map);
 		// The FAQs that already exist — fed to the AI so it skips duplicates up
-		// front, and reused by store_suggestions() for the post-filter safety net.
-		$existing_faqs = $this->Existing_Faqs();
+		// front so the AI can identify questions already covered.
+			$existing_faqs = $this->Existing_Faqs();
+			$this->load->model('Faq_Workspace_Model');
 
 		try {
 			if (strtolower((string) $run->Source) === 'pdf') {
@@ -344,8 +342,12 @@ class Faq_Suggestion_Model extends CI_Model
 				@ini_set('memory_limit', faq_suggestion_memory_limit(get_env('FAQ_SUGGESTION_MEMORY_LIMIT')));
 				$path = FCPATH . self::UPLOAD_DIR . basename((string) $run->StoredName);
 				$ext  = strtolower(pathinfo((string) $run->StoredName, PATHINFO_EXTENSION));
-				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest_file_path($path, $ext, (string) $run->FileName, $dest_names, $existing_faqs, $this->max_suggestions());
+					$this->load->library('FaqSuggestionService');
+					$knowledge=$this->Faq_Workspace_Model->Knowledge_Input((string)$run->FileName);
+					$source_map=array('D1'=>array('source_type'=>'uploaded_document','excerpt'=>'Uploaded document: '.$run->FileName,'ghl_message_id'=>null,'chat_file_id'=>null,'message_index'=>null));
+					$prompt=faq_suggestion_build_file_prompt($dest_names,$existing_faqs,$this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
+					$this->Update_Run($run_id,array('InputText'=>$prompt['input']."\nAttached document: ".$run->FileName));
+					$result = $this->faqsuggestionservice->suggest_file_path($path, $ext, (string) $run->FileName, $dest_names, $existing_faqs, $this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
 			} elseif (strtolower((string) $run->Source) === 'chatfile') {
 				// Mine an uploaded WhatsApp export (.txt, or .zip of several) — parse
 				// it into messages and reuse the same text path as the chats generator.
@@ -363,9 +365,11 @@ class Faq_Suggestion_Model extends CI_Model
 				// Keep the exact text handed to the AI so operators can review the
 				// input a run's suggestions came from (stored before the call so it
 				// survives an AI failure).
-				$this->Update_Run($run_id, array('InputText' => $transcript));
-				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions());
+					$knowledge=$this->Faq_Workspace_Model->Knowledge_Input($transcript,array('batch'=>true,'limit'=>30));
+					$prompt=faq_suggestion_build_prompt($transcript,$dest_names,$existing_faqs,$this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
+					$this->Update_Run($run_id, array('InputText' => $prompt['input']));
+					$this->load->library('FaqSuggestionService');
+					$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
 			} else {
 				$start     = substr((string) $run->StartDate, 0, 10) . ' 00:00:00';
 				$end       = substr((string) $run->EndDate, 0, 10) . ' 23:59:59';
@@ -380,16 +384,22 @@ class Faq_Suggestion_Model extends CI_Model
 					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
 				}
 				// Keep the exact text handed to the AI (see chat-file branch above).
-				$this->Update_Run($run_id, array('InputText' => $transcript));
-				$this->load->library('FaqSuggestionService');
-				$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions());
+					$knowledge=$this->Faq_Workspace_Model->Knowledge_Input($transcript,array('batch'=>true,'limit'=>30));
+					$prompt=faq_suggestion_build_prompt($transcript,$dest_names,$existing_faqs,$this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
+					$this->Update_Run($run_id, array('InputText' => $prompt['input']));
+					$this->load->library('FaqSuggestionService');
+					$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
 			}
 		} catch (Exception $e) {
 			$this->Update_Run($run_id, array('RunState' => 'error', 'ErrorMessage' => $e->getMessage()));
 			return array('created' => 0, 'proposed' => 0, 'reason' => 'error', 'model' => '', 'run_id' => $run_id, 'error' => $e->getMessage());
 		}
 
-		return $this->store_suggestions($run_id, $result, $dest_map, $existing_faqs, isset($source_map) ? $source_map : array()) + array('run_id' => $run_id);
+		try { return $this->store_suggestions($run_id, $result, $dest_map, isset($source_map) ? $source_map : array(),$knowledge['map'],$knowledge['selection']) + array('run_id' => $run_id); }
+		catch (Exception $e) {
+			$this->Update_Run($run_id,array('RunState'=>'error','ErrorMessage'=>$e->getMessage(),'Model'=>$result['model'],'CostUsd'=>$result['cost_usd']));
+			return array('created'=>0,'proposed'=>0,'reason'=>'error','model'=>$result['model'],'run_id'=>$run_id,'error'=>$e->getMessage());
+		}
 	}
 
 	/**
@@ -398,7 +408,7 @@ class Faq_Suggestion_Model extends CI_Model
 	 * model. Shared by the chats and PDF generators. Returns
 	 * ['created'=>int, 'proposed'=>int, 'reason'=>string, 'model'=>string].
 	 */
-	protected function store_suggestions($run_id, $result, $dest_map, $existing_faqs = null, $source_map = array())
+	protected function store_suggestions($run_id, $result, $dest_map, $source_map = array(), $knowledge_map=array(), $knowledge_selection=null)
 	{
 		$this->load->model('Faq_Model');
 
@@ -407,34 +417,13 @@ class Faq_Suggestion_Model extends CI_Model
 		foreach ($dest_map as $id => $name) {
 			$name_to_id[$name] = $id;
 		}
-		$parsed = faq_suggestion_parse_response($result['raw'], $name_to_id, $this->max_suggestions());
-
-		// Safety net: drop any candidate whose title OR question already matches an
-		// existing FAQ / prior suggestion (the prompt asked the model to skip these,
-		// but this catches a reworded duplicate it may have missed).
-		if ($existing_faqs === null) {
-			$existing_faqs = $this->Existing_Faqs();
-		}
-		$existing_titles    = array();
-		$existing_questions = array();
-		foreach ($existing_faqs as $f) {
-			$existing_titles[] = isset($f['title']) ? $f['title'] : '';
-			foreach ((isset($f['questions']) && is_array($f['questions'])) ? $f['questions'] : array() as $q) {
-				$existing_questions[] = $q;
-			}
-		}
-		$parsed = faq_suggestion_filter_new($parsed, $existing_titles, $existing_questions);
-
-		// Embedding semantic-dedupe: catch a reworded question the title/question
-		// filter can't (different words, same meaning/answer). Fail-open — any
-		// embedding hiccup leaves the already text-filtered $parsed untouched.
-		$parsed = $this->semantic_dedupe($parsed, $existing_faqs);
+		$parsed = faq_suggestion_parse_response($result['raw'], $name_to_id, $this->max_suggestions(), true);
 
 		// Build every valid suggestion first, so the run's AI cost can be split
 		// evenly across the rows actually stored (one AI call produces them all).
 		$rows = array();
 		foreach ($parsed as $s) {
-			$built = Faq_Model::Build_Items(
+			$built = isset($s['assessment'])?array('items'=>$s['items'],'error'=>null):Faq_Model::Build_Items(
 				array_map(function ($it) { return $it['q']; }, $s['items']),
 				array_map(function ($it) { return $it['a']; }, $s['items'])
 			);
@@ -442,11 +431,13 @@ class Faq_Suggestion_Model extends CI_Model
 				continue;
 			}
 			$rows[] = array(
+				'ReviewReason'   => 'Review the draft answer and supporting evidence.',
 				'Title'          => $s['title'],
 				'Description'    => Faq_Model::Encode_Items($built['items']),
 				'Reason'         => isset($s['reason']) ? $s['reason'] : '',
 				'DestinationIds' => implode(',', $s['destination_ids']),
 				'SourceRefs'     => isset($s['source_refs']) && is_array($s['source_refs']) ? $s['source_refs'] : array(),
+				'AssessmentCandidate'=>isset($s['assessment'])?$s:null,
 			);
 		}
 
@@ -454,17 +445,19 @@ class Faq_Suggestion_Model extends CI_Model
 		$cost_each = empty($rows) ? 0 : round(((float) $result['cost_usd']) / count($rows), 6);
 		$created   = 0;
 		foreach ($rows as $row) {
+			$assessed=$row['AssessmentCandidate']; unset($row['AssessmentCandidate']);
 			$source_refs = $row['SourceRefs'];
 			unset($row['SourceRefs']); // this is evidence metadata, not a faq_suggestions column
-			$row['State']   = 'pending';
+			$row['State']   = 'pending_context';
 			$row['RunKey']  = $run_key;
 			$row['RunID']   = (int) $run_id;
 			$row['Model']   = $result['model'];
 			$row['CostUsd'] = $cost_each;
 			$suggestion_id = $this->Create($row);
-			foreach ($source_refs as $ref) {
-				if (isset($source_map[$ref])) { $this->Create_Source($suggestion_id, $run_id, $ref, $source_map[$ref]); }
-			}
+			$this->load->model('Faq_Workspace_Model');
+			$this->Faq_Workspace_Model->Audit($suggestion_id, null, 'extracted', null, $row);
+			if ($assessed) { $this->Faq_Workspace_Model->Apply_Assessment($suggestion_id,$assessed,$source_map,$knowledge_map,null,$run_id,$knowledge_selection); }
+			else { foreach ($source_refs as $ref) { if (isset($source_map[$ref])) { $this->Create_Source($suggestion_id, $run_id, $ref, $source_map[$ref]); } } }
 			$created++;
 		}
 
@@ -485,7 +478,7 @@ class Faq_Suggestion_Model extends CI_Model
 	}
 
 	/** Store a validated evidence link returned by the model for one suggestion. */
-	protected function Create_Source($suggestion_id, $run_id, $ref, $source)
+	function Create_Source($suggestion_id, $run_id, $ref, $source)
 	{
 		$this->db->insert('faq_suggestion_sources', array(
 			'SuggestionID' => (int) $suggestion_id, 'RunID' => (int) $run_id, 'SourceRef' => (string) $ref,
@@ -495,73 +488,6 @@ class Faq_Suggestion_Model extends CI_Model
 			'MessageIndex' => !empty($source['message_index']) ? (int) $source['message_index'] : null,
 			'SourceExcerpt' => (string) $source['excerpt'],
 		));
-	}
-
-	/**
-	 * Drop candidates that are semantically near an existing FAQ (or a candidate
-	 * kept earlier in this batch) by comparing OpenAI embeddings — the layer that
-	 * catches a reworded question the normalised title/question filter misses.
-	 *
-	 * One batched embeddings call covers every existing FAQ + every candidate;
-	 * the pure faq_suggestion_filter_semantic then keeps only the non-duplicates.
-	 * Disabled when the threshold is out of (0, 1); fail-open on any error — the
-	 * incoming $parsed (already text-filtered) is returned unchanged so a flaky
-	 * embeddings call never blocks a run.
-	 */
-	protected function semantic_dedupe($parsed, $existing_faqs)
-	{
-		$parsed = array_values((array) $parsed);
-		if (empty($parsed)) {
-			return $parsed;
-		}
-		$threshold = $this->semantic_threshold();
-		if ($threshold <= 0 || $threshold >= 1) {
-			return $parsed; // pass disabled via config
-		}
-
-		// Canonical embed text for each existing FAQ and each candidate.
-		$existing_texts = array();
-		foreach ((array) $existing_faqs as $f) {
-			$items = isset($f['items']) && is_array($f['items']) ? $f['items'] : array();
-			$text  = faq_suggestion_embed_text(isset($f['title']) ? $f['title'] : '', $items);
-			if ($text !== '') {
-				$existing_texts[] = $text;
-			}
-		}
-		$sug_texts = array();
-		foreach ($parsed as $s) {
-			$items = isset($s['items']) && is_array($s['items']) ? $s['items'] : array();
-			$sug_texts[] = faq_suggestion_embed_text(isset($s['title']) ? $s['title'] : '', $items);
-		}
-
-		try {
-			$this->load->library('FaqSuggestionService');
-			// One call for both sets, then split back out by count (order preserved).
-			$all     = array_merge($existing_texts, $sug_texts);
-			$vectors = $this->faqsuggestionservice->embed($all);
-			$existing_vectors = array_slice($vectors, 0, count($existing_texts));
-			$sug_vectors      = array_slice($vectors, count($existing_texts));
-		} catch (Exception $e) {
-			// Fail-open: keep the text-filtered candidates as-is.
-			log_message('error', 'FaqSuggestion semantic_dedupe skipped: ' . $e->getMessage());
-			return $parsed;
-		}
-
-		return faq_suggestion_filter_semantic($parsed, $sug_vectors, $existing_vectors, $threshold);
-	}
-
-	/**
-	 * Cosine-similarity cut-off for the embedding dedupe (default 0.86). At/above
-	 * it a candidate counts as a duplicate. Override with
-	 * FAQ_SUGGESTION_SEMANTIC_THRESHOLD; set it to 0 (or >= 1) to turn the pass off.
-	 */
-	protected function semantic_threshold()
-	{
-		$n = get_env('FAQ_SUGGESTION_SEMANTIC_THRESHOLD');
-		if ($n === null || $n === '' || !is_numeric($n)) {
-			return 0.86;
-		}
-		return (float) $n;
 	}
 
 	/**
@@ -606,7 +532,7 @@ class Faq_Suggestion_Model extends CI_Model
 	 */
 	protected function Recent_Ghl_Messages($start, $end, $phone_key = '')
 	{
-		$this->db->select('id, direction, body');
+		$this->db->select('id, direction, body, conversation_id');
 		$this->db->from('ghl_messages');
 		$this->db->where('date_added >=', $start);
 		$this->db->where('date_added <=', $end);
@@ -707,7 +633,7 @@ class Faq_Suggestion_Model extends CI_Model
 				$content = $zip->getFromIndex($i);
 				if ($content === false || trim($content) === '') { continue; }
 				foreach (chat_history_parse($content) as $message_index => $m) {
-					$m['source_type'] = 'uploaded_chat_file'; $m['message_index'] = $message_index + 1;
+					$m['source_type'] = 'uploaded_chat_file'; $m['message_index'] = $message_index + 1; $m['conversation_key']='upload:'.hash('sha256',$entry);
 					$messages[] = $m;
 				}
 			}
@@ -716,7 +642,7 @@ class Faq_Suggestion_Model extends CI_Model
 			$text = (string) @file_get_contents($path);
 			if (trim($text) !== '') {
 				foreach (chat_history_parse($text) as $message_index => $m) {
-					$m['source_type'] = 'uploaded_chat_file'; $m['message_index'] = $message_index + 1;
+					$m['source_type'] = 'uploaded_chat_file'; $m['message_index'] = $message_index + 1; $m['conversation_key']='upload:single';
 					$messages[] = $m;
 				}
 			}
@@ -724,15 +650,17 @@ class Faq_Suggestion_Model extends CI_Model
 		return $messages;
 	}
 
-	/**
-	 * The FAQs that already exist — active FAQs plus pending/accepted suggestions
-	 * (each ['title'=>, 'questions'=>[...], 'items'=>[['q'=>,'a'=>],...]]). Used
-	 * three ways so a run doesn't re-propose an FAQ that already exists or is
-	 * awaiting review: fed into the AI prompt (compare-first), into the post-filter
-	 * safety net (faq_suggestion_filter_new matches titles AND questions), and into
-	 * the embedding semantic-dedupe pass (uses 'items' so the ANSWER body counts).
-	 * Q&A text comes from decoding the stored Description JSON via Faq_Model.
-	 */
+	/** Reuse the saved upload for contextual expansion; staff do not upload again. */
+	function Uploaded_Chat_Evidence($run_id)
+	{
+		$run=$this->Read_Run($run_id);
+		if (!$run || $run->Source!=='chatfile') { return array(); }
+		$path=FCPATH.self::UPLOAD_DIR.basename((string)$run->StoredName);
+		$messages=$this->Chat_File_Messages($path,strtolower(pathinfo($path,PATHINFO_EXTENSION)));
+		return faq_suggestion_transcript_with_sources(array(),$messages,0)['sources'];
+	}
+
+	/** Existing FAQ titles and questions supplied to the extraction prompt. */
 	function Existing_Faqs()
 	{
 		$this->load->model('Faq_Model');
@@ -744,45 +672,24 @@ class Faq_Suggestion_Model extends CI_Model
 
 		$this->db->select('Title, Description');
 		$this->db->where('Status', 'Y');
-		$this->db->where_in('State', array('pending', 'accepted'));
+		$this->db->where('State !=', 'dismissed');
 		foreach ($this->db->get('faq_suggestions')->result() as $r) {
 			$out[] = $this->existing_faq_entry($r->Title, $r->Description);
 		}
 		return $out;
 	}
 
-	/**
-	 * Shape one existing FAQ into the record the dedupe layers consume:
-	 *   'title'     — the FAQ title
-	 *   'questions' — its question texts (the title/question post-filter)
-	 *   'items'     — its full [['q'=>,'a'=>], ...] pairs (the semantic embed text,
-	 *                 which needs the ANSWER body to catch a reworded question that
-	 *                 shares the same answer).
-	 */
+	/** Existing titles and questions let the extraction prompt avoid repeats. */
 	protected function existing_faq_entry($title, $description)
 	{
-		$items     = $this->decode_qa($description);
 		$questions = array();
-		foreach ($items as $it) {
-			if ($it['q'] !== '') {
-				$questions[] = $it['q'];
-			}
-		}
-		return array('title' => (string) $title, 'questions' => $questions, 'items' => $items);
-	}
-
-	/** The [['q'=>,'a'=>], ...] pairs inside a stored FAQ Description JSON (q non-empty). */
-	protected function decode_qa($description)
-	{
-		$items = array();
 		foreach (Faq_Model::Decode_Items((string) $description) as $it) {
 			$q = trim((string) (isset($it['q']) ? $it['q'] : ''));
-			$a = trim((string) (isset($it['a']) ? $it['a'] : ''));
 			if ($q !== '') {
-				$items[] = array('q' => $q, 'a' => $a);
+				$questions[] = $q;
 			}
 		}
-		return $items;
+		return array('title' => (string) $title, 'questions' => $questions);
 	}
 
 	/** Active destination categories as CategoryID => Name (IsDestination='YES'). */

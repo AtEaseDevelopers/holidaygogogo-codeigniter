@@ -1,5 +1,8 @@
 <?php
 defined('BASEPATH') OR exit('No direct script access allowed');
+require_once __DIR__ . '/faq_extraction_helper.php';
+require_once __DIR__ . '/faq_workspace_helper.php';
+require_once __DIR__ . '/faq_knowledge_helper.php';
 
 /**
  * FAQ AI Suggestion helpers — pure, DB-free functions behind the "FAQ AI
@@ -13,6 +16,22 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  * (see tests/helpers/FaqSuggestionHelperTest.php). The controller / model /
  * service only do the IO around them.
  */
+
+if (!function_exists('faq_suggestion_json_input')) {
+	/** JSON mode requires an explicit JSON instruction in the input messages. */
+	function faq_suggestion_json_input($input)
+	{
+		$messages = is_string($input)
+			? array(array('role' => 'user', 'content' => $input))
+			: $input;
+		// The separate Responses instructions field does not satisfy this check.
+		array_unshift($messages, array(
+			'role' => 'system',
+			'content' => 'Return only a JSON object following the supplied instructions.',
+		));
+		return $messages;
+	}
+}
 
 if (!function_exists('faq_suggestion_memory_limit')) {
 	/**
@@ -216,7 +235,7 @@ if (!function_exists('faq_suggestion_transcript_with_sources')) {
 			$dir = strtolower((string) (isset($r['direction']) ? $r['direction'] : ''));
 			$msgs[] = array('who' => ($dir === 'inbound') ? 'Customer' : 'Agent', 'body' => $body,
 				'source_type' => 'ghl_message', 'ghl_message_id' => isset($r['id']) ? (int) $r['id'] : null,
-				'chat_file_id' => null, 'message_index' => null);
+				'chat_file_id' => null, 'message_index' => null, 'conversation_key'=>isset($r['conversation_id'])?'ghl:'.$r['conversation_id']:'');
 		}
 		foreach ((array) $wa_messages as $m) {
 			if (!empty($m['system'])) {
@@ -229,7 +248,8 @@ if (!function_exists('faq_suggestion_transcript_with_sources')) {
 			$msgs[] = array('who' => !empty($m['outbound']) ? 'Agent' : 'Customer', 'body' => $body,
 				'source_type' => isset($m['source_type']) ? (string) $m['source_type'] : 'whatsapp_history',
 				'ghl_message_id' => null, 'chat_file_id' => isset($m['chat_file_id']) ? (int) $m['chat_file_id'] : null,
-				'message_index' => isset($m['message_index']) ? (int) $m['message_index'] : null);
+				'message_index' => isset($m['message_index']) ? (int) $m['message_index'] : null,
+				'conversation_key'=>isset($m['conversation_key'])?$m['conversation_key']:(isset($m['chat_file_id'])?'wa:'.$m['chat_file_id']:''));
 		}
 
 		// 2) Drop noise.
@@ -251,16 +271,19 @@ if (!function_exists('faq_suggestion_transcript_with_sources')) {
 			if ($k === '') {
 				continue;
 			}
-			$counts[$k] = (isset($counts[$k]) ? $counts[$k] : 0) + 1;
+			$ck=$m['conversation_key'].'|'.$k;
+			$counts[$ck] = (isset($counts[$ck]) ? $counts[$ck] : 0) + 1;
 		}
 
 		$seen  = array();
 		$lines = array();
 		$sources = array();
 		$number = 0;
+		$conversations=array();
 		foreach ($kept as $m) {
 			$k  = faq_suggestion_norm_msg($m['body']);
-			$sk = $m['who'] . '|' . $k;
+			$ck=$m['conversation_key'].'|'.$k;
+			$sk = $m['who'] . '|' . $ck;
 			if ($k !== '' && isset($seen[$sk])) {
 				continue; // duplicate of an already-emitted line (this side)
 			}
@@ -270,14 +293,19 @@ if (!function_exists('faq_suggestion_transcript_with_sources')) {
 			$number++;
 			$ref = 'S' . $number;
 			$line = ($include_refs ? '[' . $ref . '] ' : '') . $m['who'] . ': ' . $m['body'];
-			if ($m['who'] === 'Customer' && $k !== '' && isset($counts[$k]) && $counts[$k] > 1) {
-				$line .= ' (asked ' . $counts[$k] . ' times)';
+			if ($m['who'] === 'Customer' && $k !== '' && isset($counts[$ck]) && $counts[$ck] > 1) {
+				$line .= ' (asked ' . $counts[$ck] . ' times)';
+			}
+			if ($include_refs && $m['conversation_key']!=='') {
+				if (!isset($conversations[$m['conversation_key']])) { $conversations[$m['conversation_key']]='C'.(count($conversations)+1); }
+				$line.=' [conversation '.$conversations[$m['conversation_key']].']';
 			}
 			$lines[] = $line;
 			$sources[$ref] = array(
 				'source_type' => $m['source_type'], 'ghl_message_id' => $m['ghl_message_id'],
 				'chat_file_id' => $m['chat_file_id'], 'message_index' => $m['message_index'],
 				'excerpt' => $m['who'] . ': ' . $m['body'],
+				'conversation_key'=>$m['conversation_key'],
 			);
 		}
 
@@ -306,9 +334,8 @@ if (!function_exists('faq_suggestion_transcript_with_sources')) {
 if (!function_exists('faq_suggestion_existing_block')) {
 	/**
 	 * Render the FAQs that already exist into a compact bullet list for the
-	 * prompt, so the model can compare against them and skip anything already
-	 * covered (a semantic dedupe the title-only post-filter can't do — it catches
-	 * a reworded duplicate before it's ever proposed). $existing_faqs is a list of
+	 * prompt, so the model can compare against them and skip questions already
+	 * covered. $existing_faqs is a list of
 	 * ['title'=>string, 'questions'=>[string,...]]; each becomes
 	 *   "- <title> (<q1>; <q2>; …)".
 	 * Capped at $max entries so a large FAQ corpus can't blow the prompt up.
@@ -346,169 +373,24 @@ if (!function_exists('faq_suggestion_existing_block')) {
 }
 
 if (!function_exists('faq_suggestion_build_prompt')) {
-	/**
-	 * Build the OpenAI Responses API instructions + input for FAQ mining. The
-	 * model is asked to return a JSON OBJECT (the literal word "json" appears in
-	 * the input, which the Responses API json_object mode requires) with a
-	 * "suggestions" list; each suggestion carries a title, optional destination
-	 * names (chosen from the provided vocabulary) and a list of question/answer
-	 * pairs — the same shape a FAQ stores. $destination_names is the allowed
-	 * destination vocabulary so the model tags with real, resolvable destinations.
-	 * $existing_faqs (['title'=>, 'questions'=>[]] list) are the FAQs that already
-	 * exist — injected so the model skips duplicates up front (see
-	 * faq_suggestion_existing_block).
-	 */
-	function faq_suggestion_build_prompt($transcript, $destination_names = array(), $existing_faqs = array(), $max = 0)
-	{
-		$dest = array();
-		foreach ((array) $destination_names as $n) {
-			$n = trim((string) $n);
-			if ($n !== '') {
-				$dest[] = $n;
-			}
-		}
-		$dest_line = empty($dest) ? '(none configured)' : implode(', ', $dest);
-
-		// When a cap is given, tell the AI the ceiling up front so it doesn't spend
-		// output tokens on suggestions we'd only discard at parse time.
-		$max      = (int) $max;
-		$cap_line = $max > 0
-			? "Return AT MOST {$max} suggestions — if you can extract more, keep the {$max} best-supported and most actionable ones; do not discard a well-supported tour-specific question merely because it is less broadly reusable. "
-			: "";
-
-		$instructions =
-			"You are a knowledge analyst for a Malaysian tour agency. " .
-			"You read recent WhatsApp / CRM conversations between customers and sales agents " .
-			"and distil them into reusable FAQ entries. " .
-			"Be EXHAUSTIVE: list every distinct question or reusable piece of knowledge you can extract from the chats — " .
-			"any topic a FAQ could capture (e.g. pricing & deposits, payment, booking / cancellation / refund process, " .
-			"what's included, visa & documents, flights & logistics, accommodation, transport, foods, " .
-			"activities & attractions, environment & scenery, itinerary specifics, and any niche or one-off point). " .
-			"Do NOT limit yourself to the most common questions; include the less frequent and edge-case ones too. " .
-			"Group near-identical questions together. Write the answer as a complete, warm, READY-TO-SEND reply that a sales agent " .
-			"can COPY and PASTE straight to a customer with no editing — address the customer directly (\"you\"), keep the tone " .
-			"friendly and professional, and make it self-contained (a full reply, not internal notes or a terse definition). " .
-			"Be DETAILED and, whenever the answer involves a process or several points (e.g. how to book, pay, cancel, or apply " .
-			"for a visa), lay it out as clear STEP-BY-STEP instructions — use numbered steps (1., 2., 3. …) or short bullet " .
-			"lines so the customer can follow along easily; cover the whole flow end to end rather than a one-line summary. " .
-			"Preserve tour-specific facts when the conversation supports them. Do NOT turn a question about a named tour, package, " .
-			"itinerary day, departure, airline, hotel, meal, inclusion, exclusion, optional activity, eligibility, or tour condition " .
-			"into a generic agency policy. Keep the tour/package name and the factual detail in both the question and answer, and tag " .
-			"the applicable destination whenever it is in the allowed list. Only combine conversations when they concern the same tour " .
-			"or the same factual answer. Remove customer-only details (name, phone, personal travel date, and a bespoke quote), but retain " .
-			"a published or generally applicable package price, departure date, or condition when the agent clearly states it applies to that tour. " .
-			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came up or why it is useful. " .
-			"Order the suggestions by strength of evidence and customer usefulness; tour-specific and agency-wide FAQs are both valuable. " .
-			$cap_line .
-			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
-			"skip it even if you would word the question differently; only return genuinely NEW questions. " .
-			"Never include a specific customer's name, phone number, a price quoted to one person, or any other private data. " .
-			"Answer ONLY with a JSON object.";
-
-		$existing_block = faq_suggestion_existing_block($existing_faqs);
-		$existing_line  = $existing_block === '' ? '' :
-			"EXISTING FAQs — these are ALREADY answered, so do NOT propose any FAQ already covered here " .
-			"(skip it even if worded differently); only return questions NOT in this list:\n" .
-			$existing_block . "\n\n";
-
-		$input =
-			"Return json with this exact shape:\n" .
-			"{\"suggestions\":[{" .
-			"\"title\":\"short FAQ title\"," .
-			"\"reason\":\"one sentence: where this came up or why it is useful\"," .
-			"\"source_refs\":[\"S1\"]," .
-			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
-			"\"items\":[{\"q\":\"the question\",\"a\":\"a detailed, step-by-step, ready-to-send reply to the customer\"}]" .
-			"}]}\n\n" .
-			($max > 0
-				? "Return at most {$max} FAQs; keep well-supported tour-specific FAQs as well as agency-wide ones.\n\n"
-				: "List every FAQ you can extract; retain supported tour-specific details.\n\n") .
-			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
-			$dest_line . "\n\n" .
-			$existing_line .
-			"Conversations (each [S#] is an evidence reference):\n" . (string) $transcript .
-			"\n\nFor every suggestion, source_refs MUST contain only the [S#] reference(s) that directly support it."
-			. " Use an empty array only when no source reference is available.";
-
-		return array('instructions' => $instructions, 'input' => $input);
-	}
+    /** Extract candidates from a labelled conversation transcript. */
+    function faq_suggestion_build_prompt($transcript, $destination_names = array(), $existing_faqs = array(), $max = 0, $knowledge=array(), $packages=array())
+    {
+        return array('instructions'=>faq_suggestion_extraction_instructions($max),
+            'input'=>faq_suggestion_candidate_input($destination_names,$existing_faqs,$knowledge,$packages).
+                ((int)$max>0?"\nReturn at most ".(int)$max." FAQs; keep well-supported tour-specific FAQs as well as agency-wide ones.":"\nList every FAQ you can extract; retain supported tour-specific details.").
+                "\nConversations (each [S#] is an evidence reference):\n".(string)$transcript);
+    }
 }
 
 if (!function_exists('faq_suggestion_build_file_prompt')) {
-	/**
-	 * Build the OpenAI Responses API instructions + user prelude text for mining
-	 * FAQs from an UPLOADED DOCUMENT (a PDF brochure / itinerary / price sheet or
-	 * a screenshot). The caller appends the file itself as an input_file /
-	 * input_image content part. Same JSON contract as
-	 * faq_suggestion_build_prompt() so faq_suggestion_parse_response() handles
-	 * both — the literal word "json" appears so Responses json_object mode is
-	 * satisfied. $destination_names is the allowed destination vocabulary.
-	 * $existing_faqs (['title'=>, 'questions'=>[]] list) are the FAQs that already
-	 * exist — injected so the model skips duplicates up front.
-	 */
-	function faq_suggestion_build_file_prompt($destination_names = array(), $existing_faqs = array(), $max = 0)
-	{
-		$dest = array();
-		foreach ((array) $destination_names as $n) {
-			$n = trim((string) $n);
-			if ($n !== '') {
-				$dest[] = $n;
-			}
-		}
-		$dest_line = empty($dest) ? '(none configured)' : implode(', ', $dest);
-
-		// When a cap is given, tell the AI the ceiling up front so it doesn't spend
-		// output tokens on suggestions we'd only discard at parse time.
-		$max      = (int) $max;
-		$cap_line = $max > 0
-			? "Return AT MOST {$max} suggestions — if you can extract more, keep only the {$max} most broadly useful ones. "
-			: "";
-
-		$instructions =
-			"You are a knowledge analyst for a Malaysian tour agency. " .
-			"You read an uploaded document (a tour brochure, itinerary, price sheet, or a screenshot of one) " .
-			"and distil it into reusable FAQ entries. " .
-			"Be EXHAUSTIVE: list every distinct question or reusable piece of knowledge the document supports — " .
-			"any topic a FAQ could capture (e.g. pricing & deposits, payment, booking / cancellation / refund process, " .
-			"what's included, visa & documents, flights & logistics, accommodation, transport, foods, " .
-			"activities & attractions, environment & scenery, itinerary specifics, and any niche or one-off detail). " .
-			"Do NOT limit yourself to the most common questions; include the less frequent and edge-case ones too. " .
-			"Write the answer as a complete, warm, READY-TO-SEND reply that a sales agent can COPY and PASTE straight to a " .
-			"customer with no editing — address the customer directly (\"you\"), keep the tone friendly and professional, and " .
-			"make it self-contained (a full reply, not internal notes or a terse definition), grounded in the document's contents. " .
-			"Be DETAILED and, whenever the answer involves a process or several points (e.g. how to book, pay, cancel, or apply " .
-			"for a visa), lay it out as clear STEP-BY-STEP instructions — use numbered steps (1., 2., 3. …) or short bullet " .
-			"lines so the customer can follow along easily; cover the whole flow end to end rather than a one-line summary. " .
-			"For EACH FAQ also give a short 'reason' (one sentence) noting where it came from or why it is useful. " .
-			"Roughly ORDER the suggestions with the more broadly useful ones first. " .
-			$cap_line .
-			"Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
-			"skip it even if worded differently; only return genuinely NEW questions. " .
-			"Never invent facts not supported by the document, and never include a specific customer's private data. " .
-			"Answer ONLY with a JSON object.";
-
-		$existing_block = faq_suggestion_existing_block($existing_faqs);
-		$existing_line  = $existing_block === '' ? '' :
-			"EXISTING FAQs — these are ALREADY answered, so do NOT propose any FAQ already covered here " .
-			"(skip it even if worded differently); only return questions NOT in this list:\n" .
-			$existing_block . "\n\n";
-
-		$input =
-			"Return json with this exact shape:\n" .
-			"{\"suggestions\":[{" .
-			"\"title\":\"short FAQ title\"," .
-			"\"reason\":\"one sentence: where this came from or why it is useful\"," .
-			"\"destinations\":[\"zero or more of the allowed destination names\"]," .
-			"\"items\":[{\"q\":\"the question\",\"a\":\"a detailed, step-by-step, ready-to-send reply to the customer\"}]" .
-			"}]}\n\n" .
-			"Allowed destinations (copy names verbatim, or leave the array empty when the FAQ is not destination-specific): " .
-			$dest_line . "\n\n" .
-			$existing_line .
-			($max > 0 ? "Return at most {$max} FAQs; put the more broadly useful ones first.\n\n" : "") .
-			"Read the attached document and extract the FAQs now.";
-
-		return array('instructions' => $instructions, 'input' => $input);
-	}
+    /** Extract candidates from the attached document. */
+    function faq_suggestion_build_file_prompt($destination_names = array(), $existing_faqs = array(), $max = 0, $knowledge=array(), $packages=array())
+    {
+        return array('instructions'=>faq_suggestion_extraction_instructions($max,true),
+            'input'=>faq_suggestion_candidate_input($destination_names,$existing_faqs,$knowledge,$packages).
+                "\nRead the attached document, referenced as D1. Use empty source_refs when no [S#] references are supplied; answer_refs may include D1.");
+    }
 }
 
 if (!function_exists('faq_suggestion_logs_to_prune')) {
@@ -554,6 +436,7 @@ if (!function_exists('faq_suggestion_run_scope')) {
 		};
 
 		$source = strtolower(trim((string) $get('Source')));
+		if ($source === 'reevaluate') { return 'Re-evaluation · '.trim((string)$get('FileName')); }
 		if ($source === 'pdf') {
 			$file = trim((string) $get('FileName'));
 			return $file !== '' ? $file : 'Uploaded PDF';
@@ -634,7 +517,7 @@ if (!function_exists('faq_suggestion_parse_response')) {
 	 * A suggestion with no title or no complete Q&A item is dropped. The list is
 	 * capped at $max entries.
 	 */
-	function faq_suggestion_parse_response($decoded, $dest_name_to_id = array(), $max = 30)
+	function faq_suggestion_parse_response($decoded, $dest_name_to_id = array(), $max = 30, $strict_review = false)
 	{
 		if (is_string($decoded)) {
 			$decoded = json_decode($decoded, true);
@@ -642,6 +525,7 @@ if (!function_exists('faq_suggestion_parse_response')) {
 		if (!is_array($decoded)) {
 			return array();
 		}
+		if ($strict_review && (!isset($decoded['suggestions']) || !is_array($decoded['suggestions']))) { return array(); }
 		// Accept either {"suggestions":[...]} or a bare [...] list.
 		if (isset($decoded['suggestions']) && is_array($decoded['suggestions'])) {
 			$list = $decoded['suggestions'];
@@ -664,17 +548,21 @@ if (!function_exists('faq_suggestion_parse_response')) {
 			if (!is_array($s)) {
 				continue;
 			}
+			$assessed=$strict_review && (array_key_exists('label',$s) || array_key_exists('status',$s));
+			if ($assessed) { try { $assessment=faq_suggestion_assessment($s); } catch (Exception $e) { continue; } }
+			if ($strict_review && (!isset($s['title']) || !is_string($s['title']) ||
+				(isset($s['reason']) && !is_string($s['reason'])))) { continue; }
 			$title = trim((string) (isset($s['title']) ? $s['title'] : ''));
 			if ($title === '') {
 				continue;
 			}
 			if (strlen($title) > 255) {
-				$title = substr($title, 0, 255);
+				$title = mb_strcut($title, 0, 255, 'UTF-8');
 			}
 
 			$reason = trim((string) (isset($s['reason']) ? $s['reason'] : ''));
 			if (strlen($reason) > 500) {
-				$reason = substr($reason, 0, 500);
+				$reason = mb_strcut($reason, 0, 500, 'UTF-8');
 			}
 
 			$items = array();
@@ -683,9 +571,12 @@ if (!function_exists('faq_suggestion_parse_response')) {
 				if (!is_array($it)) {
 					continue;
 				}
+				if ($strict_review && (!isset($it['q']) || !is_string($it['q']) ||
+					(isset($it['a']) && !is_string($it['a'])))) { continue; }
 				$q = trim((string) (isset($it['q']) ? $it['q'] : ''));
 				$a = trim((string) (isset($it['a']) ? $it['a'] : ''));
-				if ($q === '' || $a === '') {
+				if ($strict_review && !$assessed) { $a = 'insufficient verified source'; }
+				if ($q === '' || (!$assessed && $a === '')) {
 					continue;
 				}
 				$items[] = array('q' => $q, 'a' => $a);
@@ -697,6 +588,7 @@ if (!function_exists('faq_suggestion_parse_response')) {
 			$dest_ids = array();
 			$raw_dests = isset($s['destinations']) && is_array($s['destinations']) ? $s['destinations'] : array();
 			foreach ($raw_dests as $dn) {
+				if ($strict_review && !is_string($dn)) { continue; }
 				$k = strtolower(trim((string) $dn));
 				if ($k !== '' && isset($map[$k]) && !in_array($map[$k], $dest_ids, true)) {
 					$dest_ids[] = $map[$k];
@@ -705,209 +597,23 @@ if (!function_exists('faq_suggestion_parse_response')) {
 
 			$refs = array();
 			foreach ((isset($s['source_refs']) && is_array($s['source_refs'])) ? $s['source_refs'] : array() as $ref) {
+				if ($strict_review && !is_string($ref)) { continue; }
 				$ref = strtoupper(trim((string) $ref));
 				if (preg_match('/^S[1-9][0-9]*$/', $ref) && !in_array($ref, $refs, true)) { $refs[] = $ref; }
 			}
-			$out[] = array('title' => $title, 'reason' => $reason, 'destination_ids' => $dest_ids, 'items' => $items, 'source_refs' => $refs);
+			$candidate = array('title' => $title, 'reason' => $reason, 'destination_ids' => $dest_ids, 'items' => $items, 'source_refs' => $refs);
+			if ($strict_review) {
+				if ($assessed) {
+					$candidate['assessment']=$assessment;
+					$all_refs=array_merge($refs,$assessment['answer_refs']);
+					$candidate['source_refs']=array_values(array_unique(array_filter($all_refs,function($ref){return preg_match('/^S[1-9][0-9]*$/D',$ref);} )));
+				}
+			}
+			$out[] = $candidate;
 			if ($max > 0 && count($out) >= $max) {
 				break;
 			}
 		}
 		return $out;
-	}
-}
-
-if (!function_exists('faq_suggestion_norm_title')) {
-	/**
-	 * Normalise a title for duplicate detection: lowercase, every run of
-	 * non-alphanumerics collapsed to a single space, trimmed. Pure.
-	 */
-	function faq_suggestion_norm_title($title)
-	{
-		$t = strtolower(trim((string) $title));
-		$t = preg_replace('/[^a-z0-9]+/', ' ', $t);
-		return trim($t);
-	}
-}
-
-if (!function_exists('faq_suggestion_filter_new')) {
-	/**
-	 * Safety-net dedupe (the prompt already asks the model to skip existing FAQs;
-	 * this catches what slips through). Drop a suggestion when its normalised title
-	 * OR any of its normalised questions already exists — matched against
-	 * $existing_titles AND $existing_questions (both drawn from FAQs / prior
-	 * suggestions), or against something emitted earlier in this same batch. This
-	 * is what makes a REWORDED title for an existing question ("Deposit info" vs
-	 * the FAQ "Deposit amount", both asking "How much is the deposit?") still get
-	 * dropped. Order is preserved. Pure.
-	 */
-	function faq_suggestion_filter_new($suggestions, $existing_titles = array(), $existing_questions = array())
-	{
-		$seen = array();
-		$remember = function ($text) use (&$seen) {
-			$key = faq_suggestion_norm_title($text);
-			if ($key !== '') {
-				$seen[$key] = true;
-			}
-		};
-		foreach ((array) $existing_titles as $t) {
-			$remember($t);
-		}
-		foreach ((array) $existing_questions as $q) {
-			$remember($q);
-		}
-
-		$out = array();
-		foreach ((array) $suggestions as $s) {
-			$title_key = faq_suggestion_norm_title(isset($s['title']) ? $s['title'] : '');
-			if ($title_key === '') {
-				continue;
-			}
-			// This suggestion's keys: its title plus each of its questions.
-			$keys = array($title_key);
-			if (isset($s['items']) && is_array($s['items'])) {
-				foreach ($s['items'] as $it) {
-					$qk = faq_suggestion_norm_title(isset($it['q']) ? $it['q'] : '');
-					if ($qk !== '') {
-						$keys[] = $qk;
-					}
-				}
-			}
-			$dup = false;
-			foreach ($keys as $k) {
-				if (isset($seen[$k])) {
-					$dup = true;
-					break;
-				}
-			}
-			if ($dup) {
-				continue;
-			}
-			foreach ($keys as $k) {
-				$seen[$k] = true;
-			}
-			$out[] = $s;
-		}
-		return $out;
-	}
-}
-
-if (!function_exists('faq_suggestion_embed_text')) {
-	/**
-	 * Build the canonical text used to EMBED one FAQ / candidate for semantic
-	 * dedupe. It folds the title AND every question + answer into a single
-	 * whitespace-normalised string, so two entries that ask the SAME thing in
-	 * different words but share the same answer body still embed close together
-	 * (which is exactly the reworded-question duplicate the normalised-title
-	 * filter misses). $qas is a list of ['q'=>, 'a'=>] pairs. Pure.
-	 */
-	function faq_suggestion_embed_text($title, $qas)
-	{
-		$parts = array();
-		$title = trim((string) $title);
-		if ($title !== '') {
-			$parts[] = $title;
-		}
-		foreach ((array) $qas as $qa) {
-			$q = trim((string) (isset($qa['q']) ? $qa['q'] : ''));
-			$a = trim((string) (isset($qa['a']) ? $qa['a'] : ''));
-			$line = trim($q . ' ' . $a);
-			if ($line !== '') {
-				$parts[] = $line;
-			}
-		}
-		$text = preg_replace('/\s+/', ' ', implode(' ', $parts));
-		return trim((string) $text);
-	}
-}
-
-if (!function_exists('faq_suggestion_cosine')) {
-	/**
-	 * Cosine similarity of two equal-length numeric vectors, in [-1, 1] (in
-	 * practice [0, 1] for embedding vectors). Returns 0.0 for empty, mismatched
-	 * length, non-array, or zero-magnitude inputs so a bad vector never counts
-	 * as a match. Pure.
-	 */
-	function faq_suggestion_cosine($a, $b)
-	{
-		if (!is_array($a) || !is_array($b)) {
-			return 0.0;
-		}
-		$a = array_values($a);
-		$b = array_values($b);
-		$n = count($a);
-		if ($n === 0 || $n !== count($b)) {
-			return 0.0;
-		}
-		$dot = 0.0;
-		$na  = 0.0;
-		$nb  = 0.0;
-		for ($i = 0; $i < $n; $i++) {
-			$x = (float) $a[$i];
-			$y = (float) $b[$i];
-			$dot += $x * $y;
-			$na  += $x * $x;
-			$nb  += $y * $y;
-		}
-		if ($na <= 0 || $nb <= 0) {
-			return 0.0;
-		}
-		return $dot / (sqrt($na) * sqrt($nb));
-	}
-}
-
-if (!function_exists('faq_suggestion_filter_semantic')) {
-	/**
-	 * Semantic-dedupe safety net (the layer the normalised-title/question filter
-	 * can't do). Drop a candidate whose embedding vector is cosine-similar at or
-	 * above $threshold to ANY existing FAQ's vector, OR to a candidate kept
-	 * earlier in this same batch (in-batch dedupe). $sug_vectors is indexed
-	 * parallel to $suggestions; $existing_vectors is the vectors of the FAQs that
-	 * already exist. Order is preserved.
-	 *
-	 * Fail-open by design: a $threshold outside (0, 1) disables the pass (returns
-	 * everything), and a candidate with no usable vector is KEPT — a missing
-	 * embedding must never silently drop a real suggestion; the title/question
-	 * filter already ran before this. Pure.
-	 */
-	function faq_suggestion_filter_semantic($suggestions, $sug_vectors, $existing_vectors, $threshold)
-	{
-		$suggestions = array_values((array) $suggestions);
-		$threshold   = (float) $threshold;
-		if ($threshold <= 0 || $threshold >= 1) {
-			return $suggestions;
-		}
-		$existing_vectors = array_values((array) $existing_vectors);
-
-		$kept         = array();
-		$kept_vectors = array();
-		foreach ($suggestions as $i => $s) {
-			$vec = isset($sug_vectors[$i]) ? $sug_vectors[$i] : null;
-			if (!is_array($vec) || empty($vec)) {
-				$kept[] = $s; // can't judge -> keep
-				continue;
-			}
-			$dup = false;
-			foreach ($existing_vectors as $ev) {
-				if (is_array($ev) && faq_suggestion_cosine($vec, $ev) >= $threshold) {
-					$dup = true;
-					break;
-				}
-			}
-			if (!$dup) {
-				foreach ($kept_vectors as $kv) {
-					if (faq_suggestion_cosine($vec, $kv) >= $threshold) {
-						$dup = true;
-						break;
-					}
-				}
-			}
-			if ($dup) {
-				continue;
-			}
-			$kept[]         = $s;
-			$kept_vectors[] = $vec;
-		}
-		return $kept;
 	}
 }

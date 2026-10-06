@@ -1,7 +1,6 @@
 <?php
 	$can_edit = isset($can_edit) ? $can_edit : ((int)$this->session->level === 10); // OWNER or FAQ EDIT ACCESS (FE)
 	$run_id   = (int)$run->RunID;
-	$back_url = base_url('Faq_Suggestion/View?id=') . $run_id;
 	$is_pdf   = (strtolower((string)$run->Source) === 'pdf');
 ?>
 
@@ -29,6 +28,7 @@
 
 <div class="d-flex flex-column-fluid">
 	<div class="container-fluid">
+		<?php $this->load->view('faq/sections',array('active_section'=>'history')); ?>
 		<?php if($this->session->flashdata('faq_success')) { ?>
 			<div class="alert alert-light-success" role="alert" style="border-left:4px solid #1bc5bd;">
 				<?php echo htmlspecialchars($this->session->flashdata('faq_success')); ?>
@@ -49,7 +49,10 @@
 					</h3>
 				</div>
 				<div class="card-toolbar">
-					<a href="<?php echo base_url('Faq_Suggestion'); ?>" class="btn btn-light font-weight-bold" data-toggle="tooltip" title="Back to all runs">
+					<a href="<?php echo base_url('Faq?section=suggestions&run_id=').$run_id; ?>" class="btn btn-light-primary font-weight-bold mr-2">
+						<i class="la la-list"></i>View Suggestions
+					</a>
+					<a href="<?php echo base_url('Faq?section=history'); ?>" class="btn btn-light font-weight-bold" data-toggle="tooltip" title="Back to all runs">
 						<i class="la la-arrow-left"></i>Back to Runs
 					</a>
 				</div>
@@ -166,13 +169,14 @@
 									</td>
 									<td style="text-align:center;">
 										<div class="btn-group">
-											<?php if($can_edit && $s->State === 'pending') { ?>
+											<?php if($can_edit && !in_array($s->State,array('accepted','dismissed'),true)) { ?>
 												<a href="<?php echo base_url('Faq_Suggestion/Update?id=') . (int)$s->SuggestionID; ?>" class="btn btn-icon btn-light-warning btn-sm" data-toggle="tooltip" title="Edit suggestion before accepting">
 													<i class="la la-edit"></i>
 												</a>
-												<a href="<?php echo base_url('Faq_Suggestion/Accept?id=') . (int)$s->SuggestionID; ?>" onclick="return confirm('Create a real FAQ from this suggestion?');" class="btn btn-icon btn-light-success btn-sm ml-1" data-toggle="tooltip" title="Accept — create a FAQ from this suggestion">
-													<i class="la la-check"></i>
-												</a>
+
+											<?php } ?>
+											<?php if($can_edit) { ?>
+												<form class="d-inline" method="post" action="<?php echo base_url('Faq_Suggestion/Accept'); ?>" onsubmit="return confirm('Create a real FAQ from this suggestion?');"><?php echo faq_workspace_csrf_field($this->session); ?><input type="hidden" name="suggestion_id" value="<?php echo (int)$s->SuggestionID; ?>"><input type="hidden" name="run_id" value="<?php echo $run_id; ?>"><button type="submit" class="btn btn-icon btn-light-success btn-sm ml-1" data-toggle="tooltip" title="Accept — create a FAQ from this suggestion" aria-label="Approve suggestion"><i class="la la-check" aria-hidden="true"></i></button></form>
 											<?php } ?>
 											<?php if($s->State === 'accepted' && !empty($s->AcceptedFAQID)) { ?>
 												<a href="<?php echo base_url('Faq/Update?faq_id=') . (int)$s->AcceptedFAQID; ?>" class="btn btn-icon btn-light-primary btn-sm ml-1" data-toggle="tooltip" title="Open the FAQ created from this suggestion">
@@ -180,9 +184,7 @@
 												</a>
 											<?php } ?>
 											<?php if($can_edit) { ?>
-												<button onclick="Delete_Record('<?php echo base_url('assets/image/sweetalert.jpg'); ?>', '<?php echo 'Suggestion : ' . str_replace('\'', '', $s->Title); ?>', '<?php echo base_url('Faq_Suggestion/Delete'); ?>', 'id', <?php echo (int)$s->SuggestionID; ?>, 'Y', '<?php echo $back_url; ?>')" class="btn btn-icon btn-light-danger btn-sm ml-1" data-toggle="tooltip" title="Delete suggestion">
-													<i class="la la-trash"></i>
-												</button>
+												<form class="d-inline" method="post" action="<?php echo base_url('Faq_Suggestion/Delete'); ?>" data-delete-title="<?php echo htmlspecialchars('Suggestion : '.$s->Title,ENT_QUOTES,'UTF-8'); ?>" onsubmit="return Confirm_Delete_Form(this, '<?php echo base_url('assets/image/sweetalert.jpg'); ?>', this.dataset.deleteTitle);"><?php echo faq_workspace_csrf_field($this->session); ?><input type="hidden" name="id" value="<?php echo (int)$s->SuggestionID; ?>"><input type="hidden" name="run_id" value="<?php echo $run_id; ?>"><button type="submit" class="btn btn-icon btn-light-danger btn-sm ml-1" data-toggle="tooltip" title="Delete suggestion" aria-label="Delete suggestion"><i class="la la-trash" aria-hidden="true"></i></button></form>
 											<?php } ?>
 										</div>
 									</td>
@@ -231,6 +233,10 @@
 						$message_label = 'Message ' . (int)$source->MessageIndex;
 						$file_name = !empty($source->ChatFileName) ? (string)$source->ChatFileName : 'Not recorded';
 						$open_url = '';
+					} elseif($type === 'staff_information' || $type === 'knowledge') {
+						$label = $type === 'knowledge' ? 'Knowledge Source' : 'Staff-provided information';
+						$customer = ''; $conversation = $type === 'knowledge' ? (string)$source->SourceTitle : 'Added during re-evaluation';
+						$contact = ''; $when = 'Not recorded'; $message_label = (string)$source->SourceRef; $open_url = '';
 					} else {
 						$label = 'Directly uploaded chat file';
 						$customer = ''; $conversation = 'Uploaded for this FAQ run'; $contact = ''; $when = 'Not recorded';

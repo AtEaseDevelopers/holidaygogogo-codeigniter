@@ -42,6 +42,7 @@
 
 <div class="d-flex flex-column-fluid">
 	<div class="container-fluid">
+		<?php $this->load->view('faq/sections',array('active_section'=>'faq')); ?>
 		<?php if($this->session->flashdata('faq_success')) { ?>
 			<div class="alert alert-light-success" role="alert" style="border-left:4px solid #1bc5bd;">
 				<?php echo htmlspecialchars($this->session->flashdata('faq_success')); ?>
@@ -79,9 +80,6 @@
 							<?php } ?>
 						</div>
 						<div class="d-flex flex-wrap justify-content-end">
-							<a href="<?php echo base_url('Faq_Suggestion'); ?>" class="btn btn-light-info font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Review AI-suggested FAQs mined from recent WhatsApp / GHL chats">
-								<i class="la la-magic"></i>AI Suggestions
-							</a>
 							<?php if($can_edit) { ?>
 								<a href="<?php echo base_url('Faq/Export_Template'); ?>" class="btn btn-light-info font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Download an editable Excel template of all FAQs to re-import">
 									<i class="la la-file-export"></i>Export

@@ -82,7 +82,7 @@
 <script src="<?php echo base_url('assets/plugins/custom/tinymce/tinymce.bundle.js'); ?>"></script>
 <script src="<?php echo base_url('assets/js/pages/crud/forms/editors/tinymce.js'); ?>"></script>
 <script src="<?php echo base_url('assets/plugins/custom/draggable/draggable.bundle.js'); ?>"></script>
-<script src="<?php echo base_url('assets/js/universal-js.js?param=angiethay'); ?>"></script>
+<script src="<?php echo base_url('assets/js/universal-js.js?v=' . filemtime(FCPATH . 'assets/js/universal-js.js')); ?>"></script>
 <script src="<?php echo base_url('assets/js/notifications.js?v=' . filemtime(FCPATH . 'assets/js/notifications.js')); ?>"></script>
 <script src="<?php echo base_url('assets/js/notifications-page.js?v=' . filemtime(FCPATH . 'assets/js/notifications-page.js')); ?>"></script>
 <script src="<?php echo base_url('assets/js/remarks-panel.js'); ?>"></script>
