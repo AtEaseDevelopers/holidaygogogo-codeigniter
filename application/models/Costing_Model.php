@@ -1406,6 +1406,19 @@ class Costing_Model extends CI_Model
         return $this->db->where('id', (int) $package_id)->get('costing_packages')->row_array();
     }
 
+    /**
+     * Whether a costing package row exists. Used to validate the target before
+     * accepting a supplier-quotation upload against it.
+     */
+    public function Package_Exists($package_id)
+    {
+        $package_id = (int) $package_id;
+        if ($package_id <= 0) {
+            return false;
+        }
+        return $this->db->where('id', $package_id)->count_all_results('costing_packages') > 0;
+    }
+
     private function Read_Booking($booking_id, $package_id = null)
     {
         $this->db->select('

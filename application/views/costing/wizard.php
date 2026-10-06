@@ -108,6 +108,49 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     .cw-combo-summary { margin-top: 14px; }
     .cw-combo-summary .cw-summary-box { background: #fff; }
     .cw-combo-empty { color: #9aa0b3; font-style: italic; }
+
+    /* Supplier Quotations uploader */
+    .cw-quote-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: stretch; }
+    @media (max-width: 767px) { .cw-quote-grid { grid-template-columns: 1fr; } }
+    .cw-dropzone {
+        position: relative; display: flex; align-items: center; justify-content: center;
+        min-height: 158px; margin: 0; padding: 20px;
+        border: 2px dashed #d6dae3; border-radius: 12px; background: #f9fafc;
+        cursor: pointer; text-align: center;
+        transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    }
+    .cw-dropzone:hover { border-color: #6082B6; background: #f4f7ff; }
+    .cw-dropzone.is-drag { border-color: #6082B6; background: #eef4ff; box-shadow: inset 0 0 0 3px rgba(96,130,182,.10); }
+    .cw-dropzone.has-file { border-style: solid; border-color: #1BC5BD; background: #f3fdfb; }
+    .cw-dropzone-icon { font-size: 36px; color: #6082B6; display: block; margin-bottom: 10px; }
+    .cw-dropzone.is-drag .cw-dropzone-icon { color: #3b5f99; }
+    .cw-dropzone-main { font-weight: 600; color: #3f4254; font-size: 14px; }
+    .cw-dropzone-cta { color: #6082B6; text-decoration: underline; }
+    .cw-dropzone-hint { color: #9aa0b3; font-size: 12px; margin-top: 5px; }
+    .cw-dropzone-file { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; font-weight: 600; color: #0b8f88; font-size: 14px; }
+    .cw-dropzone-file .la { font-size: 24px; flex: 0 0 auto; }
+    .cw-chosen-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cw-chosen-clear { border: 0; background: transparent; color: #a1a5b7; font-size: 22px; line-height: 1; cursor: pointer; padding: 0 2px; flex: 0 0 auto; }
+    .cw-chosen-clear:hover { color: #F64E60; }
+    .cw-quote-meta { display: flex; flex-direction: column; justify-content: flex-end; }
+    .cw-quote-status { font-size: 12px; margin-top: 8px; }
+
+    .cw-quote-files { margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+    .cw-quote-empty { padding: 20px; text-align: center; color: #9aa0b3; border: 1px dashed #e4e6ef; border-radius: 10px; background: #fafbfc; font-size: 13px; }
+    .cw-quote-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid #ecedf3; border-radius: 10px; background: #fff; transition: box-shadow .15s ease, border-color .15s ease; }
+    .cw-quote-item:hover { border-color: #d6dae3; box-shadow: 0 2px 10px rgba(60,64,84,.06); }
+    .cw-quote-ficon { flex: 0 0 38px; width: 38px; height: 38px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+    .cw-quote-ficon.ft-pdf { background: #fdecec; color: #F64E60; }
+    .cw-quote-ficon.ft-word { background: #eaf1fd; color: #2a6ad4; }
+    .cw-quote-ficon.ft-excel { background: #e9f8f1; color: #0b8f88; }
+    .cw-quote-ficon.ft-image { background: #fff4e6; color: #FF9800; }
+    .cw-quote-ficon.ft-file { background: #eef1f7; color: #6082B6; }
+    .cw-quote-info { flex: 1 1 auto; min-width: 0; }
+    .cw-quote-fname { font-weight: 600; color: #3f4254; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cw-quote-fname:hover { color: #6082B6; }
+    .cw-quote-sub { font-size: 12px; color: #9aa0b3; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cw-quote-sub .sep { margin: 0 7px; opacity: .45; }
+    .cw-quote-del-wrap { flex: 0 0 auto; }
 </style>
 
 <div class="d-flex flex-column-fluid">
@@ -326,6 +369,71 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                     </div>
                 </div>
 
+            </div>
+
+            <!-- SUPPLIER QUOTATIONS: rate sheets (PDF/Word/Excel/image) a supplier
+                 sent us, kept against this package for future reference. Lives
+                 INSIDE the cost <form> (above Save & Continue) but its inputs
+                 have NO name attribute, so they are never POSTed with the cost
+                 form — uploads/deletes go via AJAX. -->
+            <div class="cw-panel" id="cw-quote-panel" data-package="<?php echo $package_id; ?>">
+                <div class="cw-panel-title">Supplier Quotations</div>
+                <div class="cw-panel-sub">Attach the quotation a supplier gave you so you can refer back to it later if prices change. Tag each file with a supplier and the matching cost items above will show a link to it.</div>
+
+                <div class="cw-quote-grid">
+                    <!-- Drag-and-drop dropzone (the whole card is a label for the
+                         hidden file input, so a click anywhere opens the picker). -->
+                    <label class="cw-dropzone" id="cw-quote-drop">
+                        <input type="file" id="cw-quote-file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.gif" hidden>
+                        <div class="cw-dropzone-inner" id="cw-quote-prompt">
+                            <i class="la la-cloud-upload-alt cw-dropzone-icon"></i>
+                            <div class="cw-dropzone-main"><span class="cw-dropzone-cta">Click to browse</span> or drag &amp; drop</div>
+                            <div class="cw-dropzone-hint">PDF, Word, Excel or image &middot; up to 20&nbsp;MB</div>
+                        </div>
+                        <div class="cw-dropzone-file" id="cw-quote-chosen" style="display:none;">
+                            <i class="la la-file-alt"></i>
+                            <span class="cw-chosen-name" id="cw-quote-chosen-name"></span>
+                            <button type="button" class="cw-chosen-clear" id="cw-quote-clear" title="Remove selected file">&times;</button>
+                        </div>
+                    </label>
+
+                    <div class="cw-quote-meta">
+                        <div class="form-group mb-2">
+                            <label class="font-weight-bold mb-1" style="font-size:12px;">Supplier</label>
+                            <input type="text" class="form-control form-control-sm" id="cw-quote-supplier" list="cw-supplier-list" placeholder="Supplier (optional)">
+                        </div>
+                        <div class="form-group mb-2">
+                            <label class="font-weight-bold mb-1" style="font-size:12px;">Note / title</label>
+                            <input type="text" class="form-control form-control-sm" id="cw-quote-title" placeholder="e.g. 2026 contracted rates (optional)">
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary font-weight-bold btn-block" id="cw-quote-upload" disabled><i class="la la-upload"></i>Upload Quotation</button>
+                        <div class="cw-quote-status" id="cw-quote-status" style="display:none;"></div>
+                    </div>
+                </div>
+
+                <div class="cw-quote-files" id="cw-quote-list">
+                    <?php if (empty($quotation_files)) { ?>
+                        <div class="cw-quote-empty" id="cw-quote-empty">No supplier quotations attached yet.</div>
+                    <?php } else {
+                        foreach ($quotation_files as $qf) {
+                            $sub_parts = array();
+                            if ($qf['supplier'] !== null && $qf['supplier'] !== '') { $sub_parts[] = html_escape($qf['supplier']); }
+                            if ($qf['title'] !== null && $qf['title'] !== '') { $sub_parts[] = html_escape($qf['title']); }
+                    ?>
+                        <div class="cw-quote-item" data-id="<?php echo (int) $qf['id']; ?>">
+                            <span class="cw-quote-ficon ft-<?php echo costing_quotation_file_kind($qf['original_name']); ?>"><i class="<?php echo costing_quotation_file_icon($qf['original_name']); ?>"></i></span>
+                            <div class="cw-quote-info">
+                                <a href="<?php echo base_url('Costing/Quotation_File/' . (int) $qf['id']); ?>" target="_blank" rel="noopener" class="cw-quote-fname" title="<?php echo html_escape($qf['original_name']); ?>"><?php echo html_escape($qf['original_name']); ?></a>
+                                <div class="cw-quote-sub"><?php echo $sub_parts ? implode('<span class="sep">&middot;</span>', $sub_parts) : 'No supplier tagged'; ?></div>
+                            </div>
+                            <div class="cw-quote-del-wrap">
+                                <?php if (!empty($qf['CanDelete'])) { ?>
+                                    <button type="button" class="btn btn-icon btn-light-danger btn-sm cw-quote-del" title="Delete attachment"><i class="la la-trash"></i></button>
+                                <?php } ?>
+                            </div>
+                        </div>
+                    <?php } } ?>
+                </div>
             </div>
 
             <div class="cw-actions">
@@ -696,6 +804,61 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         );
     }, $combinations)); ?> || [];
 
+    // Supplier quotation attachments for this package. Each cost item whose
+    // supplier matches one of these shows a link to the quote(s) (same trim +
+    // lowercase key the server uses in costing_quotation_supplier_key()).
+    var QUOTE_FILES = <?php
+        $quote_js = array();
+        foreach ((isset($quotation_files) ? $quotation_files : array()) as $qf) {
+            $quote_js[] = array(
+                'id'            => (int) $qf['id'],
+                'supplier'      => (string) (isset($qf['supplier']) ? $qf['supplier'] : ''),
+                'title'         => (string) (isset($qf['title']) ? $qf['title'] : ''),
+                'original_name' => (string) $qf['original_name'],
+                'icon'          => costing_quotation_file_icon($qf['original_name']),
+                'kind'          => costing_quotation_file_kind($qf['original_name']),
+                'view_url'      => base_url('Costing/Quotation_File/' . (int) $qf['id']),
+                'can_delete'    => !empty($qf['CanDelete']),
+            );
+        }
+        // JSON_INVALID_UTF8_SUBSTITUTE: a filename/supplier with a stray non-UTF-8
+        // byte must not make json_encode() return false (which would blank the
+        // whole list and hide every quotation link).
+        echo json_encode($quote_js, JSON_INVALID_UTF8_SUBSTITUTE);
+    ?> || [];
+
+    function supplierKey(s) { return (s || '').toString().trim().toLowerCase(); }
+    function escHtml(s) { return (s || '').toString().replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+    // Group quotes by supplier key for O(1) per-row lookup; rebuilt after upload/delete.
+    var quotesBySupplier = {};
+    function rebuildQuoteIndex() {
+        quotesBySupplier = {};
+        QUOTE_FILES.forEach(function (q) {
+            var k = supplierKey(q.supplier);
+            (quotesBySupplier[k] = quotesBySupplier[k] || []).push(q);
+        });
+    }
+    rebuildQuoteIndex();
+
+    // Links to the quotation(s) for a given supplier, or '' when none / untagged.
+    function quoteLinksHtml(supplier) {
+        var k = supplierKey(supplier);
+        if (k === '' || !quotesBySupplier[k]) { return ''; }
+        return '<i class="la la-paperclip text-primary"></i> ' + quotesBySupplier[k].map(function (q) {
+            return '<a href="' + q.view_url + '" target="_blank" rel="noopener" title="' + escHtml(q.title || q.original_name) + '">' + escHtml(q.original_name) + '</a>';
+        }).join(', ');
+    }
+    function updateRowQuoteLink(row) {
+        var s = row.querySelector('.cw-supplier');
+        var slot = row.querySelector('.cw-supplier-quote');
+        if (!s || !slot) { return; }
+        slot.innerHTML = quoteLinksHtml(s.value);
+    }
+    function refreshAllRowQuoteLinks() {
+        combosWrap.querySelectorAll('.cw-crow').forEach(updateRowQuoteLink);
+    }
+
     function money(n) { return 'RM ' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2); }
     function totalPax() { return (parseInt(adultInput.value, 10) || 0) + (parseInt(childInput.value, 10) || 0); }
 
@@ -1024,6 +1187,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             '<td><input type="text" class="form-control" name="' + base + '[name]" value="" readonly>' +
             '<select class="form-control form-control-sm cw-mult-type mt-2" name="' + base + '[multiplier_type]" title="How this cost scales">' + multiplierOptions(item.multiplier_type) + '</select>' +
             '<input type="text" class="form-control form-control-sm cw-supplier mt-2" name="' + base + '[supplier]" list="cw-supplier-list" placeholder="Supplier (optional)" title="Pick an existing supplier or type a new name (not saved to the supplier master)" value="">' +
+            '<div class="cw-supplier-quote mt-1" style="font-size:11px;"></div>' +
             '<input type="hidden" name="' + base + '[include]" value="1">' +
             '<input type="hidden" name="' + base + '[category]" value="miscellaneous">' +
             '<input type="hidden" name="' + base + '[unit_count]" value="1">' +
@@ -1046,6 +1210,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         tr.querySelector('input[name="' + base + '[category]"]').value = cat;
         tr.querySelector('.cw-mult-type').value = item.multiplier_type || 'fixed';
         tr.querySelector('.cw-supplier').value = item.supplier || '';
+        updateRowQuoteLink(tr);
         tr.querySelector('.cw-cost').value = (item.unit_price !== undefined ? item.unit_price : 0);
         tr.querySelector('.cw-count').value = (item.count !== undefined && item.count !== null && item.count !== '') ? item.count : masterCount(item.multiplier_type);
         remarkTr.querySelector('.cw-remark').value = item.remark || '';
@@ -1167,9 +1332,22 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         if (e.target.classList && e.target.classList.contains('cw-combo-sell-input')) {
             e.target.setAttribute('data-touched', '1');
         }
+        // Typing/choosing a supplier re-points the row's quotation link.
+        if (e.target.classList && e.target.classList.contains('cw-supplier')) {
+            var row = e.target.closest('.cw-crow');
+            if (row) { updateRowQuoteLink(row); }
+        }
     });
     combosWrap.addEventListener('input', recalc);
     combosWrap.addEventListener('change', recalc);
+    // A datalist pick can fire 'change' without 'input' in some browsers — keep
+    // the row's quotation link in sync on either event.
+    combosWrap.addEventListener('change', function (e) {
+        if (e.target.classList && e.target.classList.contains('cw-supplier')) {
+            var row = e.target.closest('.cw-crow');
+            if (row) { updateRowQuoteLink(row); }
+        }
+    });
     combosWrap.addEventListener('click', function (e) {
         var addItem = e.target.closest('.cw-combo-add-item');
         if (addItem) {
@@ -1237,6 +1415,157 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     });
     addComboCard(generalExisting ? generalExisting.name : '', generalExisting ? generalExisting.items : [], null, true);
     regularCombos.forEach(function (combo) { addComboCard(combo.name, combo.items, combo.selling_price_per_pax, false); });
+
+    // ---- Supplier Quotations: drag-and-drop upload / delete ----------------
+    (function () {
+        var panel = document.getElementById('cw-quote-panel');
+        if (!panel) { return; }
+        var BASE = '<?php echo base_url('Costing/'); ?>';
+        var pkgId = panel.getAttribute('data-package');
+        var listEl = document.getElementById('cw-quote-list');
+        var statusEl = document.getElementById('cw-quote-status');
+        var dropEl = document.getElementById('cw-quote-drop');
+        var fileEl = document.getElementById('cw-quote-file');
+        var promptEl = document.getElementById('cw-quote-prompt');
+        var chosenEl = document.getElementById('cw-quote-chosen');
+        var chosenNameEl = document.getElementById('cw-quote-chosen-name');
+        var clearBtn = document.getElementById('cw-quote-clear');
+        var supEl = document.getElementById('cw-quote-supplier');
+        var titleEl = document.getElementById('cw-quote-title');
+        var btn = document.getElementById('cw-quote-upload');
+        var ACCEPT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'gif'];
+
+        function setStatus(msg, ok) {
+            if (!msg) { statusEl.style.display = 'none'; return; }
+            statusEl.style.display = '';
+            statusEl.className = 'cw-quote-status ' + (ok ? 'text-success' : 'text-danger');
+            statusEl.textContent = msg;
+        }
+        function extOf(name) { var p = (name || '').split('.'); return p.length > 1 ? p.pop().toLowerCase() : ''; }
+
+        // Reflect the chosen file in the dropzone (or reset to the empty prompt).
+        function showChosen() {
+            var f = fileEl.files && fileEl.files[0];
+            if (f) {
+                chosenNameEl.textContent = f.name;
+                chosenNameEl.setAttribute('title', f.name);
+                promptEl.style.display = 'none';
+                chosenEl.style.display = '';
+                dropEl.classList.add('has-file');
+                btn.disabled = false;
+            } else {
+                promptEl.style.display = '';
+                chosenEl.style.display = 'none';
+                dropEl.classList.remove('has-file');
+                btn.disabled = true;
+            }
+        }
+        function resetPicker() { fileEl.value = ''; showChosen(); }
+
+        fileEl.addEventListener('change', function () {
+            var f = fileEl.files && fileEl.files[0];
+            if (f && ACCEPT.indexOf(extOf(f.name)) === -1) {
+                setStatus('Unsupported file type. Allowed: PDF, Word, Excel, image.', false);
+                resetPicker();
+                return;
+            }
+            setStatus('', true);
+            showChosen();
+        });
+
+        // Clear button sits inside the dropzone <label>; stop the click from
+        // re-opening the native file picker.
+        clearBtn.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            setStatus('', true);
+            resetPicker();
+        });
+
+        // Drag-and-drop onto the dropzone.
+        ['dragenter', 'dragover'].forEach(function (ev) {
+            dropEl.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); dropEl.classList.add('is-drag'); });
+        });
+        ['dragleave', 'dragend'].forEach(function (ev) {
+            dropEl.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); dropEl.classList.remove('is-drag'); });
+        });
+        dropEl.addEventListener('drop', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            dropEl.classList.remove('is-drag');
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                fileEl.files = e.dataTransfer.files;
+                fileEl.dispatchEvent(new Event('change'));
+            }
+        });
+
+        // Build one attachment card. `f` matches the server-rendered markup so
+        // a reload (DB render) and the live insert look identical.
+        function metaLine(supplier, title) {
+            var parts = [];
+            if (supplier) { parts.push(escHtml(supplier)); }
+            if (title) { parts.push(escHtml(title)); }
+            return parts.length ? parts.join('<span class="sep">&middot;</span>') : 'No supplier tagged';
+        }
+        function addListRow(f) {
+            var empty = document.getElementById('cw-quote-empty');
+            if (empty) { empty.remove(); }
+            var item = document.createElement('div');
+            item.className = 'cw-quote-item';
+            item.setAttribute('data-id', f.id);
+            item.innerHTML =
+                '<span class="cw-quote-ficon ft-' + (f.kind || 'file') + '"><i class="' + f.icon + '"></i></span>' +
+                '<div class="cw-quote-info">' +
+                    '<a href="' + f.view_url + '" target="_blank" rel="noopener" class="cw-quote-fname" title="' + escHtml(f.original_name) + '">' + escHtml(f.original_name) + '</a>' +
+                    '<div class="cw-quote-sub">' + metaLine(f.supplier, f.title) + '</div>' +
+                '</div>' +
+                '<div class="cw-quote-del-wrap">' + (f.can_delete ? '<button type="button" class="btn btn-icon btn-light-danger btn-sm cw-quote-del" title="Delete attachment"><i class="la la-trash"></i></button>' : '') + '</div>';
+            listEl.insertBefore(item, listEl.firstChild);
+        }
+
+        btn.addEventListener('click', function () {
+            if (!fileEl.files || !fileEl.files.length) { setStatus('Choose a file to upload.', false); return; }
+            var fd = new FormData();
+            fd.append('package_id', pkgId);
+            fd.append('supplier', supEl.value || '');
+            fd.append('title', titleEl.value || '');
+            fd.append('quotation_file', fileEl.files[0]);
+            btn.disabled = true; setStatus('Uploading…', true);
+            fetch(BASE + 'Upload_Quotation', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (!res || !res.ok) { btn.disabled = false; setStatus((res && res.message) || 'Upload failed.', false); return; }
+                    QUOTE_FILES.push(res.file);
+                    rebuildQuoteIndex();
+                    addListRow(res.file);
+                    refreshAllRowQuoteLinks();
+                    resetPicker(); supEl.value = ''; titleEl.value = '';
+                    setStatus('Uploaded.', true);
+                })
+                .catch(function () { btn.disabled = false; setStatus('Upload failed. Please try again.', false); });
+        });
+
+        listEl.addEventListener('click', function (e) {
+            var del = e.target.closest('.cw-quote-del');
+            if (!del) { return; }
+            var item = del.closest('.cw-quote-item');
+            var id = item ? parseInt(item.getAttribute('data-id'), 10) : 0;
+            if (!id || !confirm('Delete this attachment?')) { return; }
+            var fd = new FormData(); fd.append('id', id);
+            fetch(BASE + 'Delete_Quotation', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (!res || !res.ok) { setStatus((res && res.message) || 'Could not delete.', false); return; }
+                    QUOTE_FILES = QUOTE_FILES.filter(function (q) { return q.id !== id; });
+                    rebuildQuoteIndex();
+                    if (item) { item.remove(); }
+                    if (!listEl.querySelector('.cw-quote-item')) {
+                        listEl.innerHTML = '<div class="cw-quote-empty" id="cw-quote-empty">No supplier quotations attached yet.</div>';
+                    }
+                    refreshAllRowQuoteLinks();
+                    setStatus('', true);
+                })
+                .catch(function () { setStatus('Could not delete. Please try again.', false); });
+        });
+    })();
 
     recalc();
 })();

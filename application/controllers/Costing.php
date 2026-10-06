@@ -85,6 +85,15 @@ class Costing extends MY_Controller
         $this->load->model('Supplier_Model');
         $array['supplier_names'] = $this->Supplier_Model->Read_Supplier_Names();
 
+        // Supplier quotation attachments kept against this package, so the cost
+        // step can list them and each cost item can link to its supplier's quote.
+        $this->load->model('Costing_Quotation_File_Model');
+        $this->load->helper('costing_quotation');
+        $array['quotation_files'] = $this->Costing_Quotation_File_Model->Read_By_Package(
+            $package_id,
+            (int) $this->session->userdata('admin_id')
+        );
+
         $titles = array(
             'tab_title' => 'HolidayGoGoGo | Costing Package',
             'breadcrumb_title' => 'Setting >> Costing >> Package',
@@ -369,6 +378,158 @@ class Costing extends MY_Controller
     {
         $active_tab = strtolower(trim((string) $active_tab));
         return in_array($active_tab, array('currencies', 'rates'), true) ? $active_tab : 'currencies';
+    }
+
+    /**
+     * AJAX: upload a supplier quotation (PDF / Word / Excel / image) and attach
+     * it to a costing package as a reference for the Cost Template & Margin step.
+     * Files land in a deny-all protected directory and are only ever served back
+     * through Quotation_File() below — never a public asset URL.
+     */
+    public function Upload_Quotation()
+    {
+        $out = function ($data) {
+            $this->output->set_content_type('application/json')->set_output(json_encode($data));
+        };
+
+        $package_id = (int) $this->input->post('package_id');
+        if ($package_id <= 0 || !$this->Costing_Model->Package_Exists($package_id)) {
+            return $out(array('ok' => false, 'message' => 'Costing package not found.'));
+        }
+
+        if (!isset($_FILES['quotation_file'])) {
+            return $out(array('ok' => false, 'message' => 'No file was uploaded.'));
+        }
+        $upload_err = (int) $_FILES['quotation_file']['error'];
+        if ($upload_err !== UPLOAD_ERR_OK) {
+            // Distinguish "too big for the server" from "nothing selected" so the
+            // user gets an actionable message (our own 20MB cap may be below the
+            // php.ini upload_max_filesize / post_max_size).
+            if (in_array($upload_err, array(UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE), true)) {
+                return $out(array('ok' => false, 'message' => 'File is too large to upload.'));
+            }
+            if ($upload_err === UPLOAD_ERR_PARTIAL) {
+                return $out(array('ok' => false, 'message' => 'Upload was interrupted. Please try again.'));
+            }
+            return $out(array('ok' => false, 'message' => 'No file was uploaded.'));
+        }
+
+        $this->load->helper('costing_quotation');
+        $original = (string) $_FILES['quotation_file']['name'];
+        if (!costing_quotation_is_allowed_file($original)) {
+            return $out(array('ok' => false, 'message' => 'Unsupported file type. Allowed: PDF, Word, Excel, image.'));
+        }
+
+        $config = array(
+            'upload_path'   => costing_quotation_ensure_upload_dir(),
+            'allowed_types' => costing_quotation_allowed_types(),
+            'max_size'      => costing_quotation_max_size_kb(),
+            'encrypt_name'  => true,
+        );
+        $this->load->library('upload', $config);
+        $this->upload->initialize($config);
+
+        if (!$this->upload->do_upload('quotation_file')) {
+            $error = trim(strip_tags($this->upload->display_errors('', '')));
+            return $out(array('ok' => false, 'message' => 'Upload failed: ' . $error));
+        }
+
+        $data = $this->upload->data();
+        $rel_path = costing_quotation_upload_reldir() . $data['file_name'];
+
+        $this->load->model('Costing_Quotation_File_Model');
+        $id = $this->Costing_Quotation_File_Model->Add(array(
+            'costing_package_id' => $package_id,
+            'supplier'           => $this->input->post('supplier'),
+            'title'              => $this->input->post('title'),
+            'original_name'      => $original,
+            'stored_path'        => $rel_path,
+            'file_size'          => (int) round(((float) $data['file_size']) * 1024), // CI reports KB (2dp)
+            'created_by'         => $this->session->userdata('admin_id'),
+        ));
+
+        if ($id <= 0) {
+            // Persist failed — reclaim the orphaned upload rather than leak it.
+            costing_quotation_delete_file($rel_path);
+            return $out(array('ok' => false, 'message' => 'Could not save the attachment. Please try again.'));
+        }
+
+        return $out(array(
+            'ok'   => true,
+            'file' => array(
+                'id'            => $id,
+                'supplier'      => trim((string) $this->input->post('supplier')),
+                'title'         => trim((string) $this->input->post('title')),
+                'original_name' => $original,
+                'icon'          => costing_quotation_file_icon($original),
+                'kind'          => costing_quotation_file_kind($original),
+                'view_url'      => base_url('Costing/Quotation_File/' . $id),
+                'can_delete'    => true,
+            ),
+        ));
+    }
+
+    /**
+     * Stream a quotation attachment inline to any logged-in staff who can open
+     * the costing package. The file is read from a protected directory with a
+     * realpath containment check (defends against a tampered stored_path), and
+     * is never exposed at a public asset URL.
+     */
+    public function Quotation_File($id = null)
+    {
+        $this->load->model('Costing_Quotation_File_Model');
+        $this->load->helper('costing_quotation');
+
+        $row = $this->Costing_Quotation_File_Model->Get((int) $id);
+        if (empty($row) || empty($row['stored_path'])) {
+            show_404();
+            return;
+        }
+
+        $base = realpath(costing_quotation_upload_dir());
+        $real = realpath(FCPATH . $row['stored_path']);
+        if ($real === false || $base === false
+            || strpos($real, rtrim($base, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR) !== 0) {
+            show_404();
+            return;
+        }
+
+        $ext = strtolower(pathinfo($real, PATHINFO_EXTENSION));
+        $download_name = 'quotation_' . (int) $row['id'] . '.' . $ext;
+        header('Content-Type: ' . costing_quotation_file_mime($real));
+        header('Content-Disposition: inline; filename="' . $download_name . '"');
+        header('Content-Length: ' . filesize($real));
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: private, max-age=0, no-cache');
+        readfile($real);
+        exit;
+    }
+
+    /**
+     * AJAX: soft-delete a quotation attachment (uploader-only) and unlink the
+     * file from disk.
+     */
+    public function Delete_Quotation()
+    {
+        $out = function ($data) {
+            $this->output->set_content_type('application/json')->set_output(json_encode($data));
+        };
+
+        $id = (int) $this->input->post('id');
+        if ($id <= 0) {
+            return $out(array('ok' => false, 'message' => 'Missing attachment reference.'));
+        }
+
+        $this->load->model('Costing_Quotation_File_Model');
+        $this->load->helper('costing_quotation');
+
+        $row = $this->Costing_Quotation_File_Model->Delete($id, (int) $this->session->userdata('admin_id'));
+        if (empty($row)) {
+            return $out(array('ok' => false, 'message' => 'You can only delete attachments you uploaded.'));
+        }
+
+        costing_quotation_delete_file($row['stored_path']);
+        return $out(array('ok' => true));
     }
 
     private function Wizard_Steps()
