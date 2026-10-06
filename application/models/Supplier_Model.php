@@ -184,6 +184,31 @@ class Supplier_Model extends CI_Model
 		return $this->db->get()->result_array();
 	}
 
+	/**
+	 * Flat list of active supplier names, for a "pick existing OR type new"
+	 * datalist (e.g. the costing combination item supplier field). Names only —
+	 * the caller stores whatever is chosen/typed as free text and never writes
+	 * back to this master.
+	 */
+	public function Read_Supplier_Names()
+	{
+		$this->db->select('Name');
+		$this->db->where('Status', 'Y');
+		$this->db->where('Name !=', '');
+		$this->db->order_by('Name', 'ASC');
+		$rows = $this->db->get('supplier')->result_array();
+
+		$names = array();
+		foreach ($rows as $row) {
+			$name = trim((string) $row['Name']);
+			if ($name !== '' && !in_array($name, $names, true)) {
+				$names[] = $name;
+			}
+		}
+
+		return $names;
+	}
+
 	public function get_supplier_by_name($name)
 	{
 		$this->db->select('SupplierID, Name, SupplierCode');

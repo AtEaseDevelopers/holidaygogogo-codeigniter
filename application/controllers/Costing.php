@@ -80,6 +80,11 @@ class Costing extends MY_Controller
         $array['has_snapshot'] = $existing_booking_id > 0;
         $array['wizard_steps'] = $this->Wizard_Steps();
 
+        // Supplier names for the combination item "pick existing OR type new"
+        // datalist. Optional free text — a typed-in name is never saved back here.
+        $this->load->model('Supplier_Model');
+        $array['supplier_names'] = $this->Supplier_Model->Read_Supplier_Names();
+
         $titles = array(
             'tab_title' => 'HolidayGoGoGo | Costing Package',
             'breadcrumb_title' => 'Setting >> Costing >> Package',

@@ -1593,6 +1593,7 @@ class Costing_Model extends CI_Model
             costing_booking_items.bank_charges_myr,
             costing_booking_items.myr_per_unit AS frozen_myr_per_unit,
             COALESCE(costing_booking_items.remark, "") AS remark,
+            COALESCE(costing_booking_items.supplier, "") AS supplier,
             costing_currencies.code AS currency
         ';
     }
@@ -2021,6 +2022,10 @@ class Costing_Model extends CI_Model
                 'unit_price' => round(max(0, (float) $row['unit_price']), 2),
                 'currency_id' => $currency_id,
                 'remark' => trim((string) (isset($row['remark']) ? $row['remark'] : '')),
+                // Optional per-item supplier. May be an existing supplier name the
+                // user picked OR a brand-new name typed in; either way it is stored
+                // as free text here and never written back to the supplier master.
+                'supplier' => trim((string) (isset($row['supplier']) ? $row['supplier'] : '')),
             );
 
             if ((float) $normalized_row['unit_count'] <= 0) {

@@ -78,7 +78,8 @@ $TourCode       = isset($package['tour_code']) && $package['tour_code'] !== '' ?
 $CustomerName   = isset($package['customer_name']) && $package['customer_name'] !== '' ? $package['customer_name'] : '-';
 $PricingBasis   = $qv('quote_pricing_basis');
 $TravelDateNote = $qv('quote_travel_date_note');
-$HotelNote      = $qv('quote_hotel_note');
+// Hotel note is rich-text (TinyMCE) HTML now — blank editor markup renders nothing.
+$HotelNote      = costing_itinerary_html_is_blank($qv('quote_hotel_note')) ? '' : $qv('quote_hotel_note');
 // 5 Oct 2026: first-column title (Hotel / Room Type) + Single Supp on/off.
 $HotelTitleLabel = costing_quote_normalize_hotel_title_label($qv('quote_hotel_title_label'));
 $ShowSingleSupp  = costing_quote_single_supp_enabled(
@@ -172,10 +173,10 @@ if (empty($FlightOptions)) {
 // The hotel/flight page is always appended to the quotation. Empty tables show a
 // "to be confirmed" placeholder row. The footer falls back to the default
 // boilerplate only when it was never saved (NULL); a deliberately cleared footer
-// ('') renders nothing. Pass the raw value — $qv collapses NULL to '' — so the
-// splitter can still tell the two apart.
+// ('') renders nothing. Pass the raw value (NOT $qv, which collapses NULL to '')
+// so never-saved and deliberately-cleared stay distinct. Footer is rich-text HTML.
 $ShowLogisticsPage = true;
-$FooterLines = costing_quote_footer_note_lines(
+$FooterNotesHtml = costing_quote_footer_notes_html(
     array_key_exists('quote_footer_notes', $qm) ? $qm['quote_footer_notes'] : null
 );
 ?>
@@ -204,6 +205,8 @@ $FooterLines = costing_quote_footer_note_lines(
     table.data th { background: #d9d9d9; text-align: center; font-weight: bold; }
     .section-title { font-weight: bold; text-align: center; margin: 14px 0 6px 0; }
     .note-row td { background: #f7f7f7; font-style: italic; }
+    /* Hotel note is rich-text now; drop the editor's <p> margins so it stays a tight note line. */
+    .note-row td p { margin: 0; }
     .footer-notes { margin-top: 14px; }
     .footer-notes p { background: #fff3a3; font-style: italic; font-size: 11px; padding: 2px 4px; margin-bottom: 4px; }
     /* Reserve top/bottom margin on every page for the repeating header/footer. */
@@ -322,7 +325,7 @@ $FooterLines = costing_quote_footer_note_lines(
                     </tr>
                 <?php } } ?>
                 <?php if ($HotelNote !== '') { ?>
-                    <tr class="note-row"><td colspan="<?php echo $hotel_colspan; ?>" class="text-center"><?php echo html_escape($HotelNote); ?></td></tr>
+                    <tr class="note-row"><td colspan="<?php echo $hotel_colspan; ?>" class="text-center"><?php echo $HotelNote; ?></td></tr>
                 <?php } ?>
             </tbody>
         </table>
@@ -371,13 +374,9 @@ $FooterLines = costing_quote_footer_note_lines(
         </table>
         <?php } } ?>
 
-        <!-- Boilerplate footer notes (highlighted) -->
-        <?php if (!empty($FooterLines)) { ?>
-            <div class="footer-notes">
-                <?php foreach ($FooterLines as $line) { ?>
-                    <p><?php echo html_escape($line); ?></p>
-                <?php } ?>
-            </div>
+        <!-- Boilerplate footer notes (highlighted) — rich-text HTML -->
+        <?php if ($FooterNotesHtml !== '') { ?>
+            <div class="footer-notes"><?php echo $FooterNotesHtml; ?></div>
         <?php } ?>
     </div>
     <?php } ?>

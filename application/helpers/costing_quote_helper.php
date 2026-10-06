@@ -10,9 +10,15 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  * to the WHOLE quote and lives on costing_packages.
  *
  * Kept free of the CI super-object so the model can reuse them and PHPUnit can
- * drive them directly. All values are plain text (no rich HTML), so "blank" is
- * simply an empty trim.
+ * drive them directly. Most values are plain text; the Hotel note and Footer
+ * notes are rich-text (TinyMCE) HTML and reuse the itinerary blank-detector, so
+ * an empty editor ("<p></p>") counts as blank rather than content.
  */
+
+// Hotel note + Footer notes share the itinerary's rich-text blank-detector
+// (costing_itinerary_html_is_blank). Both helpers are function_exists-guarded,
+// so this require is safe under CI's loader and under PHPUnit.
+require_once __DIR__ . '/costing_itinerary_helper.php';
 
 if (!function_exists('costing_quote_price_normalize')) {
     /**
@@ -447,10 +453,15 @@ if (!function_exists('costing_quote_prepare_level')) {
             }
             $val = trim((string) (isset($post[$column]) ? $post[$column] : ''));
             if ($column === 'quote_footer_notes') {
-                // Preserve a deliberately cleared footer as '' (not NULL) so the
-                // quote renders no footer; NULL stays reserved for "never saved"
-                // → default boilerplate (see costing_quote_footer_note_lines()).
-                $out[$column] = $val;
+                // Rich-text (TinyMCE) now. A visually blank editor is persisted as
+                // '' (not NULL) so the quote renders no footer; NULL stays reserved
+                // for "never saved" → default boilerplate (costing_quote_footer_notes_html()).
+                $out[$column] = costing_itinerary_html_is_blank($val) ? '' : $val;
+                continue;
+            }
+            if ($column === 'quote_hotel_note') {
+                // Rich-text (TinyMCE) now — null when the editor is visually blank.
+                $out[$column] = costing_itinerary_html_is_blank($val) ? null : $val;
                 continue;
             }
             $out[$column] = $val !== '' ? $val : null;
@@ -462,48 +473,38 @@ if (!function_exists('costing_quote_prepare_level')) {
 if (!function_exists('costing_quote_default_footer_notes')) {
     /**
      * The default boilerplate footer notes shown (highlighted) at the bottom of
-     * the quote. Seeded into the editor when the package has none saved yet, and
-     * used verbatim on the PDF when the package field is blank. One note per line.
+     * the quote. Rich-text (TinyMCE) HTML — one <p> per note so each renders in
+     * its own highlighted box. Seeded into the editor when the package has none
+     * saved yet, and used verbatim on the PDF when the field is NULL.
      *
      * @return string
      */
     function costing_quote_default_footer_notes()
     {
         return implode("\n", array(
-            'Note: Pricing quoted as Group Rate. Please verify the fare breakdown before you accept the fare quote. Seats are limited and subject to availability.',
-            '*Fares available on a first-come-first serve basis or it will expire. Seats are not guaranteed until booked. Taxes are subject to change.',
-            '*All flight schedules are correct at the time of publication and dissemination; however, these are subject to change without prior notice.',
-            '*Each flight sector quote reduction or increase for the number of passengers will affect the air fare & need to re-quote accordingly.',
-            '*Seat subject to availability & fare subject to change without prior notice; NO seat HOLD on this stage.',
+            '<p>Note: Pricing quoted as Group Rate. Please verify the fare breakdown before you accept the fare quote. Seats are limited and subject to availability.</p>',
+            '<p>*Fares available on a first-come-first serve basis or it will expire. Seats are not guaranteed until booked. Taxes are subject to change.</p>',
+            '<p>*All flight schedules are correct at the time of publication and dissemination; however, these are subject to change without prior notice.</p>',
+            '<p>*Each flight sector quote reduction or increase for the number of passengers will affect the air fare &amp; need to re-quote accordingly.</p>',
+            '<p>*Seat subject to availability &amp; fare subject to change without prior notice; NO seat HOLD on this stage.</p>',
         ));
     }
 }
 
-if (!function_exists('costing_quote_footer_note_lines')) {
+if (!function_exists('costing_quote_footer_notes_html')) {
     /**
-     * Split a stored footer-notes blob into trimmed, non-empty lines for display.
-     * NULL (never saved) falls back to the default boilerplate; a deliberately
-     * cleared footer ('') renders no lines at all.
+     * The rich-text footer-notes HTML to render on the quotation. NULL (never
+     * saved) falls back to the default boilerplate; a visually blank editor
+     * ("<p></p>") means the user cleared it → render nothing.
      *
      * @param string|null $stored
-     * @return string[]
+     * @return string
      */
-    function costing_quote_footer_note_lines($stored)
+    function costing_quote_footer_notes_html($stored)
     {
-        // NULL = never saved → seed the standard boilerplate. '' (or whitespace)
-        // = the user cleared the footer → render no lines.
         if ($stored === null) {
-            $stored = costing_quote_default_footer_notes();
+            return costing_quote_default_footer_notes();
         }
-        $stored = trim((string) $stored);
-        $lines = preg_split('/\r\n|\r|\n/', $stored);
-        $out = array();
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line !== '') {
-                $out[] = $line;
-            }
-        }
-        return $out;
+        return costing_itinerary_html_is_blank($stored) ? '' : (string) $stored;
     }
 }

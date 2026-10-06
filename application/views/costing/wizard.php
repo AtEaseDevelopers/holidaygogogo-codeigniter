@@ -72,6 +72,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     .cw-step.is-active { border-color: #6082B6; background: #eef4ff; }
     .cw-step.is-active .cw-num { background: #6082B6; color: #fff; }
     .cw-step.is-done .cw-num { background: #1BC5BD; color: #fff; }
+    .cw-step.is-done .cw-num i, .cw-step.is-done .cw-num .la { color: #fff !important; }
     .cw-step.is-upcoming { color: #9aa0b3; }
     .cw-panel {
         border: 1px solid #e4e6ef; border-radius: 8px; background: #fff;
@@ -290,6 +291,14 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 <div class="cw-panel-sub">Alternative packages shown on the customer Quotation PDF &mdash; the customer picks ONE. Add cost items to each combination straight from the item master. Each combination is priced on its own (selling = its cost &divide; (1 &minus; margin), gross margin); there is no combined total.</div>
 
                 <div id="cw-combos"></div>
+
+                <!-- Suppliers for the per-item "pick existing OR type new" field.
+                     Free text: a typed-in name is NOT saved to the supplier master. -->
+                <datalist id="cw-supplier-list">
+                    <?php foreach ((isset($supplier_names) ? $supplier_names : array()) as $sname) { ?>
+                        <option value="<?php echo html_escape($sname); ?>"></option>
+                    <?php } ?>
+                </datalist>
 
                 <div class="d-flex flex-wrap align-items-center mt-2" style="gap:8px;">
                     <button type="button" class="btn btn-light-primary font-weight-bold" id="cw-combo-add"><i class="la la-plus"></i>Add Combination</button>
@@ -550,7 +559,8 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 <button type="button" class="btn btn-light-primary font-weight-bold" id="cw-hotel-add"><i class="la la-plus"></i>Add Hotel</button>
                 <div class="mt-4">
                     <label class="font-weight-bold mb-1">Hotel note</label>
-                    <input type="text" class="form-control" name="quote_hotel_note" value="<?php echo html_escape($q_val('quote_hotel_note')); ?>" placeholder="The hotel is based on the lowest room type &amp; subject to change upon availability.">
+                    <textarea class="form-control cw-itin-editor" name="quote_hotel_note"><?php echo html_escape($q_val('quote_hotel_note')); ?></textarea>
+                    <small class="text-muted">e.g. The hotel is based on the lowest room type &amp; subject to change upon availability.</small>
                 </div>
             </div>
 
@@ -578,8 +588,8 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             <!-- Boilerplate footer notes -->
             <div class="cw-panel">
                 <div class="cw-panel-title">Footer Notes</div>
-                <div class="cw-panel-sub">Shown (highlighted) at the bottom of the quotation — one note per line.</div>
-                <textarea class="form-control" name="quote_footer_notes" rows="6" style="font-size:13px;"><?php echo html_escape($footer_notes_val); ?></textarea>
+                <div class="cw-panel-sub">Shown (highlighted) at the bottom of the quotation — each paragraph is its own highlighted note.</div>
+                <textarea class="form-control cw-itin-editor" name="quote_footer_notes"><?php echo html_escape($footer_notes_val); ?></textarea>
             </div>
 
             <div class="cw-actions">
@@ -680,6 +690,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                     'unit_price'      => (float) (isset($it['unit_price']) ? $it['unit_price'] : 0),
                     'count'           => (float) (isset($it['quantity']) ? $it['quantity'] : 1),
                     'remark'          => isset($it['remark']) ? $it['remark'] : '',
+                    'supplier'        => isset($it['supplier']) ? $it['supplier'] : '',
                 );
             }, isset($combo['items']) ? $combo['items'] : array()),
         );
@@ -1012,6 +1023,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         tr.innerHTML =
             '<td><input type="text" class="form-control" name="' + base + '[name]" value="" readonly>' +
             '<select class="form-control form-control-sm cw-mult-type mt-2" name="' + base + '[multiplier_type]" title="How this cost scales">' + multiplierOptions(item.multiplier_type) + '</select>' +
+            '<input type="text" class="form-control form-control-sm cw-supplier mt-2" name="' + base + '[supplier]" list="cw-supplier-list" placeholder="Supplier (optional)" title="Pick an existing supplier or type a new name (not saved to the supplier master)" value="">' +
             '<input type="hidden" name="' + base + '[include]" value="1">' +
             '<input type="hidden" name="' + base + '[category]" value="miscellaneous">' +
             '<input type="hidden" name="' + base + '[unit_count]" value="1">' +
@@ -1033,6 +1045,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         tr.querySelector('input[name="' + base + '[name]"]').value = item.name || '';
         tr.querySelector('input[name="' + base + '[category]"]').value = cat;
         tr.querySelector('.cw-mult-type').value = item.multiplier_type || 'fixed';
+        tr.querySelector('.cw-supplier').value = item.supplier || '';
         tr.querySelector('.cw-cost').value = (item.unit_price !== undefined ? item.unit_price : 0);
         tr.querySelector('.cw-count').value = (item.count !== undefined && item.count !== null && item.count !== '') ? item.count : masterCount(item.multiplier_type);
         remarkTr.querySelector('.cw-remark').value = item.remark || '';
@@ -1063,6 +1076,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
                 name: nameEl ? nameEl.value : '',
                 category: catEl ? catEl.value : 'miscellaneous',
                 multiplier_type: row.querySelector('.cw-mult-type').value,
+                supplier: row.querySelector('.cw-supplier') ? row.querySelector('.cw-supplier').value : '',
                 currency_id: row.querySelector('.cw-currency').value,
                 unit_price: row.querySelector('.cw-cost').value,
                 count: row.querySelector('.cw-count').value,
@@ -1349,6 +1363,31 @@ jQuery(function () {
 </script>
 <?php } elseif ($active_step === 'logistics') { ?>
 <script>
+// Hotel note + Footer notes use the SAME rich-text editor as the itinerary
+// remark fields (class cw-itin-editor, TinyMCE). Init them and flush each editor
+// back to its textarea before the logistics form posts.
+jQuery(function () {
+    var form = document.getElementById('cw-logi-form');
+    if (!form || typeof window.tinymce === 'undefined') { return; }
+    var editorConfig = {
+        menubar: false,
+        height: 110,
+        branding: false,
+        statusbar: false,
+        toolbar: 'undo redo | bold italic underline | forecolor backcolor | bullist numlist | alignleft aligncenter alignright | removeformat',
+        plugins: 'lists paste',
+        paste_data_images: true,
+        paste_webkit_styles: 'none',
+        paste_remove_styles_if_webkit: true,
+        invalid_styles: { '*': 'position top left right bottom z-index' },
+        content_style: 'body{font-size:13px} img{max-width:100%;height:auto}'
+    };
+    form.querySelectorAll('.cw-itin-editor').forEach(function (el) {
+        tinymce.init(Object.assign({}, editorConfig, { target: el }));
+    });
+    form.addEventListener('submit', function () { tinymce.triggerSave(); });
+});
+
 // Hotel pricing + flight options are STATE-DRIVEN (rendered from a JS model), so
 // dynamic pricing columns (4.2), pull-from-costing (4.1), flight modes (4.3) and
 // multiple airline options (item 3 + 4.4) all stay in sync. On any structural

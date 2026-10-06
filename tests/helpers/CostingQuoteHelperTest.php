@@ -84,29 +84,34 @@ $assertions['level basis trimmed']   = $level['quote_pricing_basis'] === '25paxs
 $assertions['level price float']     = $level['quote_flight_price'] === 1708.0;
 $assertions['level expiry kept']     = $level['quote_flight_expiry'] === 'Expired valid until 10 September 2026';
 $assertions['level blank null']      = $level['quote_hotel_note'] === null;
+// Hotel note is rich-text (TinyMCE) now: a visually blank editor ("<p></p>")
+// normalises to NULL, real HTML is kept verbatim.
+$hotelNoteBlank = costing_quote_prepare_level(array('quote_hotel_note' => '<p><br></p>'));
+$assertions['hotel note blank html -> null'] = $hotelNoteBlank['quote_hotel_note'] === null;
+$hotelNoteKept = costing_quote_prepare_level(array('quote_hotel_note' => '<p>Lowest room type</p>'));
+$assertions['hotel note html kept'] = $hotelNoteKept['quote_hotel_note'] === '<p>Lowest room type</p>';
 $assertions['level no bogus key']    = !array_key_exists('bogus_field', $level);
 $assertions['level only known keys'] = (array_keys($level) === $fields);
 
-// Footer notes are special-cased: a deliberately cleared footer is persisted as
-// '' (not NULL) so the quote renders no footer. NULL stays reserved for "never
-// saved" → default boilerplate.
-$levelClearedFooter = costing_quote_prepare_level(array('quote_footer_notes' => '   '));
+// Footer notes are rich-text (TinyMCE) now and special-cased: a visually blank
+// editor ("<p></p>" / whitespace) is persisted as '' (not NULL) so the quote
+// renders no footer. NULL stays reserved for "never saved" → default boilerplate.
+$levelClearedFooter = costing_quote_prepare_level(array('quote_footer_notes' => '<p><br></p>'));
 $assertions['level cleared footer -> empty string'] = $levelClearedFooter['quote_footer_notes'] === '';
-$levelKeptFooter = costing_quote_prepare_level(array('quote_footer_notes' => "Custom note"));
-$assertions['level custom footer kept'] = $levelKeptFooter['quote_footer_notes'] === 'Custom note';
+$levelKeptFooter = costing_quote_prepare_level(array('quote_footer_notes' => '<p>Custom note</p>'));
+$assertions['level custom footer kept'] = $levelKeptFooter['quote_footer_notes'] === '<p>Custom note</p>';
 
-// --- costing_quote_default_footer_notes / footer_note_lines ----------------
+// --- costing_quote_default_footer_notes / footer_notes_html ----------------
 $default = costing_quote_default_footer_notes();
 $assertions['default footer non-empty'] = trim($default) !== '';
-// NULL (never saved) falls back to the default boilerplate...
-$defaultLines = costing_quote_footer_note_lines(null);
-$assertions['null footer -> default lines'] = count($defaultLines) === 5;
-// ...but a deliberately cleared ('') footer renders no lines at all.
-$assertions['empty footer -> no lines'] = costing_quote_footer_note_lines('') === array();
-$assertions['whitespace footer -> no lines'] = costing_quote_footer_note_lines("  \n ") === array();
-
-$customLines = costing_quote_footer_note_lines("Line one\n\n  Line two  \nLine three");
-$assertions['custom footer trims blanks'] = $customLines === array('Line one', 'Line two', 'Line three');
+$assertions['default footer is html'] = strpos($default, '<p>') !== false;
+// NULL (never saved) falls back to the default boilerplate HTML...
+$assertions['null footer -> default html'] = costing_quote_footer_notes_html(null) === $default;
+// ...but a deliberately cleared (blank HTML) footer renders nothing at all.
+$assertions['blank html footer -> empty'] = costing_quote_footer_notes_html('<p></p>') === '';
+$assertions['whitespace footer -> empty'] = costing_quote_footer_notes_html("  \n ") === '';
+// Real HTML is returned verbatim.
+$assertions['custom footer html kept'] = costing_quote_footer_notes_html('<p>One</p><ul><li>Two</li></ul>') === '<p>One</p><ul><li>Two</li></ul>';
 
 // --- 18 Sep 2026 feedback: flight modes (4.3) ------------------------------
 $modes = costing_quote_flight_modes();
