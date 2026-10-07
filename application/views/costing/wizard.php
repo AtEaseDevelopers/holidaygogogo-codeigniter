@@ -814,6 +814,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         return array(
             'name' => isset($combo['name']) ? $combo['name'] : '',
             'is_general' => !empty($combo['is_general']) ? 1 : 0,
+            'tour_leader_count' => isset($combo['tour_leader_count']) ? max(1, (int) $combo['tour_leader_count']) : 1,
             'selling_price_per_pax' => (isset($combo['selling_price_per_pax']) && $combo['selling_price_per_pax'] !== null && $combo['selling_price_per_pax'] !== '')
                 ? (float) $combo['selling_price_per_pax'] : null,
             'items' => array_map(function ($it) {
@@ -989,6 +990,23 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         return Math.round(cost * 100) / 100;
     }
 
+    // A combination's own No. of Tour Leaders (never below 1). Scales the
+    // tour-leader cost in THAT combo's summary only — item-card line totals untouched.
+    function cardTourLeaderCount(card) {
+        var input = card.querySelector('.cw-combo-tl-input');
+        var n = parseInt(input && input.value, 10);
+        return (n && n > 0) ? n : 1;
+    }
+    // Extra tour-leader cost for the summary: (count − 1) × the tour-leader rows' MYR.
+    function tourLeaderExtra(rows, count) {
+        if (count <= 1) { return 0; }
+        var tl = 0;
+        rows.forEach(function (row) {
+            if (row.getAttribute('data-cat') === 'tour_leader') { tl += rowTotalMyr(row); }
+        });
+        return Math.round((count - 1) * tl * 100) / 100;
+    }
+
     function recalcCombos(margin, pax) {
         function set(card, sel, val) { var el = card.querySelector(sel); if (el) { el.textContent = money(val); } }
 
@@ -997,9 +1015,12 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         var generalCard = combosWrap.querySelector('.cw-combo-card.cw-combo-general');
         var generalRows = generalCard ? cardRows(generalCard) : [];
         var generalPure = generalRows.length ? pureRowsCost(generalRows) : 0;
+        // The General's own No. of Tour Leaders scales its tour-leader cost; this
+        // scaled cost then folds into every regular combination (owner-scales-own).
+        var generalTlExtra = generalCard ? tourLeaderExtra(generalRows, cardTourLeaderCount(generalCard)) : 0;
         if (generalCard) {
             // The general subtotal charges bank once per its own currencies.
-            set(generalCard, '.cw-combo-cost', Math.round((generalPure + bankTotalForRows(generalRows)) * 100) / 100);
+            set(generalCard, '.cw-combo-cost', Math.round((generalPure + generalTlExtra + bankTotalForRows(generalRows)) * 100) / 100);
         }
 
         combosWrap.querySelectorAll('.cw-combo-card').forEach(function (card) {
@@ -1008,7 +1029,10 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             // so a currency shared by both is charged once (mirrors the PHP fold).
             var ownRows = cardRows(card);
             var union = ownRows.concat(generalRows);
-            var cost = Math.round((pureRowsCost(ownRows) + generalPure + bankTotalForRows(union)) * 100) / 100;
+            // This combination's own tour-leader section scales by its own count; the
+            // folded general carries the General's scaled tour-leader cost.
+            var ownTlExtra = tourLeaderExtra(ownRows, cardTourLeaderCount(card));
+            var cost = Math.round((pureRowsCost(ownRows) + ownTlExtra + generalPure + generalTlExtra + bankTotalForRows(union)) * 100) / 100;
             var costPax = Math.round((cost / pax) * 100) / 100;
             var divisor = 1 - (margin / 100);
             var markupPax = divisor > 0 ? Math.round((costPax / divisor) * 100) / 100 : costPax;
@@ -1168,24 +1192,36 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         return sel;
     }
 
-    // A category header row inside a combination's cost table.
-    function comboCatHeader(cat) {
+    // A category header row inside a combination's cost table. The Tour Leader
+    // header also carries this combination's "No. of Tour Leaders" input (next to
+    // the label), which scales ONLY this section's cost in the summary + PDF.
+    function comboCatHeader(cat, c) {
         var tr = document.createElement('tr');
         tr.className = 'cw-combo-cat-row';
         tr.setAttribute('data-cat', cat);
         var col = catColor(cat);
-        tr.innerHTML = '<td colspan="7" style="background:' + col.bg + '; color:' + col.fg + '; border-left:4px solid ' + col.border + ';">' + esc(CAT_LABELS[cat] || 'Miscellaneous') + '</td>';
+        var label = esc(CAT_LABELS[cat] || 'Miscellaneous');
+        var inner = label;
+        if (cat === 'tour_leader') {
+            inner = '<span style="display:flex; align-items:center; justify-content:space-between; gap:10px;">' +
+                        '<span>' + label + '</span>' +
+                        '<span style="display:inline-flex; align-items:center; gap:6px; font-weight:600; white-space:nowrap;">No. of Tour Leaders' +
+                            '<input type="number" step="1" min="1" class="form-control form-control-sm cw-combo-tl-input" name="combinations[' + c + '][tour_leader_count]" value="1" style="width:72px; min-width:0;" title="Scales this Tour Leader section\'s cost in the summary &amp; quotation PDF (the cost rows below stay unchanged)">' +
+                        '</span>' +
+                    '</span>';
+        }
+        tr.innerHTML = '<td colspan="7" style="background:' + col.bg + '; color:' + col.fg + '; border-left:4px solid ' + col.border + ';">' + inner + '</td>';
         return tr;
     }
 
     // Drop an item row (+ its remark row) under its category header inside a combo
     // table, creating the header in canonical category order when it's the first of
     // its kind — so the combination reads as grouped sections, not one flat list.
-    function insertComboRow(tbody, cat, itemRow, remarkRow) {
+    function insertComboRow(tbody, cat, itemRow, remarkRow, c) {
         var order = Object.keys(CAT_LABELS);
         var header = tbody.querySelector('.cw-combo-cat-row[data-cat="' + cat + '"]');
         if (!header) {
-            header = comboCatHeader(cat);
+            header = comboCatHeader(cat, c);
             var myIdx = order.indexOf(cat);
             var ref = null, existing = tbody.querySelectorAll('.cw-combo-cat-row');
             for (var i = 0; i < existing.length; i++) {
@@ -1256,7 +1292,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         tr.firstElementChild.style.borderLeft = '4px solid ' + rowCol.border;
         remarkTr.firstElementChild.style.borderLeft = '4px solid ' + rowCol.border;
 
-        insertComboRow(card.querySelector('.cw-combo-body'), cat, tr, remarkTr);
+        insertComboRow(card.querySelector('.cw-combo-body'), cat, tr, remarkTr, c);
         return tr;
     }
 
@@ -1290,7 +1326,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
     // isGeneral = the single "General Combination" whose common items (Tour Leader,
     // Flight, …) are added to every other combination (item 6). It has no selling
     // price / profit of its own and cannot be removed or duplicated.
-    function addComboCard(name, items, sellingPerPax, isGeneral) {
+    function addComboCard(name, items, sellingPerPax, isGeneral, tourLeaderCount) {
         var c = comboSeq++;
         var card = document.createElement('div');
         card.className = 'cw-combo-card' + (isGeneral ? ' cw-combo-general' : '');
@@ -1353,6 +1389,12 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             if (sellInput) { sellInput.value = (Math.round(Number(sellingPerPax) * 100) / 100).toFixed(2); sellInput.setAttribute('data-touched', '1'); }
         }
         (items || []).forEach(function (it) { addComboRow(card, it); });
+
+        // Restore this combination's saved No. of Tour Leaders (default 1). The input
+        // lives in the Tour Leader section header, which only exists once a tour-leader
+        // row has been added above, so this runs AFTER the rows are built.
+        var tlInput = card.querySelector('.cw-combo-tl-input');
+        if (tlInput) { var tln = parseInt(tourLeaderCount, 10); tlInput.value = (tln && tln > 0) ? tln : 1; }
 
         if (window.jQuery && jQuery.fn.select2) {
             jQuery(card).find('.cw-combo-pick').select2({ placeholder: '— Add item —', allowClear: true, width: '260px' });
@@ -1425,7 +1467,7 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
             var src = dupCard.closest('.cw-combo-card');
             if (src) {
                 var srcName = src.querySelector('.cw-combo-name').value;
-                addComboCard(srcName ? (srcName + ' (copy)') : '', readComboItems(src), null);
+                addComboCard(srcName ? (srcName + ' (copy)') : '', readComboItems(src), null, false, cardTourLeaderCount(src));
                 recalc();
             }
             return;
@@ -1446,8 +1488,8 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
         if (combo.is_general && !generalExisting) { generalExisting = combo; }
         else { regularCombos.push(combo); }
     });
-    addComboCard(generalExisting ? generalExisting.name : '', generalExisting ? generalExisting.items : [], null, true);
-    regularCombos.forEach(function (combo) { addComboCard(combo.name, combo.items, combo.selling_price_per_pax, false); });
+    addComboCard(generalExisting ? generalExisting.name : '', generalExisting ? generalExisting.items : [], null, true, generalExisting ? generalExisting.tour_leader_count : 1);
+    regularCombos.forEach(function (combo) { addComboCard(combo.name, combo.items, combo.selling_price_per_pax, false, combo.tour_leader_count); });
 
     // ---- Supplier Quotations: drag-and-drop upload / delete ----------------
     (function () {

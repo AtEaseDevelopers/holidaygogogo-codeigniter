@@ -385,6 +385,65 @@ $gc_multi = costing_fold_general_combination([
 $assertions['general: multiple general sum']      = $approx($gc_multi[0]['cost_myr'], 1150.0);
 
 /* ------------------------------------------------------------------ *
+ * 6d) TOUR-LEADER COUNT ("No. of Tour Leaders"), owner-scales-own      *
+ * ------------------------------------------------------------------ *
+ * The count sits on the Tour Leader section of the combination that    *
+ * OWNS those rows and scales ONLY that section (summary / PDF; item-    *
+ * card line totals untouched). A combo's extra = (N - 1) × its OWN      *
+ * tour-leader MYR. The General's own count scales the folded General    *
+ * tour-leader cost. Absent / < 1 behaves as 1.                         */
+
+// Tour leader lives in the General combo (300). The count sits on the section that
+// OWNS the rows -> the General's count scales the folded 300 for every regular.
+$tl_gen = [
+    ['name' => 'General', 'is_general' => 1, 'tour_leader_count' => 2, 'items' => [
+        ['base_total' => 300.0, 'category' => 'tour_leader',   'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+    ['name' => 'Standard', 'items' => [
+        ['base_total' => 1000.0, 'category' => 'accommodation', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+    ['name' => 'Premium', 'items' => [
+        ['base_total' => 2000.0, 'category' => 'accommodation', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+];
+$g = costing_fold_general_combination($tl_gen);
+// General tl 300×2=600 folds into both. Standard 1000+600=1600; Premium 2000+600=2600.
+$assertions['tl: general count scales folded (std)'] = $approx($g[0]['cost_myr'], 1600.0);
+$assertions['tl: general count scales folded (prm)'] = $approx($g[1]['cost_myr'], 2600.0);
+// General count 1 -> unchanged (1000 + 300).
+$tl_gen1 = $tl_gen; $tl_gen1[0]['tour_leader_count'] = 1;
+$assertions['tl: general count 1 unchanged']  = $approx(costing_fold_general_combination($tl_gen1)[0]['cost_myr'], 1300.0);
+// Absent count -> treated as 1.
+$tl_gen0 = $tl_gen; unset($tl_gen0[0]['tour_leader_count']);
+$assertions['tl: absent count is 1']          = $approx(costing_fold_general_combination($tl_gen0)[0]['cost_myr'], 1300.0);
+
+// Own tour leader on a regular combo scaled by its own count. 700 + (3-1)×200 = 1100.
+$tl_own = [
+    ['name' => 'A', 'tour_leader_count' => 3, 'items' => [
+        ['base_total' => 200.0, 'category' => 'tour_leader', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+        ['base_total' => 500.0, 'category' => 'flight',      'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+];
+$assertions['tl: own-combo count scales own tl'] = $approx(costing_fold_general_combination($tl_own)[0]['cost_myr'], 1100.0);
+
+// Mixed: general own tl (count 2) + regular own tl (count 3) stack independently.
+// general_sum = 100 + (2-1)×100 = 200; own = (50+1000) + (3-1)×50 = 1150; total 1350.
+$tl_mix = [
+    ['name' => 'G', 'is_general' => 1, 'tour_leader_count' => 2, 'items' => [
+        ['base_total' => 100.0, 'category' => 'tour_leader', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+    ['name' => 'R', 'tour_leader_count' => 3, 'items' => [
+        ['base_total' => 50.0,   'category' => 'tour_leader',   'currency_id' => 1, 'bank_charges_myr' => 0.0],
+        ['base_total' => 1000.0, 'category' => 'accommodation', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+];
+$assertions['tl: mixed own+general counts'] = $approx(costing_fold_general_combination($tl_mix)[0]['cost_myr'], 1350.0);
+// Count < 1 clamps to 1; no tour-leader rows -> no-op.
+$assertions['tl: no tour-leader rows -> no-op'] = $approx(costing_fold_general_combination([
+    ['name' => 'B', 'tour_leader_count' => 5, 'items' => [['base_total' => 400.0, 'category' => 'flight', 'currency_id' => 1, 'bank_charges_myr' => 0.0]]],
+])[0]['cost_myr'], 400.0);
+
+/* ------------------------------------------------------------------ *
  * 7) SOURCE CONTRACT                                                  *
  * ------------------------------------------------------------------ */
 

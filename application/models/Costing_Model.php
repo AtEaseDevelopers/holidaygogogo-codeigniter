@@ -545,6 +545,8 @@ class Costing_Model extends CI_Model
                 'selling_price_per_pax' => isset($combo['selling_price_per_pax']) ? $combo['selling_price_per_pax'] : null,
                 // General combination (item 6): its cost folds into every other combo.
                 'is_general' => !empty($combo['is_general']) ? 1 : 0,
+                // Per-combination No. of Tour Leaders (default 1).
+                'tour_leader_count' => isset($combo['tour_leader_count']) ? max(1, (int) $combo['tour_leader_count']) : 1,
                 'sort_order' => $sort,
             ));
             $combination_id = (int) $this->db->insert_id();
@@ -1667,7 +1669,8 @@ class Costing_Model extends CI_Model
     public function Combination_Pricing_List($booking_id, $base_currency_id, $travel_date, $margin_percent, $total_pax)
     {
         $this->load->helper('costing_calc');
-        // Fold the General Combination cost into every combination first (item 6).
+        // Fold the General Combination cost into every combination first (item 6);
+        // each combination scales its own tour-leader cost by its No. of Tour Leaders.
         $folded = costing_fold_general_combination(
             $this->Read_Combinations((int) $booking_id, (int) $base_currency_id, $travel_date)
         );
@@ -1697,7 +1700,7 @@ class Costing_Model extends CI_Model
         $booking_id = (int) $booking_id;
 
         $combos = $this->db
-            ->select('id, name, selling_price_per_pax, is_general')
+            ->select('id, name, selling_price_per_pax, is_general, tour_leader_count')
             ->where('costing_booking_id', $booking_id)
             ->order_by('sort_order', 'ASC')
             ->order_by('id', 'ASC')
@@ -1742,6 +1745,9 @@ class Costing_Model extends CI_Model
                     ? null
                     : round((float) $combo['selling_price_per_pax'], 2),
                 'is_general' => !empty($combo['is_general']) ? 1 : 0,
+                // Per-combination No. of Tour Leaders — scales this combo's
+                // tour-leader cost in the summary + quotation PDF (default 1).
+                'tour_leader_count' => isset($combo['tour_leader_count']) ? max(1, (int) $combo['tour_leader_count']) : 1,
                 'items'    => $items,
             );
         }
@@ -2004,7 +2010,11 @@ class Costing_Model extends CI_Model
             $selling = isset($combo['selling_price_per_pax']) ? trim((string) $combo['selling_price_per_pax']) : '';
             $selling_price_per_pax = (!$is_general && $selling !== '' && is_numeric($selling)) ? round(max(0, (float) $selling), 2) : null;
 
-            $out[] = array('name' => $name, 'rows' => $rows, 'selling_price_per_pax' => $selling_price_per_pax, 'is_general' => $is_general);
+            // Per-combination No. of Tour Leaders (default 1, never below 1). Scales
+            // only this combo's tour-leader cost in the summary / quotation PDF.
+            $tour_leader_count = isset($combo['tour_leader_count']) ? max(1, (int) $combo['tour_leader_count']) : 1;
+
+            $out[] = array('name' => $name, 'rows' => $rows, 'selling_price_per_pax' => $selling_price_per_pax, 'is_general' => $is_general, 'tour_leader_count' => $tour_leader_count);
         }
 
         return $out;
