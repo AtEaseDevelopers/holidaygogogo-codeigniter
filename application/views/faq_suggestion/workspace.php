@@ -7,7 +7,7 @@ $run_id=isset($run_id)&&$run_id==='latest20'?'latest20':(isset($run_id)?(int)$ru
 $generation_runs=isset($generation_runs)&&is_array($generation_runs)?$generation_runs:array();
 $source_labels=array('chats'=>'Chats','pdf'=>'PDF','chatfile'=>'Chat File','reevaluate'=>'Re-evaluation');
 $total=isset($total)?$total:count($candidates); $page=isset($page)?$page:1; $pages=isset($pages)?$pages:1;
-$workspace_tab=isset($workspace_tab)?$workspace_tab:'all';
+$workspace_tab=isset($workspace_tab)?$workspace_tab:'pending';
 $pagination_query=array('section'=>'suggestions','tab'=>$workspace_tab,'search'=>$search,'run_id'=>$run_id);
 ?>
 <style>

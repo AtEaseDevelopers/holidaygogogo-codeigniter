@@ -51,7 +51,7 @@ function faq_workspace_review_version($s)
 
 function faq_workspace_filters()
 {
-    return array('all'=>'All','pending'=>'Pending Approval','context'=>'Needs Information',
+    return array('pending'=>'Pending Approval','context'=>'Needs Information',
         'accepted'=>'Approved','dismissed'=>'Rejected');
 }
 

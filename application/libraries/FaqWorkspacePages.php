@@ -24,7 +24,7 @@ class FaqWorkspacePages
         $tab=$ci->input->get('tab'); $filters=faq_workspace_filters();
         $aliases=array('new'=>'pending','ready'=>'pending','input'=>'context','source'=>'context','completed'=>'all');
         if (is_string($tab) && isset($aliases[$tab])) { $tab=$aliases[$tab]; }
-        $tab=is_string($tab)&&isset($filters[$tab])?$tab:'all';
+        $tab=is_string($tab)&&isset($filters[$tab])?$tab:'pending';
         $search=$ci->input->get('search'); $search=is_string($search)?mb_substr(trim($search),0,200):'';
         $page=$ci->input->get('page'); $page=is_scalar($page)?max(1,(int)$page):1;
         $run=$ci->input->get('run_id'); $run=$run==='latest20'?'latest20':(is_scalar($run)?max(0,(int)$run):0);
