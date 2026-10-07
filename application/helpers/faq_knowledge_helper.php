@@ -123,10 +123,11 @@ function faq_knowledge_candidate_query($candidate, $additional='', $messages=arr
     if ($additional!=='') { $focus[]=$additional; }
     $context=array();
     foreach ($messages as $message) { $message=(array)$message; $context[]=(string)($message['text']??$message['excerpt']??$message['SourceExcerpt']??''); }
-    return array('focus'=>implode("\n",$focus),'context'=>implode("\n",$context));
+    $destinations=$candidate['destination_ids']??explode(',',(string)($candidate['DestinationIds']??''));
+    return array('focus'=>implode("\n",$focus),'context'=>implode("\n",$context),'destination_ids'=>Faq_Model::Normalize_Ids($destinations));
 }
 
-/** Select complete, applicable excerpts. Scope alone or a zero topic match is insufficient. */
+/** Retrieve destination material for AI review, or check cited excerpts against the question. */
 function faq_knowledge_select($query, $rows, $products, $today, $options=array())
 {
     $query=is_array($query)?$query:array('focus'=>(string)$query,'context'=>'');
@@ -136,6 +137,16 @@ function faq_knowledge_select($query, $rows, $products, $today, $options=array()
     foreach ($catalog as $row) { $row=(array)$row; if (!empty($row['ResortName'])) { $names[]=$row['ResortName']; } }
     $resorts=faq_knowledge_resorts($focus,$names);
     if (!$resorts) { $resorts=faq_knowledge_resorts($context,$names); }
+    $destinations=array(); $matched_destinations=array(); $attached_only=!empty($options['attached_destinations_only']);
+    foreach ($options['destinations']??array() as $destination) {
+        $destination=(array)$destination; $destinations[(int)$destination['CategoryID']]=$destination['Name'];
+    }
+    foreach ($query['destination_ids']??array() as $id) { if (isset($destinations[(int)$id])) { $matched_destinations[(int)$id]=true; } }
+    if (!$matched_destinations && !$attached_only) {
+        $locations=faq_knowledge_resorts($focus,array_values($destinations));
+        if (!$locations) { $locations=faq_knowledge_resorts($context,array_values($destinations)); }
+        foreach ($destinations as $id=>$name) { if (isset($locations[faq_knowledge_norm($name)])) { $matched_destinations[$id]=true; } }
+    }
     foreach ($products as $product) {
         $product=(array)$product; $packages[(int)$product['ProductID']]=$product;
         if (faq_knowledge_has($focus,$product['Name']) || faq_knowledge_has($focus,$product['ProductCode']??'')) { $matched_products[(int)$product['ProductID']]=true; }
@@ -146,19 +157,31 @@ function faq_knowledge_select($query, $rows, $products, $today, $options=array()
     $intents=faq_knowledge_intents($focus); if (!$intents) { $intents=faq_knowledge_intents($context); }
     $query_dates=faq_knowledge_travel_dates($query['focus']."\n".($query['context']??''));
     $dates=$options['travel_dates']??(!empty($options['batch'])?array():$query_dates);
-    $limit=max(1,min(30,(int)($options['limit']??10))); $ranked=array();
-    $entity_terms=faq_knowledge_norm(implode(' ',$names).' '.implode(' ',array_column($packages,'Name')));
+    $unlimited=!empty($options['unlimited']);
+    $limit=$unlimited?0:max(1,min(30,(int)($options['limit']??10))); $ranked=array();
+    $entity_terms=faq_knowledge_norm(implode(' ',$names).' '.implode(' ',array_column($packages,'Name')).' '.implode(' ',$destinations));
     $stop=array_flip(explode(' ','the a an is are can i we you do does how what when which where with for of to in on at and or have has it this that please help policy information question answer customer resort hotel club med beach package saya kami boleh nak mahu ada ke di untuk dan atau berapa apa ini itu tahun years old'));
     $words=array();
     foreach (explode(' ',$focus) as $word) { if (mb_strlen($word,'UTF-8')>=3 && !isset($stop[$word]) && !faq_knowledge_has($entity_terms,$word) && !is_numeric($word)) { $words[$word]=true; } }
     foreach ($rows as $source) {
         $s=(array)$source;
+        if ($attached_only && (empty($s['DestinationID']) || !isset($matched_destinations[(int)$s['DestinationID']]))) { continue; }
         $valid=faq_workspace_source_valid($s,$today,$dates?reset($dates):'');
         if (!$valid && !empty($options['batch'])) { foreach ($query_dates as $date) { if (faq_workspace_source_valid($s,$today,$date)) { $valid=true; break; } } }
         if (!$valid) { continue; }
         $date_valid=true; foreach ($dates as $date) { if (!faq_workspace_source_valid($s,$today,$date)) { $date_valid=false; break; } }
         if (!$date_valid) { continue; }
         $reasons=array(); $score=0;
+        if (!empty($s['DestinationID'])) {
+            if (!isset($matched_destinations[(int)$s['DestinationID']])) { continue; }
+            $reasons[]='Destination: '.$destinations[(int)$s['DestinationID']]; $score+=25;
+            if (!empty($options['all_destination_sources'])) {
+                $reasons[]='All destination knowledge supplied for AI evaluation';
+                if ($dates) { $reasons[]='Travel date: '.implode(', ',$dates); }
+                $ranked[]=array('score'=>$score,'source'=>$s,'reasons'=>$reasons,'all_destination'=>true);
+                continue;
+            }
+        }
         if (!empty($s['ProductID'])) {
             if (!isset($matched_products[(int)$s['ProductID']])) { continue; }
             $reasons[]='Package: '.$packages[(int)$s['ProductID']]['Name']; $score+=35;
@@ -182,33 +205,38 @@ function faq_knowledge_select($query, $rows, $products, $today, $options=array()
         if ($matched) { $reasons[]='Subject: '.implode(', ',array_map(function($v){return ucfirst(str_replace('_',' ',$v));},array_keys($matched))); $score+=20+5*count($matched); }
         if ($overlap) { $score+=min(15,3*count($overlap)); if (!$matched) { $reasons[]='Question terms: '.implode(', ',array_slice($overlap,0,4)); } }
         if (!$reasons) { continue; }
-        if (empty($s['ProductID']) && empty($s['ResortName']) && empty($s['RoomType'])) { $reasons[]='Agency-wide source'; }
+        if (empty($s['DestinationID']) && empty($s['ProductID']) && empty($s['ResortName']) && empty($s['RoomType'])) { $reasons[]='Agency-wide source'; }
         if ($dates) { $reasons[]='Travel date: '.implode(', ',$dates); }
-        $ranked[]=array('score'=>$score,'source'=>$s,'reasons'=>$reasons);
+        $ranked[]=array('score'=>$score,'source'=>$s,'reasons'=>$reasons,'all_destination'=>false);
     }
     usort($ranked,function($a,$b){return $b['score']-$a['score'] ?: (int)$b['source']['SourceID']-(int)$a['source']['SourceID'];});
     if (!empty($options['batch'])) {
         // Give different resorts/subjects a turn before one subject consumes a batch's budget.
-        $groups=array(); foreach ($ranked as $entry) { $s=$entry['source']; $key=json_encode(array($s['ProductID'],$s['ResortName'],$s['RoomType'],$s['Topic'])); $groups[$key][]=$entry; }
+        $groups=array(); foreach ($ranked as $entry) { $s=$entry['source']; $key=json_encode(array($s['DestinationID']??null,$s['ProductID'],$s['ResortName'],$s['RoomType'],$s['Topic'])); $groups[$key][]=$entry; }
         $ranked=array();
         while ($groups) { foreach ($groups as $key=>$group) { $ranked[]=array_shift($groups[$key]); if (!$groups[$key]) { unset($groups[$key]); } } }
     }
-    $input=array(); $map=array(); $selection=array(); $bytes=0; $seen=array();
+    $input=array(); $map=array(); $selection=array(); $bytes=0; $matched_count=0; $seen=array();
     foreach ($ranked as $entry) {
         $s=$entry['source']; $ref='K'.(int)$s['SourceID'];
-        $key=hash('sha256',json_encode(array($s['ProductID'],$s['ResortName'],$s['RoomType'],$s['ValidFrom'],$s['ValidTo'],$s['ReviewDue'],$s['AppliesToAllRooms'],mb_strtolower(trim(preg_replace('/\s+/u',' ',$s['Excerpt'])),'UTF-8'))));
-        if (isset($seen[$key])) { continue; }
+        $key=hash('sha256',json_encode(array($s['DestinationID']??null,$s['ProductID'],$s['ResortName'],$s['RoomType'],$s['ValidFrom'],$s['ValidTo'],$s['ReviewDue'],$s['AppliesToAllRooms'],mb_strtolower(trim(preg_replace('/\s+/u',' ',$s['Excerpt'])),'UTF-8'))));
+        // Every destination entry reaches AI, with its full wording and scope.
+        // Only additional matched sources use the usual retrieval budget.
+        $complete=$entry['all_destination'] || $unlimited;
+        if (!$complete && (isset($seen[$key]) || $matched_count>=$limit)) { continue; }
         $item=array('reference'=>$ref,'title'=>$s['Title'],'excerpt'=>$s['Excerpt'],'topic'=>$s['Topic'],
+            'destination'=>$destinations[(int)($s['DestinationID']??0)]??'',
             'package_name'=>$packages[(int)$s['ProductID']]['Name']??'','resort'=>$s['ResortName'],'room_type'=>$s['RoomType'],
             'applies_to_all_rooms'=>(bool)$s['AppliesToAllRooms'],'valid_from'=>$s['ValidFrom'],'valid_to'=>$s['ValidTo'],
             'selection_reason'=>implode(' · ',$entry['reasons']));
         $size=strlen(json_encode($item,JSON_UNESCAPED_UNICODE));
-        if ($bytes+$size>60000) { continue; }
-        $bytes+=$size; $seen[$key]=true; $input[]=$item; $s['_travel_dates']=$dates; $map[$ref]=$s;
+        if (!$complete && $bytes+$size>60000) { continue; }
+        if (!$complete) { $bytes+=$size; $matched_count++; }
+        $seen[$key]=true; $input[]=$item; $s['_travel_dates']=$dates; $map[$ref]=$s;
         $selection[]=$item+array('source_id'=>(int)$s['SourceID'],'source_url'=>$s['SourceUrl']??'');
-        if (count($input)>=$limit) { break; }
     }
     $matched_packages=array(); foreach ($matched_products as $id=>$unused) { $matched_packages[]=array('name'=>$packages[$id]['Name'],'code'=>$packages[$id]['ProductCode']); }
     return array('input'=>$input,'map'=>$map,'packages'=>$matched_packages,
-        'selection'=>array('sources'=>$selection,'travel_dates'=>$dates,'limit'=>$limit,'batch'=>!empty($options['batch']),'query'=>$query['focus']));
+        'selection'=>array('sources'=>$selection,'travel_dates'=>$dates,'limit'=>$limit,'batch'=>!empty($options['batch']),'query'=>$query['focus'],
+            'all_destination_sources'=>!empty($options['all_destination_sources']),'attached_destinations_only'=>$attached_only,'destination_ids'=>array_keys($matched_destinations)));
 }

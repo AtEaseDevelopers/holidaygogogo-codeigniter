@@ -182,8 +182,8 @@
 						</div>
 					</div>
 					</fieldset>
-					<?php if(!$completed) { ?><div class="mt-3"><button type="button" class="btn btn-light-info btn-sm faq-knowledge-preview" data-mode="update" data-suggestion-id="<?php echo (int)$suggestion->SuggestionID; ?>" data-target="#faq-knowledge-preview" data-url="<?php echo base_url('Faq_Suggestion/Knowledge_Preview'); ?>" data-source-url="<?php echo base_url('Faq_Suggestion/Source_Detail?id='); ?>">Refresh matching sources</button><div id="faq-knowledge-preview">
-					<?php $this->load->view('faq_suggestion/knowledge_selection',array('selection'=>$knowledge_preview??array('sources'=>array()),'can_manage_sources'=>$can_manage_sources??false)); ?></div></div><?php } ?>
+					<?php if(!$completed) { ?><div class="mt-3 faq-knowledge-preview" data-mode="update" data-suggestion-id="<?php echo (int)$suggestion->SuggestionID; ?>" data-target="#faq-knowledge-preview" data-url="<?php echo base_url('Faq_Suggestion/Knowledge_Preview'); ?>" data-source-url="<?php echo base_url('Faq_Suggestion/Source_Detail?id='); ?>"><div id="faq-knowledge-preview" aria-live="polite">
+					<?php $this->load->view('faq_suggestion/knowledge_selection',array('selection'=>$knowledge_preview??array('sources'=>array()),'open'=>true,'can_manage_sources'=>$can_manage_sources??false)); ?></div></div><?php } ?>
 				</div>
 			</div>
 		</form>
@@ -402,4 +402,4 @@
 
 	$('[data-toggle="tooltip"]').tooltip();
 </script>
-<script src="<?php echo base_url('assets/js/faq_knowledge_preview.js'); ?>"></script>
+<script src="<?php echo base_url('assets/js/faq_knowledge_preview.js?v=').filemtime(FCPATH.'assets/js/faq_knowledge_preview.js'); ?>"></script>

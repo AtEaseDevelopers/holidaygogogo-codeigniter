@@ -13,7 +13,7 @@
 					<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
 				</div>
 				<div class="modal-body">
-					<p class="text-muted">Analyse WhatsApp &amp; GHL chats within a date range and propose new FAQs. Leave the mobile number blank to include everyone.</p>
+					<p class="text-muted">Analyse WhatsApp &amp; GHL chats within a date range and propose new FAQs. Leave the mobile number blank to include everyone. AI identifies topics, drafts answers from the chats and marks each suggestion Pending Approval or Needs Information. Attach a destination and re-evaluate to use its Knowledge Sources.</p>
 					<div class="form-group">
 						<label>Date range <span class="text-danger">*</span></label>
 						<div class="row">
@@ -83,7 +83,7 @@
 					<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
 				</div>
 				<div class="modal-body">
-					<p class="text-muted">Upload a chat export as <strong>.txt</strong> (text only, without media), or a <strong>.zip</strong> bundling several exports. The AI reads the conversation and proposes FAQs from it. Max 5 MB per .txt, 30 MB per .zip.</p>
+					<p class="text-muted">Upload a chat export as <strong>.txt</strong> (text only, without media), or a <strong>.zip</strong> bundling several exports. AI drafts FAQs from the chats and marks each suggestion Pending Approval or Needs Information. Attach a destination and re-evaluate to use its Knowledge Sources. Max 5 MB per .txt, 30 MB per .zip.</p>
 					<div class="form-group mb-0">
 						<label>Chat export file (.txt or .zip) <span class="text-danger">*</span></label>
 						<input type="file" name="file" class="form-control-file" accept=".txt,.zip,text/plain,application/zip" required>

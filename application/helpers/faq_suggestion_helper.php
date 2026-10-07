@@ -408,11 +408,11 @@ if (!function_exists('faq_suggestion_existing_match')) {
 }
 
 if (!function_exists('faq_suggestion_build_prompt')) {
-    /** Extract candidates from a labelled conversation transcript. */
-    function faq_suggestion_build_prompt($transcript, $destination_names = array(), $existing_faqs = array(), $max = 0, $knowledge=array(), $packages=array())
+    /** Initial chat scan uses conversation evidence; knowledge is added on re-evaluation. */
+    function faq_suggestion_build_prompt($transcript, $destination_names = array(), $existing_faqs = array(), $max = 0)
     {
-        return array('instructions'=>faq_suggestion_extraction_instructions($max),
-            'input'=>faq_suggestion_candidate_input($destination_names,$existing_faqs,$knowledge,$packages).
+        return array('instructions'=>faq_suggestion_extraction_instructions($max,false,true),
+            'input'=>faq_suggestion_candidate_input($destination_names,$existing_faqs,array(),array(),false).
                 ((int)$max>0?"\nReturn at most ".(int)$max." FAQs; keep well-supported tour-specific FAQs as well as agency-wide ones.":"\nList every FAQ you can extract; retain supported tour-specific details.").
                 "\nConversations (each [S#] is an evidence reference):\n".(string)$transcript);
     }

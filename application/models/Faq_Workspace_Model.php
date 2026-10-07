@@ -12,12 +12,12 @@ class Faq_Workspace_Model extends CI_Model
         $this->load->model('Faq_Model');
     }
 
-    function Audit($suggestion, $source, $action, $before, $after)
+    function Audit($suggestion, $source, $action, $before, $after, $staff=null)
     {
         $this->db->insert('faq_workspace_audit',array('SuggestionID'=>$suggestion,'SourceID'=>$source,'Action'=>$action,
             'BeforeJson'=>$before===null?null:json_encode($before,JSON_UNESCAPED_UNICODE),
             'AfterJson'=>$after===null?null:json_encode($after,JSON_UNESCAPED_UNICODE),
-            'InsertBy'=>$this->session->userdata('admin_id'),'InsertDate'=>date('Y-m-d H:i:s')));
+            'InsertBy'=>$staff===null?$this->session->userdata('admin_id'):$staff,'InsertDate'=>date('Y-m-d H:i:s')));
     }
 
     function Read_Review_History($suggestion)
@@ -47,8 +47,15 @@ class Faq_Workspace_Model extends CI_Model
     /** Retrieve reference material locally; this never makes an AI request. */
     function Knowledge_Input($text, $options=array())
     {
+        $options['destinations']=$this->Faq_Model->Read_Destinations();
+        $options['all_destination_sources']=true;
+        if (!empty($options['attached_destinations_only'])) {
+            $ids=Faq_Model::Normalize_Ids(is_array($text)?($text['destination_ids']??array()):array());
+            if (!$ids) { return faq_knowledge_select($text,array(),array(),date('Y-m-d'),$options); }
+        }
         $packages=$this->Products();
-        $rows=$this->db->select('SourceID, Status, VerifiedBy, VerifiedDate, Title, Excerpt, ProductID, ResortName, RoomType, Topic, AppliesToAllRooms, ValidFrom, ValidTo, ReviewDue, SourceUrl, FilePath')
+        if (!empty($options['attached_destinations_only'])) { $this->db->where_in('DestinationID',$ids); }
+        $rows=$this->db->select('SourceID, Status, VerifiedBy, VerifiedDate, Title, Excerpt, ProductID, DestinationID, ResortName, RoomType, Topic, AppliesToAllRooms, ValidFrom, ValidTo, ReviewDue, SourceUrl, FilePath')
             ->where('Status','approved')->order_by('SourceID','DESC')->get('faq_knowledge_sources')->result_array();
         $options['scope_catalog']=$this->Knowledge_Catalog();
         return faq_knowledge_select($text,$rows,$packages,date('Y-m-d'),$options);
@@ -64,7 +71,8 @@ class Faq_Workspace_Model extends CI_Model
         if (!is_string($additional) || strlen($additional)>20000) { throw new Exception('Additional information must be at most 20,000 bytes.'); }
         $s=$this->Faq_Suggestion_Model->Read($id); if (!$s) { throw new Exception('Suggestion not found.'); }
         $candidate=$edited??array('title'=>$s->Title,'items'=>Faq_Model::Decode_Items($s->Description));
-        return $this->Knowledge_Input(faq_knowledge_candidate_query($candidate,$additional,$this->Reevaluation_Messages($id,$include_more)));
+        if (!isset($candidate['destination_ids'])) { $candidate['destination_ids']=Faq_Suggestion_Model::Parse_Id_Csv($s->DestinationIds); }
+        return $this->Knowledge_Input(faq_knowledge_candidate_query($candidate,$additional,$this->Reevaluation_Messages($id,$include_more)),array('attached_destinations_only'=>true));
     }
 
     /** Historical selections come from the assessment snapshot, not today's matching sources. */
@@ -88,7 +96,14 @@ class Faq_Workspace_Model extends CI_Model
             $context=array();
             foreach (array_unique(array_merge($candidate['source_refs'],array('A1'))) as $ref) { if (isset($evidence[$ref])) { $context[]=$evidence[$ref]; } }
             if ($selection!==null && empty($selection['batch'])) { $context[]=array('excerpt'=>$selection['query']); }
-            $applicable=faq_knowledge_select(faq_knowledge_candidate_query($candidate,'',$context),array_values($knowledge),$this->Products(),date('Y-m-d'),array('limit'=>30,'scope_catalog'=>$this->Knowledge_Catalog())+($selection!==null&&$selection['travel_dates']?array('travel_dates'=>$selection['travel_dates']):array()));
+            $applicable=array('map'=>array());
+            if ($knowledge) {
+                $options=array('unlimited'=>true,'scope_catalog'=>$this->Knowledge_Catalog(),
+                    'destinations'=>$this->Faq_Model->Read_Destinations(),
+                    'attached_destinations_only'=>!empty($selection['attached_destinations_only']));
+                if (!empty($selection['travel_dates'])) { $options['travel_dates']=$selection['travel_dates']; }
+                $applicable=faq_knowledge_select(faq_knowledge_candidate_query($candidate,'',$context),array_values($knowledge),$this->Products(),date('Y-m-d'),$options);
+            }
             foreach ($assessment['answer_refs'] as $ref) {
                 if (isset($knowledge[$ref])) {
                     $source=$knowledge[$ref]; $current=$this->Faq_Knowledge_Source_Model->Read($source['SourceID'],true);
@@ -353,8 +368,10 @@ class Faq_Workspace_Model extends CI_Model
             $evidence[$message['reference']]=$message['source']; $input_messages[]=array('reference'=>$message['reference'],'text'=>$message['text']);
         }
         if ($additional!=='') { $evidence['A1']=array('source_type'=>'staff_information','excerpt'=>$additional,'ghl_message_id'=>null,'chat_file_id'=>null,'message_index'=>null); }
-        $candidate=array('id'=>(int)$id,'title'=>$s->Title,'items'=>Faq_Model::Decode_Items($s->Description));
-        $knowledge=$this->Knowledge_Input(faq_knowledge_candidate_query($candidate,$additional,$input_messages));
+        $candidate=array('id'=>(int)$id,'title'=>$s->Title,'items'=>Faq_Model::Decode_Items($s->Description),'destination_ids'=>Faq_Suggestion_Model::Parse_Id_Csv($s->DestinationIds));
+        $destination_names=$this->Faq_Suggestion_Model->Destination_Name_Map();
+        $candidate['destinations']=array_values(array_intersect_key($destination_names,array_flip($candidate['destination_ids'])));
+        $knowledge=$this->Knowledge_Input(faq_knowledge_candidate_query($candidate,$additional,$input_messages),array('attached_destinations_only'=>true));
         $prompt=faq_workspace_reevaluate_prompt($candidate,$input_messages,$additional,$knowledge['input']);
         return array('id'=>(int)$id,'version'=>$expected_version,'candidate'=>$candidate,'messages'=>$input_messages,'additional'=>$additional,
             'sources'=>$knowledge['input'],'knowledge'=>$knowledge['map'],'selection'=>$knowledge['selection'],'evidence'=>$evidence,'prompt'=>$prompt);
@@ -379,7 +396,7 @@ class Faq_Workspace_Model extends CI_Model
             $payload[]=array('candidate_id'=>$p['id'],'input'=>json_decode($p['prompt']['input'],true));
         }
         $input=count($prepared)===1?reset($prepared)['prompt']['input']:json_encode(array('candidates'=>$payload),JSON_UNESCAPED_UNICODE);
-        if (strlen($input)>250000) { throw new Exception('This selection contains too much information for one re-evaluation. Select fewer suggestions or shorten the additional information.'); }
+        if (count($prepared)>1 && strlen($input)>250000) { throw new Exception('All destination knowledge is included for each suggestion, and this group is too large for one request. Re-evaluate fewer suggestions at a time.'); }
         if ($service===null) { $this->load->library('FaqSuggestionService'); $service=$this->faqsuggestionservice; }
         $runs=array();
         foreach ($prepared as $id=>$p) {
@@ -403,6 +420,8 @@ class Faq_Workspace_Model extends CI_Model
             foreach ($responses as $id=>$response) {
                 $items=faq_suggestion_parse_response($response,$destination_map,1,true);
                 if (count($items)!==1 || !isset($items[0]['assessment'])) { throw new Exception('AI returned an invalid FAQ assessment.'); }
+                // Re-evaluation retains the destinations selected by staff.
+                $items[0]['destination_ids']=$prepared[$id]['candidate']['destination_ids'];
                 $parsed[$id]=$items[0];
             }
             $done=0; $errors=array(); $cost=(float)$result['cost_usd']/count($prepared);

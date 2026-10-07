@@ -330,6 +330,7 @@ class Faq_Suggestion_Model extends CI_Model
 		// Existing answers let the AI compare actual coverage within package scope.
 			$existing_faqs = $this->Existing_Faqs();
 			$this->load->model('Faq_Workspace_Model');
+		$knowledge=array('map'=>array(),'selection'=>null);
 
 		try {
 			if (strtolower((string) $run->Source) === 'pdf') {
@@ -364,11 +365,10 @@ class Faq_Suggestion_Model extends CI_Model
 				// Keep the exact text handed to the AI so operators can review the
 				// input a run's suggestions came from (stored before the call so it
 				// survives an AI failure).
-					$knowledge=$this->Faq_Workspace_Model->Knowledge_Input($transcript,array('batch'=>true,'limit'=>30));
-					$prompt=faq_suggestion_build_prompt($transcript,$dest_names,$existing_faqs,$this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
+					$prompt=faq_suggestion_build_prompt($transcript,$dest_names,$existing_faqs,$this->max_suggestions());
 					$this->Update_Run($run_id, array('InputText' => $prompt['input']));
 					$this->load->library('FaqSuggestionService');
-					$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
+					$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions());
 			} else {
 				$start     = substr((string) $run->StartDate, 0, 10) . ' 00:00:00';
 				$end       = substr((string) $run->EndDate, 0, 10) . ' 23:59:59';
@@ -383,11 +383,10 @@ class Faq_Suggestion_Model extends CI_Model
 					return array('created' => 0, 'proposed' => 0, 'reason' => 'no_messages', 'model' => '', 'run_id' => $run_id);
 				}
 				// Keep the exact text handed to the AI (see chat-file branch above).
-					$knowledge=$this->Faq_Workspace_Model->Knowledge_Input($transcript,array('batch'=>true,'limit'=>30));
-					$prompt=faq_suggestion_build_prompt($transcript,$dest_names,$existing_faqs,$this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
+					$prompt=faq_suggestion_build_prompt($transcript,$dest_names,$existing_faqs,$this->max_suggestions());
 					$this->Update_Run($run_id, array('InputText' => $prompt['input']));
 					$this->load->library('FaqSuggestionService');
-					$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions(),$knowledge['input'],$knowledge['packages']);
+					$result = $this->faqsuggestionservice->suggest($transcript, $dest_names, $existing_faqs, $this->max_suggestions());
 			}
 		} catch (Exception $e) {
 			$this->Update_Run($run_id, array('RunState' => 'error', 'ErrorMessage' => $e->getMessage()));

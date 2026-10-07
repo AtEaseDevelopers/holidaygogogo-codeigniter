@@ -61,7 +61,8 @@ class FaqWorkspacePages
         $ci->load->model('Faq_Knowledge_Source_Model');
         $page=$ci->input->get('page'); $page=is_scalar($page)?max(1,(int)$page):1;
         $batch=$ci->input->get('batch_id'); $batch=is_scalar($batch)?$batch:0;
-        $data=$ci->Faq_Knowledge_Source_Model->Listing($page,$batch,$ci->input->get('page_size'),$ci->input->get('search'));
+        $data=$ci->Faq_Knowledge_Source_Model->Listing($page,$batch,$ci->input->get('page_size'),$ci->input->get('search'),$ci->input->get('destination_id'));
+        $data['destinations']=$ci->Faq_Model->Read_Destinations();
         $ci->load->view('layout/header',array('tab_title'=>'FAQ | Knowledge Sources','breadcrumb_title'=>'FAQ >> Knowledge Sources'));
         $ci->load->view('faq_suggestion/sources',$data); $ci->load->view('layout/footer');
     }

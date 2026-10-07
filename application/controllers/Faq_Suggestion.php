@@ -104,75 +104,39 @@ class Faq_Suggestion extends MY_Controller
 	function Add_Source()
 	{
 		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
-		$this->load->model('Faq_Knowledge_Source_Model'); $this->load->library('FaqSourceImport');
+		$this->load->model('Faq_Knowledge_Source_Model');
 		$this->load->helper('faq_source_import');
-		$data=array('step'=>'type','type'=>'','draft'=>null,'draft_id'=>'','error'=>'','selected_entries'=>null,'products'=>$this->Faq_Workspace_Model->Products());
-		$imports=$this->session->userdata('faq_source_imports'); $imports=is_array($imports)?$imports:array();
+		$data=array('step'=>'type','type'=>'','error'=>'','destination_id'=>0,'destinations'=>$this->Faq_Model->Read_Destinations());
 		if (strtoupper((string)$this->input->server('REQUEST_METHOD'))==='POST') {
 			if (!$this->Require_Workspace_Post()) { return; }
 			try {
 				$stage=$this->input->post('stage');
 				$type=$this->input->post('type');
-				if (!is_string($type) || !in_array($type,array('pdf','csv','url','manual'),true)) { throw new Exception('Choose an import type.'); }
+				if (!is_string($type) || !in_array($type,array('pdf','document','csv','url','manual'),true)) { throw new Exception('Choose an import type.'); }
 				$data['type']=$type;
 				if ($stage==='choose') { $data['step']='input'; }
 				elseif ($stage==='import') {
-					@set_time_limit(600);
-					$data['step']='input'; $draft=array('type'=>$type,'entries'=>array());
-					$row=array('SourceType'=>$type,'Title'=>'','SourceUrl'=>'','StoredName'=>null,'Excerpt'=>'','ProductID'=>'0','ResortName'=>'','RoomType'=>'','Topic'=>'','ValidFrom'=>'','ValidTo'=>'','ReviewDue'=>'');
-					if ($type==='pdf') {
-						$stored=$this->Receive_Knowledge_Pdf(); $draft['stored']=$stored;
-						$this->load->library('FaqSuggestionService');
-						$result=$this->faqsuggestionservice->extract_knowledge_pdf(FCPATH.Faq_Knowledge_Source_Model::UPLOAD_DIR.$stored,(string)$_FILES['file']['name']);
-						$parsed=json_decode($result['raw'],true);
-						if (!is_array($parsed) || !isset($parsed['text']) || !is_string($parsed['text']) || trim($parsed['text'])==='') { throw new Exception('Could not extract readable policy wording from this PDF.'); }
-						$row['Title']=mb_substr(is_string($parsed['title']??null)?$parsed['title']:pathinfo($_FILES['file']['name'],PATHINFO_FILENAME),0,255);
-						$row['Excerpt']=mb_strcut($parsed['text'],0,60000,'UTF-8'); $row['ExtractedText']=$parsed['text']; $row['StoredName']=$stored;
-						$draft['entries']=array($row);
+					$data['step']='input'; $entries=array();
+					$destination=$this->input->post('destination_id')??'0';
+					$data['destination_id']=is_string($destination)?$destination:0;
+					$destination=$this->Faq_Knowledge_Source_Model->Validate_Destination($destination);
+					$row=array('SourceType'=>$type,'Title'=>'','SourceUrl'=>'','StoredName'=>null,'Excerpt'=>'','ProductID'=>'0','DestinationID'=>$destination,'ResortName'=>'','RoomType'=>'','Topic'=>'general_information','ValidFrom'=>'','ValidTo'=>'','ReviewDue'=>'');
+					if ($type==='pdf' || $type==='document') {
+						$stored=$this->Receive_Knowledge_Document($type==='pdf'?'pdf':'pdf|docx|txt');
+						$this->Queue_Source_Import(pathinfo($stored,PATHINFO_EXTENSION)==='pdf'?'pdf':'document',(string)$_FILES['file']['name'],$stored,null,$destination); return;
 					} elseif ($type==='csv') {
-						$stored=$this->Receive_Knowledge_Csv(); $draft['stored']=$stored;
-						$csv=$this->faqsourceimport->CSV(FCPATH.Faq_Knowledge_Source_Model::UPLOAD_DIR.$stored);
-						$records=faq_source_ai_csv_records($csv);
-						$draft['entries']=$this->Extract_Imported_Knowledge('csv',(string)($_FILES['file']['name']??$stored),$records,$data['products'],array('stored'=>$stored));
+						$stored=$this->Receive_Knowledge_Csv();
+						$this->Queue_Source_Import('csv',(string)($_FILES['file']['name']??$stored),$stored,null,$destination); return;
 					} elseif ($type==='url') {
-						$read=$this->faqsourceimport->Read_URL($this->input->post('source_url'));
-						$draft['entries']=$this->Extract_Imported_Knowledge('url',$read['title'],array('U1'=>$read['text']),$data['products'],array('url'=>$read['url'],'retrieved'=>date('Y-m-d H:i:s')));
+						$this->Queue_Source_Import('url','',null,$this->input->post('source_url'),$destination); return;
 					} else {
 						$title=$this->input->post('title'); $text=$this->input->post('content');
 						if (!is_string($title) || trim($title)==='' || !is_string($text) || trim($text)==='' || strlen($text)>60000) { throw new Exception('Enter a title and content of at most 60,000 bytes.'); }
-						$row['Title']=$title; $row['Excerpt']=$text; $row['ExtractedText']=$text; $draft['entries']=array($row);
+						$row['Title']=$title; $row['Excerpt']=$text; $row['ExtractedText']=$text; $entries=array($row);
 					}
-					$token=bin2hex(random_bytes(16)); $imports[$token]=$draft;
-					while (count($imports)>3) { array_shift($imports); }
-					$this->session->set_userdata('faq_source_imports',$imports);
-					$data['draft_id']=$token; $data['draft']=$draft; $data['step']='review';
-				} elseif ($stage==='save') {
-					$token=$this->input->post('draft_id');
-					if (!is_string($token) || !isset($imports[$token]) || $imports[$token]['type']!==$type) { throw new Exception('Import preview expired. Start the import again.'); }
-					$draft=$imports[$token]; $data['draft_id']=$token; $data['draft']=$draft; $data['step']='review';
-					$entries=$this->input->post('entries'); $selected=$this->input->post('selected_entries');
-					$data['selected_entries']=array();
-					if (!is_array($selected) || !$selected) { throw new Exception('Select at least one useful source to save.'); }
-					foreach ($selected as $index) {
-						if (!is_string($index) || !ctype_digit($index) || !array_key_exists((int)$index,$draft['entries']) || in_array((int)$index,$data['selected_entries'],true)) { throw new Exception('Invalid source selection.'); }
-						$data['selected_entries'][]=(int)$index;
-					}
-					if (!is_array($entries)) { throw new Exception('Review the selected source entries.'); }
-					$rows=array();
-					foreach ($draft['entries'] as $i=>$original) {
-						if (!in_array($i,$data['selected_entries'],true)) { continue; }
-						$posted=$entries[$i]??null; if (!is_array($posted)) { throw new Exception('Invalid imported entry.'); }
-						foreach (array('Title','Excerpt','ProductID','ResortName','RoomType','Topic','ValidFrom','ValidTo','ReviewDue') as $field) {
-							if (!isset($posted[$field]) || !is_string($posted[$field])) { throw new Exception('Missing source field: '.$field); }
-							$original[$field]=$posted[$field];
-						}
-						$original['AppliesToAllRooms']=isset($posted['AppliesToAllRooms'])&&$posted['AppliesToAllRooms']==='1'?1:0;
-						$data['draft']['entries'][$i]=$original;
-						$rows[]=$original;
-					}
-					$count=$this->Faq_Knowledge_Source_Model->Create_Import(faq_source_unique_entries($rows));
-					unset($imports[$token]); $this->session->set_userdata('faq_source_imports',$imports);
-					$this->session->set_flashdata('faq_success',$count.' knowledge source(s) saved as Approved and available for AI evaluation.');
+					foreach ($entries as &$entry) { $entry['DestinationID']=$destination; } unset($entry);
+					$count=$this->Faq_Knowledge_Source_Model->Create_Import(faq_source_unique_entries($entries));
+					$this->session->set_flashdata('faq_success',$count.' knowledge source(s) uploaded and automatically approved. You can delete any source you do not want.');
 					redirect(base_url('Faq?section=sources')); return;
 				} else { throw new Exception('Invalid import step.'); }
 			} catch(Exception $e) { $data['error']=$e->getMessage(); }
@@ -181,35 +145,55 @@ class Faq_Suggestion extends MY_Controller
 		$this->load->view('faq_suggestion/source_wizard',$data); $this->load->view('layout/footer');
 	}
 
-	private function Extract_Imported_Knowledge($type, $title, $records, $products, $metadata)
+	private function Queue_Source_Import($type, $name, $stored, $url, $destination)
 	{
-		$metadata['title']=$title;
-		// Validate the size before starting a paid request.
-		faq_source_ai_build_prompt($type,$title,$records,$products);
-		$this->load->library('FaqSuggestionService');
-		$result=$this->faqsuggestionservice->extract_knowledge_text($type,$title,$records,$products);
-		return faq_source_ai_parse_entries($result['raw'],$type,$records,$products,$metadata);
+		$this->load->model('Faq_Knowledge_Import_Model');
+		$id=$this->Faq_Knowledge_Import_Model->Queue($type,$name,$stored,$url,$destination);
+		$this->Prune_Logs();
+		if (!$this->Spawn_Worker($id,true)) {
+			$this->Faq_Knowledge_Import_Model->Fail($id,'Could not start source extraction. The server needs background worker support.');
+		}
+		redirect(base_url('Faq_Suggestion/Source_Import?id=').$id);
+	}
+
+	function Source_Import()
+	{
+		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
+		$this->load->model('Faq_Knowledge_Import_Model');
+		$job=$this->Faq_Knowledge_Import_Model->Read($this->input->get('id'),(int)$this->session->userdata('admin_id'));
+		if (!$job) { show_404(); return; }
+		if ($job->State==='done') {
+			$this->session->set_flashdata('faq_success',(int)$job->SourceCount.' knowledge source(s) uploaded and automatically approved. You can delete any source you do not want.');
+			redirect(base_url('Faq?section=sources')); return;
+		}
+		$this->load->view('layout/header',array('tab_title'=>'Knowledge Source | Upload Progress','breadcrumb_title'=>'Knowledge Source >> Upload Progress'));
+		$this->load->view('faq_suggestion/source_import',array('job'=>$job)); $this->load->view('layout/footer');
+	}
+
+	function Source_Import_Status()
+	{
+		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
+		$staff=(int)$this->session->userdata('admin_id');
+		if (function_exists('session_write_close')) { session_write_close(); }
+		$this->load->model('Faq_Knowledge_Import_Model');
+		$job=$this->Faq_Knowledge_Import_Model->Read($this->input->get('id'),$staff);
+		if (!$job) { show_404(); return; }
+		$this->output->set_content_type('application/json')->set_header('Cache-Control: no-store')->set_output(json_encode(
+			array('state'=>$job->State,'count'=>(int)$job->SourceCount,'error'=>(string)$job->ErrorMessage)));
 	}
 
 	function Source_Detail()
 	{
 		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
 		$s=$this->Faq_Knowledge_Source_Model->Read((int)$this->input->get('id')); if (!$s) { show_404(); return; }
-		$this->load->view('layout/header',array('tab_title'=>'Knowledge Source | Edit','breadcrumb_title'=>'Knowledge Source >> Edit'));
+		$this->load->view('layout/header',array('tab_title'=>'Knowledge Source | View','breadcrumb_title'=>'Knowledge Source >> View'));
 		$this->load->view('faq_suggestion/source_detail',array('source'=>$s,'products'=>$this->Faq_Workspace_Model->Products(),'return_query'=>$this->Source_List_Query())); $this->load->view('layout/footer');
 	}
 
 	function Review_Source()
 	{
 		if (!$this->Can_Manage_Sources()) { show_error('Source manager access required.',403); return; }
-		if (!$this->Require_Workspace_Post()) { return; }
-		try {
-			$id=$this->input->post('source_id'); $state=$this->input->post('state');
-			if (!is_string($id) || !preg_match('/^[1-9][0-9]*$/D',$id) || !is_string($state)) { throw new Exception('Invalid source update.'); }
-			$this->Faq_Knowledge_Source_Model->Review((int)$id,$state,$this->Source_Post());
-			$this->session->set_flashdata('faq_success','Source updated. Suggestions using this source have been checked.');
-		} catch (Exception $e) { $this->session->set_flashdata('faq_error',$e->getMessage()); }
-		redirect(base_url('Faq_Suggestion/Source_Detail').'?'.http_build_query(array('id'=>(int)$this->input->post('source_id'))+$this->Source_List_Query(true)));
+		show_error('Knowledge sources are approved automatically and cannot be edited. Delete the source and upload a replacement.',405);
 	}
 
 	function Delete_Source()
@@ -230,26 +214,20 @@ class Faq_Suggestion extends MY_Controller
 		$method=$post?'post':'get';
 		$batch=filter_var($this->input->$method('batch_id'),FILTER_VALIDATE_INT,array('options'=>array('min_range'=>0,'max_range'=>4294967295)));
 		$page=$this->input->$method('page'); $page=is_scalar($page)?max(1,(int)$page):1;
-		return array('section'=>'sources','batch_id'=>$batch===false?0:$batch,'page'=>$page,'page_size'=>faq_workspace_page_size($this->input->$method('page_size')),'search'=>faq_workspace_search($this->input->$method('search')));
-	}
-
-	private function Source_Post()
-	{
-		$data=array();
-		foreach (array('SourceType'=>'source_type','Title'=>'title','SourceUrl'=>'source_url','Excerpt'=>'excerpt','ProductID'=>'product_id','ResortName'=>'resort_name','RoomType'=>'room_type','Topic'=>'topic','ValidFrom'=>'valid_from','ValidTo'=>'valid_to','ReviewDue'=>'review_due','AppliesToAllRooms'=>'all_rooms') as $key=>$field) { $data[$key]=$this->input->post($field); }
-		return $data;
+		return array('section'=>'sources','batch_id'=>$batch===false?0:$batch,'destination_id'=>faq_workspace_source_destination_filter($this->input->$method('destination_id')),'page'=>$page,'page_size'=>faq_workspace_page_size($this->input->$method('page_size')),'search'=>faq_workspace_search($this->input->$method('search')));
 	}
 
 	function Source_File()
 	{
 		if (!$this->Can_View() && !$this->Can_Manage_Sources()) { show_error('FAQ access required.',403); return; }
 		$s=$this->Faq_Knowledge_Source_Model->Read((int)$this->input->get('id'));
-		if (!$s || (!$this->Can_Manage_Sources() && $s->Status!=='approved') || !$s->StoredName || !preg_match('/^[a-zA-Z0-9_-]+\.(pdf|csv)$/D',$s->StoredName)) { show_404(); return; }
+		if (!$s || (!$this->Can_Manage_Sources() && $s->Status!=='approved') || !$s->StoredName || !preg_match('/^[a-zA-Z0-9_-]+\.(pdf|csv|docx|txt)$/D',$s->StoredName)) { show_404(); return; }
 		$path=FCPATH.Faq_Knowledge_Source_Model::UPLOAD_DIR.$s->StoredName;
 		if (!is_file($path)) { show_404(); return; }
-		$pdf=pathinfo($s->StoredName,PATHINFO_EXTENSION)==='pdf';
-		$this->output->set_content_type($pdf?'application/pdf':'text/csv')->set_header('X-Content-Type-Options: nosniff')
-			->set_header('Content-Disposition: '.($pdf?'inline; filename="source.pdf"':'attachment; filename="source.csv"'))->set_output(file_get_contents($path));
+		$extension=pathinfo($s->StoredName,PATHINFO_EXTENSION);
+		$mimes=array('pdf'=>'application/pdf','csv'=>'text/csv','docx'=>'application/vnd.openxmlformats-officedocument.wordprocessingml.document','txt'=>'text/plain');
+		$this->output->set_content_type($mimes[$extension])->set_header('X-Content-Type-Options: nosniff')
+			->set_header('Content-Disposition: '.($extension==='pdf'?'inline':'attachment').'; filename="source.'.$extension.'"')->set_output(file_get_contents($path));
 	}
 
 	// Keep existing links working; Update is the combined editing and review screen.
@@ -351,6 +329,7 @@ class Faq_Suggestion extends MY_Controller
 				if (!is_string($title) || strlen($title)>1024 || !is_array($questions) || count($questions)>50) { throw new Exception('Invalid question preview.'); }
 				$items=array(); foreach ($questions as $q) { if (!is_string($q) || strlen($q)>4000) { throw new Exception('Invalid question preview.'); } $items[]=array('q'=>$q); }
 				$edited=array('title'=>$title,'items'=>$items);
+				if ($this->input->post('destination_ids_present')==='1') { $edited['destination_ids']=Faq_Model::Normalize_Ids($this->input->post('destination_ids')); }
 			}
 			$knowledge=$this->Faq_Workspace_Model->Knowledge_For_Candidate((int)$id,$additional,$this->input->post('more_messages')==='1',$edited);
 			echo json_encode(array('ok'=>true,'selection'=>$knowledge['selection'],'can_manage_sources'=>$this->Can_Manage_Sources()),JSON_UNESCAPED_UNICODE);
@@ -715,7 +694,7 @@ class Faq_Suggestion extends MY_Controller
 	 * Spawn the detached CLI worker for a run. Returns true if launched, false
 	 * when exec() is unavailable (caller then falls back to inline processing).
 	 */
-	private function Spawn_Worker($run_id)
+	private function Spawn_Worker($run_id, $knowledge_import=false)
 	{
 		if (!function_exists('exec')) {
 			return false;
@@ -726,7 +705,9 @@ class Faq_Suggestion extends MY_Controller
 		}
 		$php   = $this->Php_Cli_Bin();
 		$index = FCPATH . 'index.php';
-		$out   = $log_dir . 'run_' . (int) $run_id . '.out';
+		$worker=$knowledge_import?'Faq_Knowledge_Import_Job':'Faq_Suggestion_Job';
+		$job_id=$knowledge_import?(string)$run_id:(string)(int)$run_id;
+		$out   = $log_dir . ($knowledge_import?'source_':'run_') . $job_id . '.out';
 		// Memory ceiling for the worker — a big PDF needs several full-size copies of
 		// the file in memory (raw + base64 + data URI + JSON), so default to 1024M
 		// and let .env FAQ_SUGGESTION_MEMORY_LIMIT override.
@@ -736,7 +717,7 @@ class Faq_Suggestion extends MY_Controller
 		// controller name MUST match the file case (Linux is case-sensitive).
 		// `& echo $!` backgrounds the worker and prints its PID.
 		$cmd = escapeshellarg($php) . ' -d pcre.jit=0 -d memory_limit=' . escapeshellarg($mem) . ' '
-			. escapeshellarg($index) . ' Faq_Suggestion_Job run ' . escapeshellarg((string) (int) $run_id)
+			. escapeshellarg($index) . ' ' . escapeshellarg($worker) . ' run ' . escapeshellarg($job_id)
 			. ' > ' . escapeshellarg($out) . ' 2>&1 & echo $!';
 		$pid = (int) @exec($cmd);
 		return $pid > 0;
@@ -763,7 +744,7 @@ class Faq_Suggestion extends MY_Controller
 
 		$this->load->helper('faq_suggestion');
 		$files = array();
-		foreach ((array) glob($dir . 'run_*.out') as $path) {
+		foreach ((array) glob($dir . '{run_,source_}*.out',GLOB_BRACE) as $path) {
 			$files[] = array('path' => $path, 'mtime' => (int) @filemtime($path));
 		}
 		foreach (faq_suggestion_logs_to_prune($files, time(), 3) as $path) {
@@ -858,10 +839,10 @@ class Faq_Suggestion extends MY_Controller
 		return $this->upload->data();
 	}
 
-	private function Receive_Knowledge_Pdf()
+	private function Receive_Knowledge_Document($allowed_types)
 	{
 		$dir = FCPATH . Faq_Knowledge_Source_Model::UPLOAD_DIR; if (!is_dir($dir)) { @mkdir($dir,0755,true); }
-		$config=array('upload_path'=>$dir,'allowed_types'=>'pdf','max_size'=>20480,'encrypt_name'=>true); $this->load->library('upload',$config); $this->upload->initialize($config);
+		$config=array('upload_path'=>$dir,'allowed_types'=>$allowed_types,'max_size'=>20480,'encrypt_name'=>true,'file_ext_tolower'=>true); $this->load->library('upload',$config); $this->upload->initialize($config);
 		if(!$this->upload->do_upload('file')) { throw new Exception(trim(strip_tags($this->upload->display_errors('',' ')))); }
 		return $this->upload->data('file_name');
 	}

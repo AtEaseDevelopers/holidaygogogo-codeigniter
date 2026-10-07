@@ -3,6 +3,58 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 
 class FaqSourceImport
 {
+    /** Read uploaded text locally; DOCX archives are never extracted to disk. */
+    function Document($path)
+    {
+        if (!is_file($path) || filesize($path)>20*1024*1024) { throw new Exception('Documents must be at most 20 MB.'); }
+        $extension=strtolower(pathinfo($path,PATHINFO_EXTENSION));
+        if ($extension==='txt') {
+            if (filesize($path)>2*1024*1024) { throw new Exception('Text documents must contain at most 2 MB of text.'); }
+            $text=file_get_contents($path);
+            if (substr($text,0,2)==="\xFF\xFE" || substr($text,0,2)==="\xFE\xFF") {
+                $text=mb_convert_encoding(substr($text,2),'UTF-8',substr($text,0,2)==="\xFF\xFE"?'UTF-16LE':'UTF-16BE');
+            }
+            $text=preg_replace('/^\xEF\xBB\xBF/','',$text);
+        } elseif ($extension==='docx') {
+            if (!class_exists('ZipArchive')) { throw new Exception('Word imports require the PHP ZIP extension.'); }
+            $zip=new ZipArchive();
+            if ($zip->open($path)!==true) { throw new Exception('Upload a valid Word (.docx) document.'); }
+            try {
+                if ($zip->locateName('word/document.xml')===false || $zip->locateName('[Content_Types].xml')===false) { throw new Exception('Upload a valid Word (.docx) document.'); }
+                $parts=array(); $bytes=0;
+                for ($i=0;$i<$zip->numFiles;$i++) {
+                    $stat=$zip->statIndex($i);
+                    if (!preg_match('#^word/(document|header[0-9]+|footer[0-9]+|footnotes|endnotes)\.xml$#D',$stat['name'])) { continue; }
+                    $bytes+=$stat['size'];
+                    if ($bytes>2*1024*1024) { throw new Exception('The Word document contains too much text. Upload a smaller document.'); }
+                    $xml=$zip->getFromIndex($i);
+                    if (!is_string($xml) || stripos($xml,'<!DOCTYPE')!==false || stripos($xml,'<!ENTITY')!==false) { throw new Exception('The Word document contains invalid XML.'); }
+                    $doc=new DOMDocument(); $previous=libxml_use_internal_errors(true);
+                    try {
+                        if (!$doc->loadXML($xml,LIBXML_NONET|LIBXML_NOERROR|LIBXML_NOWARNING)) { throw new Exception('The Word document could not be read.'); }
+                        $xpath=new DOMXPath($doc);
+                        $xpath->registerNamespace('w','http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+                        $paragraphs=array();
+                        foreach ($xpath->query('//w:p') as $paragraph) {
+                            $line='';
+                            foreach ($xpath->query('.//w:t|.//w:tab|.//w:br|.//w:cr',$paragraph) as $node) {
+                                $line.=$node->localName==='t'?$node->textContent:($node->localName==='tab'?"\t":"\n");
+                            }
+                            if (trim($line)!=='') { $paragraphs[]=$line; }
+                        }
+                        $parts[$stat['name']]=implode("\n",$paragraphs);
+                    } finally { libxml_clear_errors(); libxml_use_internal_errors($previous); }
+                }
+                $main=$parts['word/document.xml']??''; unset($parts['word/document.xml']);
+                $text=$main."\n".implode("\n",$parts);
+            } finally { $zip->close(); }
+        } else { throw new Exception('Upload a Word (.docx) or text (.txt) document.'); }
+        if (!mb_check_encoding($text,'UTF-8') || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/',$text)) { throw new Exception('The document must contain readable text. Save text files using UTF-8.'); }
+        $text=trim($text);
+        if ($text==='') { throw new Exception('The document has no readable text. Upload a PDF for scanned documents.'); }
+        return $text;
+    }
+
     function CSV($path)
     {
         require_once __DIR__.'/../helpers/faq_source_import_helper.php';

@@ -162,9 +162,13 @@ assert_false('prompt no longer requires empty answers for missing information', 
 assert_true('prompt preserves tour-specific facts', stripos($p['instructions'], 'Preserve tour-specific facts') !== false);
 assert_true('prompt rejects genericising tour questions', stripos($p['instructions'], 'Do NOT turn a question about a named tour') !== false);
 assert_true('prompt distinguishes private and published details', stripos($p['instructions'], 'published or generally applicable package price') !== false);
-$knowledge_prompt=faq_suggestion_build_prompt('[S1] Customer: What meals?',array(),array(),10,array(array('reference'=>'K12','excerpt'=>'Daily breakfast for Package A.')),array(array('name'=>'Package A','code'=>'PA')));
-assert_true('initial prompt includes approved source excerpt',strpos($knowledge_prompt['input'],'Daily breakfast for Package A.')!==false);
-assert_true('initial prompt identifies answer references',strpos($knowledge_prompt['input'],'answer_refs')!==false);
+$chat_prompt=faq_suggestion_build_prompt('[S1] Customer: What meals?\n[S2] Agent: Daily breakfast for Package A.',array(),array(),10);
+assert_false('initial chat input has no knowledge block',strpos($chat_prompt['input'],'APPROVED KNOWLEDGE')!==false);
+assert_false('initial chat input has no package catalogue',strpos($chat_prompt['input'],'ACTIVE PACKAGE NAMES')!==false);
+assert_true('initial chat input preserves supporting reply',strpos($chat_prompt['input'],'Daily breakfast for Package A.')!==false);
+assert_true('initial chat instructions keep unanswered questions',strpos($chat_prompt['instructions'],'Keep reusable questions even when no answer is available')!==false);
+assert_true('initial chat instructions restrict answer references to chats',strpos($chat_prompt['instructions'],'must be a supplied S# chat message')!==false);
+assert_true('initial chat instructions defer destination knowledge',strpos($chat_prompt['instructions'],'destination knowledge is added only during re-evaluation')!==false);
 $sample=faq_suggestion_candidate_example(); $sample['title']='Package A meals';
 assert_false('generation contract has no structured context',array_key_exists('context',$sample));
 $sample['label']='Pending Approval'; $sample['missing_information']=array(); $sample['answer_refs']=array('S2','K12'); $sample['items']=array(array('q'=>'What meals?','a'=>'Daily breakfast.'));
@@ -318,6 +322,8 @@ $fpc = faq_suggestion_build_file_prompt(array('Japan'), array(), 40);
 assert_true('capped file prompt states the max', strpos($fpc['instructions'], '40') !== false);
 assert_true('capped file prompt says "at most"', stripos($fpc['instructions'] . $fpc['input'], 'at most') !== false);
 assert_false('uncapped file prompt has no "at most"', stripos($fp['instructions'] . $fp['input'], 'at most') !== false);
+$fpk=faq_suggestion_build_file_prompt(array('Japan'),array(),10,array(array('reference'=>'K12','excerpt'=>'Daily breakfast for Package A.')));
+assert_true('document prompt still includes supplied knowledge',strpos($fpk['input'],'Daily breakfast for Package A.')!==false);
 
 // ---- logs_to_prune ---------------------------------------------------------
 $now = mktime(12, 0, 0, 9, 18, 2026); // 2026-09-18 12:00:00

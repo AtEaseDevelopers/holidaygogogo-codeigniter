@@ -24,6 +24,8 @@ function faq_workspace_source_fingerprint($s)
     foreach (array('SourceID','Status','Excerpt','ProductID','ResortName','RoomType','Topic','ValidFrom','ValidTo','ReviewDue','AppliesToAllRooms','VerifiedBy','VerifiedDate','SourceUrl','FilePath') as $key) {
         $snapshot[$key]=isset($s[$key])?(string)$s[$key]:'';
     }
+    // Preserve legacy citation hashes for unrestricted sources.
+    if (!empty($s['DestinationID'])) { $snapshot['DestinationID']=(string)$s['DestinationID']; }
     return hash('sha256',json_encode($snapshot));
 }
 
@@ -63,6 +65,15 @@ function faq_workspace_page_size($value)
 function faq_workspace_search($value)
 {
     return is_string($value)?mb_substr(trim($value),0,200):'';
+}
+
+/** Sources can be filtered to one destination or to unrestricted entries. */
+function faq_workspace_source_destination_filter($value)
+{
+    if ($value==='none') { return 'none'; }
+    if (!is_string($value) && !is_int($value)) { return 0; }
+    $id=filter_var($value,FILTER_VALIDATE_INT,array('options'=>array('min_range'=>0,'max_range'=>2147483647)));
+    return $id===false?0:$id;
 }
 
 /** Shared ranges and numbered navigation for the two server-paginated tables. */
@@ -161,7 +172,7 @@ function faq_workspace_review_history($audit)
 
 function faq_workspace_reevaluate_prompt($candidate, $messages, $additional, $sources=array())
 {
-    return array('instructions'=>faq_suggestion_extraction_instructions(1).' Re-evaluate exactly this existing candidate; do not create unrelated suggestions. Use the same suggestions JSON contract as initial generation: '.json_encode(array('suggestions'=>array(faq_suggestion_candidate_example())),JSON_UNESCAPED_UNICODE),
+    return array('instructions'=>faq_suggestion_extraction_instructions(1).' Re-evaluate exactly this existing candidate; do not create unrelated suggestions. Approved knowledge includes only valid sources for destinations already attached to the candidate. If no destination is attached, use only the supplied chats and staff information. Review every supplied source and decide which facts answer the question. Sharing a destination does not make a resort, package or room policy universal; preserve each source scope and validity. Retain the existing selected destinations exactly, including an empty selection. Use the same suggestions JSON contract as initial generation: '.json_encode(array('suggestions'=>array(faq_suggestion_candidate_example())),JSON_UNESCAPED_UNICODE),
         'input'=>json_encode(array('existing_candidate'=>$candidate,'conversation_evidence'=>$messages,'staff_additional_information'=>$additional,
             'approved_knowledge'=>$sources,'staff_information_reference'=>$additional!==''?'A1':null),JSON_UNESCAPED_UNICODE));
 }
