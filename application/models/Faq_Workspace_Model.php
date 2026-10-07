@@ -27,6 +27,18 @@ class Faq_Workspace_Model extends CI_Model
             ->where('a.SuggestionID',(int)$suggestion)->order_by('a.AuditID','DESC')->limit(30)->get()->result();
     }
 
+    /** The extraction snapshot records an advisory match, never a publication target. */
+    function Read_FAQ_Comparison($suggestion)
+    {
+        $row=$this->db->select('AfterJson')->where('SuggestionID',(int)$suggestion)->where('Action','extracted')
+            ->order_by('AuditID','DESC')->limit(1)->get('faq_workspace_audit')->row();
+        if (!$row) { return null; }
+        $snapshot=json_decode((string)$row->AfterJson,true); $comparison=$snapshot['faq_comparison']??null;
+        if (!is_array($comparison) || empty($comparison['faq_id'])) { return null; }
+        $faq=$this->db->select('FAQID, Title, Slug')->where('FAQID',(int)$comparison['faq_id'])->where('Status','Y')->get('faq')->row();
+        return $faq ? $comparison + array('faq'=>$faq) : null;
+    }
+
     function Products()
     {
         return $this->db->select('ProductID, Name, ProductCode')->where('Status','Y')->order_by('Name','ASC')->get('product')->result();

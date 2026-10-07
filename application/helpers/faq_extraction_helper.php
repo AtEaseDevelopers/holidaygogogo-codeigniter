@@ -1,7 +1,25 @@
 <?php
 defined('BASEPATH') OR exit('No direct script access allowed');
 
-/** Original answer-writing instructions, kept verbatim for the first scan. */
+/** Compare answer coverage within the source's actual package scope. */
+function faq_suggestion_duplicate_instructions()
+{
+    return 'Compare every candidate against the supplied EXISTING FAQs using their actual answers. '.
+        'Skip a candidate only when the same resort, package, room type, travel year/date or season, eligibility and topic apply, '.
+        'and the existing answer already contains ALL relevant supported facts from the source. '.
+        'A matching title, question or broad topic alone is insufficient. Do not assume an unspecified scope applies to every package or year. '.
+        'An absent or empty answer, incomplete coverage, or an unapproved draft lacking the new supporting evidence does not establish a duplicate. '.
+        'Retain new or changed details, including prices, child/infant rates, inclusions, exclusions, dates and surcharges, even when the question already exists. '.
+        'Classify retained candidates with change_type: new, addition, change or conflict. Explain the added or changed facts in reason. '.
+        'Use existing_faq_ref only for a relevant published FAQ reference F# supplied below; otherwise return null. '.
+        'Preserve the source scope in the title, question and answer; a different year or room type may justify a separate scoped FAQ. '.
+        'When facts conflict within the same scope, retain the supported draft, set change_type to conflict and label to Needs Information, '.
+        'and identify the contradiction in missing_information for staff review. Never silently choose one version. '.
+        'Existing FAQ answers and unapproved suggestions are comparison material, not supporting evidence for a new answer; '.
+        'ground every retained answer in the supplied document, messages, approved knowledge or staff information. ';
+}
+
+/** Answer-writing instructions shared by the first scan and re-evaluation. */
 function faq_suggestion_original_instructions($max, $document=false)
 {
     $max=(int)$max;
@@ -28,8 +46,7 @@ function faq_suggestion_original_instructions($max, $document=false)
             "For EACH FAQ also give a short 'reason' (one sentence) noting where it came from or why it is useful. " .
             "Roughly ORDER the suggestions with the more broadly useful ones first. " .
             $cap_line .
-            "Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
-            "skip it even if worded differently; only return genuinely NEW questions. " .
+            faq_suggestion_duplicate_instructions() .
             "Never invent facts not supported by the document, and never include a specific customer's private data. " .
             "Answer ONLY with a JSON object.";
         return $instructions;
@@ -62,8 +79,7 @@ function faq_suggestion_original_instructions($max, $document=false)
         "For EACH FAQ also give a short 'reason' (one sentence) noting where it came up or why it is useful. " .
         "Order the suggestions by strength of evidence and customer usefulness; tour-specific and agency-wide FAQs are both valuable. " .
         $cap_line .
-        "Compare every candidate against the EXISTING FAQs listed below and do NOT propose one that is already covered — " .
-        "skip it even if you would word the question differently; only return genuinely NEW questions. " .
+        faq_suggestion_duplicate_instructions() .
         "Never include a specific customer's name, phone number, a price quoted to one person, or any other private data. " .
         "Answer ONLY with a JSON object.";
     return $instructions;
@@ -85,6 +101,7 @@ function faq_suggestion_extraction_instructions($max, $document=false)
 function faq_suggestion_candidate_example()
 {
     return array('title'=>'specific FAQ title','label'=>'Needs Information','reason'=>'one sentence: where this came up or why it is useful',
+        'change_type'=>'new','existing_faq_ref'=>null,
         'missing_information'=>array('specific missing detail or evidence'),'answer_refs'=>array(),
         'source_refs'=>array(),'destinations'=>array(),'items'=>array(array('q'=>'customer question','a'=>'a detailed customer reply using the supported facts; omit missing details')));
 }
@@ -101,7 +118,7 @@ function faq_suggestion_candidate_input($destination_names, $existing_faqs, $kno
         'label is "Pending Approval" or "Needs Information". Pending Approval requires complete supported answers and empty missing_information; Needs Information requires specific gaps and retains any supported partial draft in items[].a. Leave an answer empty only when no supported answer content is available. '.
         "\nAllowed destinations (copy names verbatim, or use an empty array): ".($dest?implode(', ',$dest):'(none configured)');
     $existing=faq_suggestion_existing_block($existing_faqs);
-    if ($existing!=='') { $input.="\nEXISTING FAQs (already recorded; skip only when both scope and topic match):\n".$existing; }
+    if ($existing!=='') { $input.="\nEXISTING FAQs (comparison only; skip only when the same scope and ALL source facts are covered by the actual answer):\n".$existing; }
     $input.="\nAPPROVED KNOWLEDGE (use only within the stated scope and validity):\n".json_encode(array_values($knowledge),JSON_UNESCAPED_UNICODE);
     $input.="\nACTIVE PACKAGE NAMES (for identification only; these names are not answer evidence):\n".json_encode(array_values($packages),JSON_UNESCAPED_UNICODE);
     return $input;

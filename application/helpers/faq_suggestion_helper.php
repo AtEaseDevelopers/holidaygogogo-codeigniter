@@ -331,44 +331,79 @@ if (!function_exists('faq_suggestion_transcript_with_sources')) {
 	}
 }
 
-if (!function_exists('faq_suggestion_existing_block')) {
-	/**
-	 * Render the FAQs that already exist into a compact bullet list for the
-	 * prompt, so the model can compare against them and skip questions already
-	 * covered. $existing_faqs is a list of
-	 * ['title'=>string, 'questions'=>[string,...]]; each becomes
-	 *   "- <title> (<q1>; <q2>; …)".
-	 * Capped at $max entries so a large FAQ corpus can't blow the prompt up.
-	 * Returns '' when there is nothing to show. Pure.
-	 */
-	function faq_suggestion_existing_block($existing_faqs, $max = 300)
+if (!function_exists('faq_suggestion_existing_entries')) {
+	/** Bound comparison input by omitting whole entries, never cutting answer facts. */
+	function faq_suggestion_existing_entries($existing_faqs, $max = 300, $max_bytes = 200000)
 	{
-		$max   = (int) $max;
-		$lines = array();
+		$entries = array(); $bytes = 0;
 		foreach ((array) $existing_faqs as $f) {
-			$title = trim((string) (isset($f['title']) ? $f['title'] : ''));
-			$qs    = isset($f['questions']) && is_array($f['questions']) ? $f['questions'] : array();
-			$clean = array();
-			foreach ($qs as $q) {
-				$q = trim((string) $q);
-				if ($q !== '') {
-					$clean[] = $q;
+			$title = trim((string) ($f['title'] ?? ''));
+			$items = array();
+			foreach ((array) ($f['items'] ?? array()) as $item) {
+				if (!is_array($item)) { continue; }
+				$q = trim((string) ($item['q'] ?? '')); $a = trim((string) ($item['a'] ?? ''));
+				if ($q !== '' || $a !== '') { $items[] = array('q'=>$q, 'a'=>$a); }
+			}
+			// Older callers provide questions only; missing answers cannot prove coverage.
+			if (!$items) {
+				foreach ((array) ($f['questions'] ?? array()) as $q) {
+					$q = trim((string) $q);
+					if ($q !== '') { $items[] = array('q'=>$q, 'a'=>''); }
 				}
 			}
-			if ($title === '' && empty($clean)) {
-				continue;
+			if ($title === '' && !$items) { continue; }
+			$entry = array('title'=>$title, 'kind'=>($f['kind'] ?? '') === 'faq' ? 'faq' : 'suggestion', 'items'=>$items);
+			if ($entry['kind'] === 'faq' && is_string($f['reference'] ?? null) && preg_match('/^F[1-9][0-9]*$/D', $f['reference'])) {
+				$entry['reference'] = $f['reference'];
 			}
-			$label = $title !== '' ? $title : $clean[0];
-			$line  = '- ' . $label;
-			if (!empty($clean)) {
-				$line .= ' (' . implode('; ', $clean) . ')';
+			if (isset($f['state']) && is_string($f['state'])) { $entry['state'] = $f['state']; }
+			$entry['answers_available'] = (bool) $items;
+			foreach ($items as $item) {
+				if ($item['a'] === '' || $item['a'] === 'insufficient verified source') { $entry['answers_available'] = false; }
 			}
-			$lines[] = $line;
-			if ($max > 0 && count($lines) >= $max) {
-				break;
-			}
+			$json = json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+			if ($json === false) { continue; }
+			$size = strlen($json) + ($entries ? 1 : 0);
+			if ((int) $max_bytes > 0 && $bytes + $size > (int) $max_bytes) { continue; }
+			$entries[] = $entry; $bytes += $size;
+			if ((int) $max > 0 && count($entries) >= (int) $max) { break; }
+		}
+		return $entries;
+	}
+}
+
+if (!function_exists('faq_suggestion_existing_block')) {
+	/** Supply actual Q&As and validated published FAQ references as JSON lines. */
+	function faq_suggestion_existing_block($existing_faqs, $max = 300, $max_bytes = 200000)
+	{
+		$lines = array();
+		foreach (faq_suggestion_existing_entries($existing_faqs, $max, $max_bytes) as $entry) {
+			$lines[] = json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 		}
 		return implode("\n", $lines);
+	}
+}
+
+if (!function_exists('faq_suggestion_existing_reference_map')) {
+	/** Use the same entry and byte limits as the AI comparison input. */
+	function faq_suggestion_existing_reference_map($existing_faqs)
+	{
+		$map = array();
+		foreach (faq_suggestion_existing_entries($existing_faqs) as $entry) {
+			if (isset($entry['reference'])) { $map[$entry['reference']] = $entry['title']; }
+		}
+		return $map;
+	}
+}
+
+if (!function_exists('faq_suggestion_existing_match')) {
+	/** Advisory link only; accept references actually supplied in this scan's prompt. */
+	function faq_suggestion_existing_match($candidate, $reference_map)
+	{
+		$comparison = $candidate['faq_comparison'] ?? array();
+		$reference = $comparison['existing_faq_ref'] ?? null;
+		if (!is_string($reference) || !isset($reference_map[$reference])) { return null; }
+		return array('faq_id'=>(int) substr($reference, 1), 'title'=>$reference_map[$reference], 'change_type'=>$comparison['change_type']);
 	}
 }
 
@@ -603,7 +638,17 @@ if (!function_exists('faq_suggestion_parse_response')) {
 			}
 			$candidate = array('title' => $title, 'reason' => $reason, 'destination_ids' => $dest_ids, 'items' => $items, 'source_refs' => $refs);
 			if ($strict_review) {
+				$change_type = $s['change_type'] ?? 'new';
+				if (!is_string($change_type) || !in_array($change_type, array('new','addition','change','conflict'), true)) { $change_type = 'new'; }
+				$existing_ref = $s['existing_faq_ref'] ?? null;
+				if (!is_string($existing_ref) || !preg_match('/^F[1-9][0-9]*$/D', $existing_ref)) { $existing_ref = null; }
+				$candidate['faq_comparison'] = array('change_type'=>$change_type, 'existing_faq_ref'=>$existing_ref);
 				if ($assessed) {
+					if ($change_type === 'conflict') {
+						$assessment['status'] = 'needs_information';
+						$assessment['missing_information'][] = 'Resolve conflicting information with the existing FAQ before approval.';
+						$assessment['missing_information'] = array_values(array_unique($assessment['missing_information']));
+					}
 					$candidate['assessment']=$assessment;
 					$all_refs=array_merge($refs,$assessment['answer_refs']);
 					$candidate['source_refs']=array_values(array_unique(array_filter($all_refs,function($ref){return preg_match('/^S[1-9][0-9]*$/D',$ref);} )));

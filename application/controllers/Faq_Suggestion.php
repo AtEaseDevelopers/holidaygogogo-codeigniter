@@ -422,6 +422,7 @@ class Faq_Suggestion extends MY_Controller
 			'destinations'=>$this->Faq_Model->Read_Destinations(),'faq_titles'=>$this->Faq_Model->Read_Titles(),
 			'selected_destination_ids'=>Faq_Suggestion_Model::Parse_Id_Csv($suggestion->DestinationIds),
 			'audit'=>$this->Faq_Workspace_Model->Read_Review_History($id),
+			'faq_comparison'=>$this->Faq_Workspace_Model->Read_FAQ_Comparison($id),
 			'knowledge_preview'=>$this->Faq_Workspace_Model->Knowledge_For_Candidate($id)['selection'],
 			'knowledge_last'=>$this->Faq_Workspace_Model->Last_Knowledge_Selection($id));
 		$this->load->view('layout/header',array('tab_title'=>'HolidayGoGoGo | Update FAQ Suggestion','breadcrumb_title'=>'FAQ AI Suggestion >> Update'));

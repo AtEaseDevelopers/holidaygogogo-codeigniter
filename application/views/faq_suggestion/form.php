@@ -59,6 +59,17 @@
 						<?php } ?>
 					</div>
 					<?php $evidence = isset($evidence) && is_array($evidence) ? $evidence : array(); ?>
+					<?php if(!empty($faq_comparison['faq'])) {
+						$related=$faq_comparison['faq'];
+						$related_url=!empty($related->Slug)?base_url('faq/'.rawurlencode($related->Slug)):(!empty($can_edit)?base_url('Faq/Update?faq_id=').(int)$related->FAQID:base_url('Faq'));
+						$comparison_labels=array('addition'=>'Adds information to','change'=>'Updates information in','conflict'=>'Conflicts with');
+					?>
+						<div class="alert alert-light-<?php echo ($faq_comparison['change_type']??'')==='conflict'?'warning':'info'; ?>">
+							<strong><?php echo $esc($comparison_labels[$faq_comparison['change_type']??'']??'Related FAQ'); ?>:</strong>
+							<a href="<?php echo $esc($related_url); ?>" target="_blank" rel="noopener"><?php echo $esc($related->Title); ?></a>
+							<div class="mt-2">Compare the existing answer with this draft before approval.</div>
+						</div>
+					<?php } ?>
 					<div class="mb-5">
 						<strong><i class="la la-comments"></i> Detected from</strong>
 						<?php if(empty($evidence)) { ?>

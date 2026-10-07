@@ -56,7 +56,8 @@ class FaqSuggestionService
 	 * Mine one transcript into candidate FAQs. $transcript is the labelled
 	 * conversation text (faq_suggestion_transcript); $destination_names is the
 	 * allowed destination vocabulary; $existing_faqs are the FAQs that already
-	 * exist (['title'=>, 'questions'=>[]]) so the model skips duplicates. Returns
+	 * exist (title, items with questions and answers, and published references)
+	 * so the model compares scoped answer coverage. Returns
 	 * the raw JSON reply + usage/cost.
 	 */
 	public function suggest($transcript, $destination_names = array(), $existing_faqs = array(), $max = 0, $knowledge=array(), $packages=array())
@@ -75,7 +76,8 @@ class FaqSuggestionService
 	 * contents base64-encoded; $ext its extension ('pdf', 'png', …). The file is
 	 * sent to the Responses API as an input_file / input_image part (reusing the
 	 * Competitor feature's pure part-builder). $existing_faqs are the FAQs that
-	 * already exist (['title'=>, 'questions'=>[]]) so the model skips duplicates.
+	 * already exist (title, items with questions and answers, and published references)
+	 * so the model compares scoped answer coverage.
 	 * Returns the raw JSON reply + usage/cost. Throws on an unsupported type or any
 	 * API failure.
 	 */

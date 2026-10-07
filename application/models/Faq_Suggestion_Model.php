@@ -327,8 +327,7 @@ class Faq_Suggestion_Model extends CI_Model
 
 		$dest_map      = $this->Destination_Name_Map();
 		$dest_names    = array_values($dest_map);
-		// The FAQs that already exist — fed to the AI so it skips duplicates up
-		// front so the AI can identify questions already covered.
+		// Existing answers let the AI compare actual coverage within package scope.
 			$existing_faqs = $this->Existing_Faqs();
 			$this->load->model('Faq_Workspace_Model');
 
@@ -395,7 +394,7 @@ class Faq_Suggestion_Model extends CI_Model
 			return array('created' => 0, 'proposed' => 0, 'reason' => 'error', 'model' => '', 'run_id' => $run_id, 'error' => $e->getMessage());
 		}
 
-		try { return $this->store_suggestions($run_id, $result, $dest_map, isset($source_map) ? $source_map : array(),$knowledge['map'],$knowledge['selection']) + array('run_id' => $run_id); }
+		try { return $this->store_suggestions($run_id, $result, $dest_map, isset($source_map) ? $source_map : array(),$knowledge['map'],$knowledge['selection'],$existing_faqs) + array('run_id' => $run_id); }
 		catch (Exception $e) {
 			$this->Update_Run($run_id,array('RunState'=>'error','ErrorMessage'=>$e->getMessage(),'Model'=>$result['model'],'CostUsd'=>$result['cost_usd']));
 			return array('created'=>0,'proposed'=>0,'reason'=>'error','model'=>$result['model'],'run_id'=>$run_id,'error'=>$e->getMessage());
@@ -403,12 +402,12 @@ class Faq_Suggestion_Model extends CI_Model
 	}
 
 	/**
-	 * Parse the AI reply, drop titles that already exist, store the new
-	 * candidates inside $run_id, and update the run with its counts / cost /
+	 * Parse the AI reply, store new facts and proposed updates for review
+	 * inside $run_id, and update the run with its counts / cost /
 	 * model. Shared by the chats and PDF generators. Returns
 	 * ['created'=>int, 'proposed'=>int, 'reason'=>string, 'model'=>string].
 	 */
-	protected function store_suggestions($run_id, $result, $dest_map, $source_map = array(), $knowledge_map=array(), $knowledge_selection=null)
+	protected function store_suggestions($run_id, $result, $dest_map, $source_map = array(), $knowledge_map=array(), $knowledge_selection=null, $existing_faqs=array())
 	{
 		$this->load->model('Faq_Model');
 
@@ -418,6 +417,7 @@ class Faq_Suggestion_Model extends CI_Model
 			$name_to_id[$name] = $id;
 		}
 		$parsed = faq_suggestion_parse_response($result['raw'], $name_to_id, $this->max_suggestions(), true);
+		$existing_refs = faq_suggestion_existing_reference_map($existing_faqs);
 
 		// Build every valid suggestion first, so the run's AI cost can be split
 		// evenly across the rows actually stored (one AI call produces them all).
@@ -438,6 +438,7 @@ class Faq_Suggestion_Model extends CI_Model
 				'DestinationIds' => implode(',', $s['destination_ids']),
 				'SourceRefs'     => isset($s['source_refs']) && is_array($s['source_refs']) ? $s['source_refs'] : array(),
 				'AssessmentCandidate'=>isset($s['assessment'])?$s:null,
+				'ExistingFAQComparison'=>faq_suggestion_existing_match($s, $existing_refs),
 			);
 		}
 
@@ -446,6 +447,7 @@ class Faq_Suggestion_Model extends CI_Model
 		$created   = 0;
 		foreach ($rows as $row) {
 			$assessed=$row['AssessmentCandidate']; unset($row['AssessmentCandidate']);
+			$comparison=$row['ExistingFAQComparison']; unset($row['ExistingFAQComparison']);
 			$source_refs = $row['SourceRefs'];
 			unset($row['SourceRefs']); // this is evidence metadata, not a faq_suggestions column
 			$row['State']   = 'pending_context';
@@ -455,7 +457,7 @@ class Faq_Suggestion_Model extends CI_Model
 			$row['CostUsd'] = $cost_each;
 			$suggestion_id = $this->Create($row);
 			$this->load->model('Faq_Workspace_Model');
-			$this->Faq_Workspace_Model->Audit($suggestion_id, null, 'extracted', null, $row);
+			$this->Faq_Workspace_Model->Audit($suggestion_id, null, 'extracted', null, $comparison ? $row + array('faq_comparison'=>$comparison) : $row);
 			if ($assessed) { $this->Faq_Workspace_Model->Apply_Assessment($suggestion_id,$assessed,$source_map,$knowledge_map,null,$run_id,$knowledge_selection); }
 			else { foreach ($source_refs as $ref) { if (isset($source_map[$ref])) { $this->Create_Source($suggestion_id, $run_id, $ref, $source_map[$ref]); } } }
 			$created++;
@@ -660,36 +662,39 @@ class Faq_Suggestion_Model extends CI_Model
 		return faq_suggestion_transcript_with_sources(array(),$messages,0)['sources'];
 	}
 
-	/** Existing FAQ titles and questions supplied to the extraction prompt. */
+	/** Existing published and draft answers supplied for coverage comparison. */
 	function Existing_Faqs()
 	{
 		$this->load->model('Faq_Model');
 
 		$out = array();
-		foreach ($this->db->select('Title, Description')->where('Status', 'Y')->get('faq')->result() as $r) {
-			$out[] = $this->existing_faq_entry($r->Title, $r->Description);
+		foreach ($this->db->select('FAQID, Title, Description')->where('Status', 'Y')->order_by('FAQID', 'ASC')->get('faq')->result() as $r) {
+			$out[] = $this->existing_faq_entry($r->Title, $r->Description) + array('kind'=>'faq', 'reference'=>'F'.(int)$r->FAQID);
 		}
 
-		$this->db->select('Title, Description');
+		$this->db->select('Title, Description, State');
 		$this->db->where('Status', 'Y');
 		$this->db->where('State !=', 'dismissed');
 		foreach ($this->db->get('faq_suggestions')->result() as $r) {
-			$out[] = $this->existing_faq_entry($r->Title, $r->Description);
+			$out[] = $this->existing_faq_entry($r->Title, $r->Description) + array('kind'=>'suggestion', 'state'=>(string)$r->State);
 		}
 		return $out;
 	}
 
-	/** Existing titles and questions let the extraction prompt avoid repeats. */
+	/** Retain answer facts and scope while excluding display and staff audit metadata. */
 	protected function existing_faq_entry($title, $description)
 	{
 		$questions = array();
+		$items = array();
 		foreach (Faq_Model::Decode_Items((string) $description) as $it) {
 			$q = trim((string) (isset($it['q']) ? $it['q'] : ''));
+			$a = trim((string) (isset($it['a']) ? $it['a'] : ''));
+			if ($q !== '' || $a !== '') { $items[] = array('q'=>$q, 'a'=>$a); }
 			if ($q !== '') {
 				$questions[] = $q;
 			}
 		}
-		return array('title' => (string) $title, 'questions' => $questions);
+		return array('title' => (string) $title, 'questions' => $questions, 'items'=>$items);
 	}
 
 	/** Active destination categories as CategoryID => Name (IsDestination='YES'). */
