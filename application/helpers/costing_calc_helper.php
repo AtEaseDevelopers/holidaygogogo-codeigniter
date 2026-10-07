@@ -298,11 +298,37 @@ if (!function_exists('costing_fold_general_combination')) {
      * not twice (feedback 29 Sep 2026). Each item row carries 'base_total' (its pure
      * MYR conversion), 'currency_id' and 'bank_charges_myr'.
      *
-     * @param array $combinations each: ['cost_myr', 'items'(rows), 'is_general'(opt), ...]
+     * "No. of Tour Leaders" ($combo['tour_leader_count'], default 1) sits on the
+     * Tour Leader section of the combination that OWNS those rows and scales ONLY
+     * that section's cost — the summary / quotation PDF price reflects N tour leaders
+     * while the item-card line totals are left untouched. A combination's extra =
+     * (N − 1) × sum of ITS OWN tour-leader rows' MYR. The General combination's own
+     * tour-leader extra is computed with the General's count and then folds into
+     * every regular combination. Anything below 1 is treated as 1 (no change). Bank
+     * charges are a per-currency transaction fee and are NOT scaled.
+     *
+     * @param array $combinations each: ['cost_myr', 'items'(rows), 'is_general'(opt), 'tour_leader_count'(opt), ...]
      * @return array regular combinations with cost_myr including the general cost + bank
      */
     function costing_fold_general_combination($combinations)
     {
+        // A combination's extra cost for additional tour leaders, from its OWN
+        // tour-leader rows scaled by its OWN count (0 when count <= 1 / no tl rows).
+        $tl_extra = function ($combo) {
+            $count = max(1.0, (float) (isset($combo['tour_leader_count']) ? $combo['tour_leader_count'] : 1));
+            if ($count <= 1.0) {
+                return 0.0;
+            }
+            $sum = 0.0;
+            foreach ((array) (isset($combo['items']) ? $combo['items'] : array()) as $item) {
+                $cat = strtolower(trim((string) (isset($item['category']) ? $item['category'] : '')));
+                if ($cat === 'tour_leader') {
+                    $sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
+                }
+            }
+            return ($count - 1.0) * $sum;
+        };
+
         $general_items = array();
         $general_sum   = 0.0;
         foreach ((array) $combinations as $combo) {
@@ -311,6 +337,8 @@ if (!function_exists('costing_fold_general_combination')) {
                     $general_items[] = $item;
                     $general_sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
                 }
+                // General's own tour-leader count scales its folded tour-leader cost.
+                $general_sum += $tl_extra($combo);
             }
         }
 
@@ -324,6 +352,8 @@ if (!function_exists('costing_fold_general_combination')) {
             foreach ($own_items as $item) {
                 $own_sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
             }
+            // This combination's own tour-leader count scales its own tour-leader rows.
+            $own_sum += $tl_extra($combo);
             $union = array_merge($own_items, $general_items);
             $combo['cost_myr'] = round($own_sum + $general_sum + costing_bank_total($union), 2);
             $out[] = $combo;
