@@ -51,7 +51,7 @@ function faq_workspace_review_version($s)
 
 function faq_workspace_filters()
 {
-    return array('pending'=>'Pending Approval','context'=>'Needs Information',
+    return array('all'=>'All','pending'=>'Pending Approval','context'=>'Needs Information',
         'accepted'=>'Approved','dismissed'=>'Rejected');
 }
 
@@ -65,6 +65,35 @@ function faq_workspace_page_size($value)
 function faq_workspace_search($value)
 {
     return is_string($value)?mb_substr(trim($value),0,200):'';
+}
+
+/** Carry only the suggestion list's supported filters between review pages. */
+function faq_workspace_return_filters($value)
+{
+    if (!is_string($value) || $value==='' || strlen($value)>4096) { return ''; }
+    parse_str($value,$filters);
+    if (!array_intersect(array_keys($filters),array('page_size','run_id','tab','search','page'))) { return ''; }
+    $tab=$filters['tab']??'pending'; $statuses=faq_workspace_filters();
+    $run=$filters['run_id']??0;
+    $run_id=is_scalar($run)?filter_var($run,FILTER_VALIDATE_INT,array('options'=>array('min_range'=>0,'max_range'=>2147483647))):false;
+    $page=$filters['page']??1;
+    $page=is_scalar($page)?filter_var($page,FILTER_VALIDATE_INT,array('options'=>array('min_range'=>1,'max_range'=>2147483647))):false;
+    return http_build_query(array('page_size'=>faq_workspace_page_size($filters['page_size']??null),
+        'run_id'=>$run==='latest20'?'latest20':($run_id===false?0:$run_id),
+        'tab'=>is_string($tab)&&isset($statuses[$tab])?$tab:'pending',
+        'search'=>faq_workspace_search($filters['search']??''),'page'=>$page===false?1:$page),'','&',PHP_QUERY_RFC3986);
+}
+
+function faq_workspace_suggestions_url($return_filters='')
+{
+    $filters=faq_workspace_return_filters($return_filters);
+    return base_url('Faq?section=suggestions').($filters!==''?'&'.$filters:'');
+}
+
+function faq_workspace_suggestion_url($id,$return_filters='')
+{
+    $filters=faq_workspace_return_filters($return_filters);
+    return base_url('Faq_Suggestion/Update?id=').(int)$id.($filters!==''?'&return_filters='.rawurlencode($filters):'');
 }
 
 /** Sources can be filtered to one destination or to unrestricted entries. */

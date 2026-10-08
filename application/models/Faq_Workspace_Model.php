@@ -298,6 +298,7 @@ class Faq_Workspace_Model extends CI_Model
         $out=array_fill_keys(array_keys(faq_workspace_filters()),0); $this->Filter_Suggestions('all',$search,$run);
         foreach ($this->db->select('State, COUNT(*) AS Total')->group_by('State')->get('faq_suggestions')->result() as $r) {
             $n=(int)$r->Total;
+            $out['all']+=$n;
             if (in_array($r->State,array('accepted','dismissed'),true)) { $out[$r->State]+=$n; }
             elseif ($r->State==='draft_ready') { $out['pending']+=$n; } else { $out['context']+=$n; }
         }

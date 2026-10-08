@@ -1,5 +1,6 @@
 <?php
-	$submit_url = base_url('Faq_Suggestion/Update?id=') . (int)$suggestion->SuggestionID;
+	$return_filters=faq_workspace_return_filters($return_filters??'');
+	$submit_url = faq_workspace_suggestion_url($suggestion->SuggestionID,$return_filters);
 	$completed=in_array($suggestion->State,array('accepted','dismissed'),true);
 	$editable=!empty($can_edit)&&!$completed;
 	$esc=function($value){return htmlspecialchars((string)$value,ENT_QUOTES,'UTF-8');};
@@ -23,8 +24,9 @@
 			.faq-review-history .small { font-size:11px; }
 			@media (max-width:575px) { .faq-evidence-grid { grid-template-columns:1fr; } }
 		</style>
-		<form id="faq_form" method="post" action="<?php echo $submit_url; ?>">
+		<form id="faq_form" method="post" action="<?php echo $esc($submit_url); ?>">
 			<?php echo faq_workspace_csrf_field($this->session); ?>
+			<input type="hidden" name="return_filters" value="<?php echo $esc($return_filters); ?>">
 			<input type="hidden" name="suggestion_id" value="<?php echo (int)$suggestion->SuggestionID; ?>">
 			<input type="hidden" name="expected_version" value="<?php echo $esc(faq_workspace_review_version($suggestion)); ?>">
 
@@ -36,7 +38,7 @@
 						</h3>
 					</div>
 					<div class="card-toolbar">
-						<a href="<?php echo isset($run_url) ? $run_url : base_url('Faq_Suggestion'); ?>" class="btn btn-light font-weight-bold" style="margin-right:6px;">
+						<a href="<?php echo $esc(isset($run_url)?$run_url:faq_workspace_suggestions_url($return_filters)); ?>" class="btn btn-light font-weight-bold" style="margin-right:6px;">
 							<i class="la la-arrow-left"></i>Back
 						</a>
 						<?php if($editable) { ?>
@@ -188,7 +190,7 @@
 			</div>
 		</form>
 
-		<?php if($editable) { ?><form id="faq-reject-form" method="post" action="<?php echo base_url('Faq_Suggestion/Dismiss'); ?>"><?php echo faq_workspace_csrf_field($this->session); ?><input type="hidden" name="suggestion_id" value="<?php echo (int)$suggestion->SuggestionID; ?>"></form><?php } ?>
+		<?php if($editable) { ?><form id="faq-reject-form" method="post" action="<?php echo base_url('Faq_Suggestion/Dismiss'); ?>"><?php echo faq_workspace_csrf_field($this->session); ?><input type="hidden" name="suggestion_id" value="<?php echo (int)$suggestion->SuggestionID; ?>"><input type="hidden" name="return_filters" value="<?php echo $esc($return_filters); ?>"></form><?php } ?>
 		<div class="card card-custom mb-5"><div class="card-body"><h5>Supporting evidence</h5>
 			<?php if(!empty($knowledge_last)) { $this->load->view('faq_suggestion/knowledge_selection',array('selection'=>$knowledge_last,'historical'=>true,'can_manage_sources'=>$can_manage_sources??false)); } ?>
 			<?php foreach((array)$citations as $citation) { ?><div class="border rounded p-4 mb-3"><strong><?php echo $esc($citation['reference'].' · '.($citation['kind']==='knowledge'?'Approved Knowledge Source':'Draft evidence').' · '.$citation['title']); ?></strong><blockquote class="mt-3 mb-0" style="white-space:pre-wrap"><?php echo $esc($citation['excerpt']); ?></blockquote></div><?php } ?>

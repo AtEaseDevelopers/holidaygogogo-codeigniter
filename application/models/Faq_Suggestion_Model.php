@@ -16,32 +16,30 @@ class Faq_Suggestion_Model extends CI_Model
 	/** WhatsApp chat exports live here (same dir the Guests chat upload writes to). */
 	const CHAT_DIR = 'assets/upload/chat_history/';
 
-	/**
-	 * The suggestions belonging to one generation run (the run detail page), in
-	 * the AI's priority order (most-helpful-first = ascending SuggestionID). Each
-	 * row is decorated with QuestionCount and the "||"-joined Destinations names.
-	 */
-	function Read_Suggestions_For_Run($run_id)
-	{
-		$this->load->model('Faq_Model'); // Decode_Items() lives there
-		$this->db->select('SuggestionID, Title, Description, Reason, DestinationIds, State, AcceptedFAQID, RunID, RunKey, Model, CostUsd, InsertBy, InsertDate, DraftSourcesJson');
-		$this->db->from('faq_suggestions');
-		$this->db->where('Status', 'Y');
-		$this->db->where('RunID', (int) $run_id);
-		$this->db->order_by('SuggestionID', 'ASC');
-		$rows = $this->db->get()->result();
-		return $this->Decorate_Suggestions($rows);
-	}
-
-	/** Share destination and source details between the run page and the paginated list. */
+	/** Add destination, generation and source details to the paginated list. */
 	function Decorate_Suggestions($rows)
 	{
 		if (!$rows) { return $rows; }
 		$dest_names = $this->Destination_Name_Map();
 		$ids = array();
-		foreach ($rows as $row) { $ids[] = (int) $row->SuggestionID; }
+		$run_ids = array(); $runs = array();
+		foreach ($rows as $row) {
+			$ids[] = (int) $row->SuggestionID;
+			if (!empty($row->RunID)) { $run_ids[(int)$row->RunID] = (int)$row->RunID; }
+		}
+		if ($run_ids) {
+			$this->load->helper('faq_suggestion');
+			foreach ($this->db->select('RunID, Source, StartDate, EndDate, Mobile, FileName, InsertDate')
+				->where('Status','Y')->where_in('RunID',array_values($run_ids))->get('faq_suggestion_runs')->result() as $run) {
+				$run->Scope = faq_suggestion_run_scope($run); $runs[(int)$run->RunID] = $run;
+			}
+		}
 		$evidence_by_suggestion = $this->Read_Evidence_For_Suggestions($ids);
 		foreach ($rows as $row) {
+			$run = $runs[(int)($row->RunID??0)]??null;
+			$row->RunSource = $run?$run->Source:null;
+			$row->RunScope = $run?$run->Scope:null;
+			$row->RunInsertDate = $run?$run->InsertDate:null;
 			$items = Faq_Model::Decode_Items($row->Description);
 			$row->QuestionCount = count($items);
 			$names = array();
@@ -110,7 +108,7 @@ class Faq_Suggestion_Model extends CI_Model
 	function Read_Recent_Generation_Runs($limit = 20)
 	{
 		$this->load->helper('faq_suggestion');
-		$runs = $this->db->select('RunID, Source, StartDate, EndDate, Mobile, FileName, InsertDate')
+		$runs = $this->db->select('RunID, Source, StartDate, EndDate, Mobile, FileName, InsertDate, RunState')
 			->where('Status', 'Y')->where('Source !=', 'reevaluate')
 			->order_by('RunID', 'DESC')->limit(max(1, (int) $limit))->get('faq_suggestion_runs')->result();
 		foreach ($runs as $run) { $run->Scope = faq_suggestion_run_scope($run); }

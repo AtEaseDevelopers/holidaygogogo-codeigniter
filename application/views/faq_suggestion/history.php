@@ -107,7 +107,7 @@
 								$src = strtolower((string)$r->Source);
 								$src_label = ($src === 'pdf') ? 'PDF' : (($src === 'chatfile') ? 'Chat File' : (($src === 'reevaluate') ? 'Re-evaluation' : 'Chats'));
 								$src_class = ($src === 'pdf') ? 'label-light-info' : (($src === 'chatfile') ? 'label-light-success' : 'label-light-primary');
-								$view_url = base_url('Faq_Suggestion/View?id=') . (int)$r->RunID;
+								$view_url = $src==='reevaluate'?base_url('Faq_Suggestion/Update?id=').(int)preg_replace('/[^0-9]/','',(string)$r->FileName):base_url('Faq?section=suggestions&tab=all&run_id=').(int)$r->RunID;
 							?>
 								<tr data-run-id="<?php echo (int)$r->RunID; ?>">
 									<td style="text-align:center; padding-top:15px; padding-bottom:15px;"><?php echo $count; ?></td>
@@ -124,7 +124,7 @@
 									<td style="text-align:center;"><?php echo htmlspecialchars($r->InsertDate ? date('j M Y', strtotime($r->InsertDate)) : '-'); ?></td>
 									<td style="text-align:center;">
 										<div class="btn-group">
-											<a href="<?php echo $src==='reevaluate'?base_url('Faq_Suggestion/Update?id=').(int)preg_replace('/[^0-9]/','',(string)$r->FileName):$view_url; ?>" class="btn btn-icon btn-light-primary btn-sm" data-toggle="tooltip" title="Open run — review the FAQs it produced">
+											<a href="<?php echo $view_url; ?>" class="btn btn-icon btn-light-primary btn-sm" data-toggle="tooltip" title="Review suggestions from this generation">
 												<i class="la la-eye"></i>
 											</a>
 											<?php if($can_edit && $src!=='reevaluate') { ?>

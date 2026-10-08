@@ -41,4 +41,7 @@
     });
     $('#faq-suggestions-table [data-toggle="tooltip"]').tooltip();
     updateSelection();
+    if (['queued', 'running'].indexOf(workspace.data('run-state')) !== -1) {
+        setTimeout(function () { location.reload(); }, 4000);
+    }
 })();
