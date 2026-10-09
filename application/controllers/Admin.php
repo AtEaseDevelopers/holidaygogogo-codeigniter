@@ -124,4 +124,22 @@ class Admin extends MY_Controller
 			$this->load->view('errors/access_denied');
 		}
 	}
+
+	// Owner-only 2FA recovery: clear an admin's Google Authenticator enrolment so
+	// they set it up again on their next login (for a lost/replaced phone).
+	function Reset_Two_Factor()
+	{
+		if(!$this->input->is_ajax_request() || (int) $this->session->level !== 10) {
+			$this->load->view('errors/access_denied');
+			return;
+		}
+		$admin_id = (int) $this->input->post('admin_id');
+		if($admin_id > 0) {
+			$this->load->model('Login_Model');
+			$this->Login_Model->Reset_Two_Factor($admin_id);
+			echo json_encode(true);
+		} else {
+			echo json_encode(false);
+		}
+	}
 }

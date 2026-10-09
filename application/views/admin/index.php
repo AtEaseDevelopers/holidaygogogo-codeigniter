@@ -192,6 +192,9 @@
                                                         <button onclick="Deactivate_Or_Activate_Admin('<?php echo 'Activate Admin Record : ' . str_replace('\'', '', $admin->Name); ?>', <?php echo $admin->AdminID; ?>, 'D', 'Y')" class="dropdown-item" style="color:#93C572; font-size:11px;">Activate Admin</button>
                                                     <?php } ?>
                                                     <a href="<?php echo base_url('Admin/Update?admin_id=') . $admin->AdminID; ?>" class="dropdown-item" style="font-size:11px;">Update Admin</a>
+                                                    <?php if($this->session->level == 10) { ?>
+                                                        <button onclick="Reset_Two_Factor('<?php echo str_replace('\'', '', $admin->Name); ?>', <?php echo $admin->AdminID; ?>)" class="dropdown-item" style="color:#F08C00; font-size:11px;">Reset 2FA</button>
+                                                    <?php } ?>
                                                 </div>
                                             </div>
                                         </td>
@@ -238,6 +241,46 @@
             icon.classList.remove('la-eye-slash');
             icon.classList.add('la-eye');
         }
+    }
+
+    function Reset_Two_Factor(name, admin_id)
+    {
+        const swalWithBootstrapButtons = Swal.mixin({
+            customClass: {
+                confirmButton: 'btn btn-light-success m-2',
+                cancelButton: 'btn btn-danger m-2'
+            },
+            buttonsStyling: true
+        });
+        swalWithBootstrapButtons.fire({
+            width: 550,
+            background: `url(${background})`,
+            icon: 'warning',
+            title: `Reset 2FA for ${name} ?`,
+            text: 'They will set up Google Authenticator again on their next login.',
+            confirmButtonText: 'Confirm',
+            cancelButtonText: 'Cancel',
+            showCancelButton: true
+        }).then((action) => {
+            if(action.isConfirmed) {
+                $.ajax({
+                    url: '<?php echo base_url('Admin/Reset_Two_Factor'); ?>',
+                    type: 'post',
+                    data: { admin_id: admin_id },
+                    dataType: 'json',
+                    success: function(status) {
+                        if(status == true) {
+                            Display_Message(background, '2FA Successfully Reset', '<?php echo base_url('Admin') ?>');
+                        } else {
+                            Display_Message(background, '2FA Could Not Be Reset', null);
+                        }
+                    },
+                    error: function() {
+                        Display_Message(background, '2FA Could Not Be Reset', null);
+                    }
+                });
+            }
+        });
     }
 
     function Deactivate_Or_Activate_Admin(title, admin_id, current_status, new_status)
