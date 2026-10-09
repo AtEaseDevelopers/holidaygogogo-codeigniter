@@ -113,9 +113,8 @@ class Competitor_Analysis_Model extends CI_Model
 	/**
 	 * Crawl-analysed rows (a pasted/URL crawl, not an upload/paste) — the
 	 * complement of Read_Uploads. These are re-hydrated into the results listing
-	 * so a saved crawl analysis keeps showing after its transient job file is
-	 * pruned (job files die at 7 days; the DB row is permanent). Newest first,
-	 * capped.
+	 * so a saved crawl analysis keeps showing when its crawl job files are
+	 * missing. Newest first, capped.
 	 */
 	function Read_Crawl_Analyses($limit = 30)
 	{

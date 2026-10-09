@@ -294,7 +294,7 @@
 
     // On page load, if a background analyse job for this crawl was left running before a
     // refresh, re-mark its pending rows and resume polling. The poll self-heals: a job
-    // that finished (or was pruned) returns done/unknown, folds in results, and clears.
+    // that finished (or was deleted) returns done/unknown, folds in results, and clears.
     function resumeRun() {
         var run = loadRun();
         if (!run || !run.job || !(run.indices && run.indices.length)) return;

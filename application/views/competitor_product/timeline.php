@@ -133,7 +133,7 @@
         var total = 0, no = 0;
         $('#run_count').text(jobs.length);
         if(!jobs.length) {
-            $rows.html('<tr id="no_runs"><td colspan="7" style="text-align:center; padding:12px;" class="text-muted">No crawl runs for this website — it may have been deleted or expired.</td></tr>');
+            $rows.html('<tr id="no_runs"><td colspan="7" style="text-align:center; padding:12px;" class="text-muted">No crawl runs for this website.</td></tr>');
         } else {
             $rows.html(jobs.map(function(j) {
                 no++;

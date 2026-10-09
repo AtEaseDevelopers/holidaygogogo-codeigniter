@@ -190,7 +190,7 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
         });
 
         // Resume a background translation left running before a refresh. The poll
-        // self-heals: a job that already finished (or was pruned) returns done/unknown.
+        // self-heals: a job that already finished (or was deleted) returns done/unknown.
         if (CUR_LANG !== 'cn' && ! HAS_CN) {
             var job = '';
             try { job = localStorage.getItem(LS_KEY) || ''; } catch (e) {}
