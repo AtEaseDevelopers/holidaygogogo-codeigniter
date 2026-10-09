@@ -10,6 +10,8 @@ class Admin extends MY_Controller
 	function index()
 	{
 		$titles = array('tab_title' => 'HolidayGoGoGo | Admin', 'breadcrumb_title' => 'Admin');
+		$this->load->helper('totp');
+		$array['twofa_enabled'] = totp_two_factor_enabled();
 		$array['admins'] = $this->Admin_Model->Read();
 		if(!empty($array['admins'])) {
 			foreach($array['admins'] as $admin) {

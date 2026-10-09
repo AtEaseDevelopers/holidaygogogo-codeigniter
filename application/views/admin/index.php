@@ -192,7 +192,7 @@
                                                         <button onclick="Deactivate_Or_Activate_Admin('<?php echo 'Activate Admin Record : ' . str_replace('\'', '', $admin->Name); ?>', <?php echo $admin->AdminID; ?>, 'D', 'Y')" class="dropdown-item" style="color:#93C572; font-size:11px;">Activate Admin</button>
                                                     <?php } ?>
                                                     <a href="<?php echo base_url('Admin/Update?admin_id=') . $admin->AdminID; ?>" class="dropdown-item" style="font-size:11px;">Update Admin</a>
-                                                    <?php if($this->session->level == 10) { ?>
+                                                    <?php if($this->session->level == 10 && !empty($twofa_enabled)) { ?>
                                                         <button onclick="Reset_Two_Factor('<?php echo str_replace('\'', '', $admin->Name); ?>', <?php echo $admin->AdminID; ?>)" class="dropdown-item" style="color:#F08C00; font-size:11px;">Reset 2FA</button>
                                                     <?php } ?>
                                                 </div>

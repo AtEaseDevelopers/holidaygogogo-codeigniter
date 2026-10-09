@@ -166,12 +166,10 @@ class Login extends CI_Controller
 		return (string) get_env('TOTP_ENCRYPTION_KEY');
 	}
 
-	// Whether the second factor is enforced. Set TWOFA_ENABLED=false in .env to
-	// skip 2FA entirely (e.g. local dev); any other value (or unset) keeps it on.
+	// Whether the second factor is enforced (TWOFA_ENABLED .env switch).
 	private function _twofa_enabled()
 	{
-		$v = strtolower(trim((string) get_env('TWOFA_ENABLED')));
-		return ! in_array($v, array('false', '0', 'no', 'off'), true);
+		return totp_two_factor_enabled();
 	}
 
 	// Seconds left on a temporary lock, or 0. The lock lives on the admin ROW so

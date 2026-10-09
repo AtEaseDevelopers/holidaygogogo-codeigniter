@@ -24,6 +24,22 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  *    verification needs the original key back. Key lives in .env, not the DB.
  */
 
+if (!function_exists('totp_two_factor_enabled')) {
+    /**
+     * Whether admin 2FA is enforced. Reads the TWOFA_ENABLED .env switch:
+     * 'false' / '0' / 'no' / 'off' disable it; any other value (or unset)
+     * keeps it on. Single source of truth for the login flow and the owner's
+     * "Reset 2FA" button.
+     *
+     * @return bool
+     */
+    function totp_two_factor_enabled()
+    {
+        $v = strtolower(trim((string) (function_exists('get_env') ? get_env('TWOFA_ENABLED') : getenv('TWOFA_ENABLED'))));
+        return !in_array($v, array('false', '0', 'no', 'off'), true);
+    }
+}
+
 if (!function_exists('totp_base32_encode')) {
     /**
      * RFC 4648 Base32 encode (no padding), the alphabet Google Authenticator
