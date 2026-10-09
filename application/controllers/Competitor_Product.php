@@ -363,8 +363,8 @@ class Competitor_Product extends MY_Controller
 	}
 
 	/**
-	 * Read every crawl-job status file into public views, pruning files older than
-	 * 7 days along the way. Returns ['crawls' => [...crawl-mode views...], 'singles'
+	 * Read retained crawl-job status files into public views. Returns
+	 * ['crawls' => [...crawl-mode views...], 'singles'
 	 * => [...in-progress paste views...], 'running' => bool]. A FINISHED paste job
 	 * is omitted (its saved DB row is folded in by the listing); transient analyse
 	 * jobs are skipped. Each view carries a '_sort' (file mtime) for recency order.
@@ -378,16 +378,6 @@ class Competitor_Product extends MY_Controller
 		foreach (glob($dir . '*.json') ?: array() as $path) {
 			if (substr($path, -11) === '.items.json') {
 				continue;   // crawled-text sidecar, not a status file
-			}
-			if (filemtime($path) < time() - 7 * 86400) {
-				@unlink($path);
-				@unlink(preg_replace('/\.json$/', '.out', $path));
-				@unlink(preg_replace('/\.json$/', '.items.json', $path));
-				@unlink(preg_replace('/\.json$/', '.items.json.tmp', $path));
-				@unlink(preg_replace('/\.json$/', '.urls.txt', $path));
-				@unlink(preg_replace('/\.json$/', '.done.txt', $path));
-				@unlink(preg_replace('/\.json$/', '.pid', $path));
-				continue;
 			}
 			$s = json_decode((string) file_get_contents($path), true);
 			if ( ! is_array($s)) {
@@ -451,7 +441,7 @@ class Competitor_Product extends MY_Controller
 	 * AJAX: the Analysis Results table (newest first). Crawl runs of the SAME
 	 * website are MERGED into one row per host (competitor_group_crawl_jobs) — the
 	 * per-run history lives behind the Timeline page — while pasted text/links and
-	 * uploaded PDFs/images stay as their own rows. Prunes stale job files. Returns
+	 * uploaded PDFs/images stay as their own rows. Returns
 	 * {jobs: [...], running: <bool>}.
 	 */
 	function Jobs_List()
@@ -473,9 +463,9 @@ class Competitor_Product extends MY_Controller
 		// In-progress paste jobs stay as individual rows.
 		$jobs = array_merge($jobs, $collected['singles']);
 
-		// Re-hydrate crawl-analysed DB rows whose transient job file has been
-		// pruned (files die at 7 days; the DB row is permanent) so they keep
-		// showing — deduped by host against the still-live crawl group rows, whose
+		// Re-hydrate crawl-analysed DB rows whose job files are missing (for example
+		// after manual deletion) so saved analyses keep showing — deduped by host
+		// against the retained crawl group rows, whose
 		// products remain reachable via Review/Timeline.
 		$covered_hosts = array();
 		foreach ($jobs as $g) {

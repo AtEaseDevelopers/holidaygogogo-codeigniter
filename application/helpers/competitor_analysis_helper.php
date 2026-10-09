@@ -5334,10 +5334,8 @@ if ( ! function_exists('competitor_orphan_crawl_rows'))
 {
 	/**
 	 * Re-hydrate crawl-analysed DB rows into the results listing as standalone
-	 * rows, so a saved analysis keeps showing after its transient crawl job file
-	 * is pruned (job files are deleted at 7 days, but the DB row lives forever —
-	 * that gap is why crawled analyses vanished from the listing while still
-	 * appearing on the Master Product page, which reads the DB directly).
+	 * rows, so a saved analysis keeps showing when its crawl job files are
+	 * missing, for example after manual deletion or legacy cleanup.
 	 *
 	 * $db_rows      analysis rows (objects/arrays) with id, url, product_name,
 	 *               cost_usd, status, created_at.
