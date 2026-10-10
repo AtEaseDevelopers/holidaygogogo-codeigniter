@@ -135,7 +135,7 @@
                             <select id="jobs_db_status_filter" class="form-control" name="db_status">
                                 <option value="" data-label="All">All</option>
                                 <?php foreach (array('waiting'=>'Waiting for Crawl', 'not_saved'=>'Awaiting Analysis', 'analysis_queued'=>'Analysis Queued',
-                                    'analysing'=>'Analysing', 'partial'=>'Partly Saved', 'saved'=>'Saved to Database', 'error'=>'Analysis Failed',
+                                    'analysing'=>'Analysing', 'partial'=>'Partly Saved', 'saved'=>'Analysis Complete', 'error'=>'Analysis Failed',
                                     'missing'=>'Saved Record Missing', 'empty'=>'No Products') as $value=>$label) { ?>
                                 <option value="<?php echo $value; ?>" data-label="<?php echo $label; ?>"><?php echo $label; ?></option>
                                 <?php } ?>
@@ -274,7 +274,7 @@
             analysis_queued: ['warning', 'Analysis queued'],
             analysing: ['primary', 'Analysing'],
             partial: ['warning', 'Partly saved'],
-            saved: ['success', 'Saved to database'],
+            saved: ['success', 'Analysis Complete'],
             error: ['danger', 'Analysis failed'],
             missing: ['danger', 'Saved record missing'],
             empty: ['dark', 'No products']
