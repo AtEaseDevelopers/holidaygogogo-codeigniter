@@ -5670,3 +5670,17 @@ if ( ! function_exists('competitor_job_archived_rows'))
 		return $rows;
 	}
 }
+
+if ( ! function_exists('competitor_log_event'))
+{
+	/**
+	 * Append a timestamped line to a dedicated, tail-able crawl event log
+	 * (application/logs/crawl_events.log) — used to trace terminate/crash of live
+	 * crawls separately from CodeIgniter's dated log-*.php files. Best-effort.
+	 */
+	function competitor_log_event($message)
+	{
+		$line = '[' . date('Y-m-d H:i:s') . '] ' . (string) $message . "\n";
+		@file_put_contents(APPPATH . 'logs/crawl_events.log', $line, FILE_APPEND | LOCK_EX);
+	}
+}

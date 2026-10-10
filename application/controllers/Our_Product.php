@@ -531,6 +531,14 @@ class Our_Product extends MY_Controller
 		}
 		$dir = APPPATH . 'logs/our_product_crawl/jobs/';
 		$pid = (int) @file_get_contents($dir . $job_id . '.pid');
+		$s   = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
+		// TRACE: who killed what, and how far it had got.
+		$host  = (is_array($s) && isset($s['url'])) ? competitor_job_host((string) $s['url']) : '';
+		$state = (is_array($s) && isset($s['state'])) ? (string) $s['state'] : '?';
+		$count = (is_array($s) && isset($s['count'])) ? (int) $s['count'] : 0;
+		competitor_log_event(sprintf(
+			'Our Product crawl TERMINATED by admin %s: job=%s host=%s state=%s products=%d pid=%d',
+			(string) $this->session->admin_id, $job_id, $host !== '' ? $host : '?', $state, $count, $pid));
 		if ($pid > 0) {
 			if (function_exists('exec')) {
 				@exec('pkill -9 -P ' . escapeshellarg((string) $pid));   // children (e.g. Chrome)
@@ -543,13 +551,17 @@ class Our_Product extends MY_Controller
 		}
 		// An upload job stages the file for its (now-killed) worker to read; remove it
 		// so terminating mid-analysis doesn't orphan it in assets/upload/.
-		$s = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
 		if (is_array($s) && ! empty($s['file_path']) && is_file($s['file_path'])) {
 			@unlink($s['file_path']);
 		}
 		foreach (array('.json', '.out', '.items.json', '.pid') as $ext) {
 			@unlink($dir . $job_id . $ext);
 		}
+		// Terminate = make it disappear → clear DB traces so it can't be resurrected.
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$this->load->model('Competitor_Crawl_Jobs_Model');
+		$this->Competitor_Crawl_Items_Model->Delete_By_Job('our_product', $job_id);
+		$this->Competitor_Crawl_Jobs_Model->Delete_Job('our_product', $job_id);
 		echo json_encode(array('success' => true));
 	}
 

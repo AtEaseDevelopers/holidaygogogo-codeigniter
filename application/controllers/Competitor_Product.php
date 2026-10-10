@@ -434,11 +434,30 @@ class Competitor_Product extends MY_Controller
 				$pid   = is_file($pidfile) ? (int) @file_get_contents($pidfile) : 0;
 				$alive = $pid > 0 && $this->pid_alive($pid);
 				if (competitor_job_looks_crashed($state, $alive, time() - filemtime($path))) {
+					// TRACE: a live crawl whose worker died — log it and record an 'error' job row
+					// so the crash is durably explainable even after the files are gone.
+					$job_id = preg_replace('/\.json$/', '', basename($path));
+					$host   = isset($s['url']) ? competitor_job_host((string) $s['url']) : '';
+					competitor_log_event(sprintf(
+						'Competitor crawl CRASHED (worker died): job=%s host=%s was=%s products=%d age=%ds pid=%d',
+						$job_id, $host !== '' ? $host : '?', $state,
+						(int) (isset($s['count']) ? $s['count'] : 0), time() - filemtime($path), $pid));
 					$s['state']   = 'error';
 					$s['message'] = 'Crawl stopped unexpectedly (the worker ended before finishing). Please run it again.';
 					@file_put_contents($path, json_encode($s, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 					@unlink($pidfile);
 					$this->reap_orphan_browsers();
+					if (($s['mode'] ?? 'crawl') === 'crawl') {
+						$this->load->model('Competitor_Crawl_Jobs_Model');
+						$this->Competitor_Crawl_Jobs_Model->Upsert_Job('competitor', array(
+							'job_id' => $job_id, 'host' => $host, 'src_url' => (string) (isset($s['url']) ? $s['url'] : ''),
+							'mode' => 'crawl', 'state' => 'error',
+							'product_count' => (int) (isset($s['count']) ? $s['count'] : 0),
+							'keyword' => (string) (isset($s['keyword']) ? $s['keyword'] : ''),
+							'competitor_name' => (string) (isset($s['competitor_name']) ? $s['competitor_name'] : ''),
+							'created_at' => (string) (isset($s['created']) ? $s['created'] : ''),
+						));
+					}
 				}
 			}
 			$mode = isset($s['mode']) ? $s['mode'] : 'crawl';
@@ -776,6 +795,14 @@ class Competitor_Product extends MY_Controller
 		}
 		$dir = APPPATH . 'logs/competitor_crawl/jobs/';
 		$pid = (int) @file_get_contents($dir . $job_id . '.pid');
+		$s   = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
+		// TRACE: who killed what, and how far it had got — so a vanished live crawl is explainable.
+		$host  = (is_array($s) && isset($s['url'])) ? competitor_job_host((string) $s['url']) : '';
+		$state = (is_array($s) && isset($s['state'])) ? (string) $s['state'] : '?';
+		$count = (is_array($s) && isset($s['count'])) ? (int) $s['count'] : 0;
+		competitor_log_event(sprintf(
+			'Competitor crawl TERMINATED by admin %s: job=%s host=%s state=%s products=%d pid=%d',
+			(string) $this->session->admin_id, $job_id, $host !== '' ? $host : '?', $state, $count, $pid));
 		if ($pid > 0) {
 			if (function_exists('exec')) {
 				@exec('pkill -9 -P ' . escapeshellarg((string) $pid));   // children (e.g. Chrome)
@@ -788,13 +815,18 @@ class Competitor_Product extends MY_Controller
 		}
 		// An upload job stages the file for its (now-killed) worker to read; remove it
 		// so terminating mid-analysis doesn't orphan it in assets/upload/.
-		$s = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
 		if (is_array($s) && ! empty($s['file_path']) && is_file($s['file_path'])) {
 			@unlink($s['file_path']);
 		}
 		foreach (array('.json', '.out', '.items.json', '.items.json.tmp', '.urls.txt', '.done.txt', '.pid') as $ext) {
 			@unlink($dir . $job_id . $ext);
 		}
+		// Terminate means "make this crawl disappear" — so clear its DB traces too, else the
+		// archived-row fallback would resurrect it from competitor_crawl_items/_jobs.
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$this->load->model('Competitor_Crawl_Jobs_Model');
+		$this->Competitor_Crawl_Items_Model->Delete_By_Job('competitor', $job_id);
+		$this->Competitor_Crawl_Jobs_Model->Delete_Job('competitor', $job_id);
 		echo json_encode(array('success' => true));
 	}
 
