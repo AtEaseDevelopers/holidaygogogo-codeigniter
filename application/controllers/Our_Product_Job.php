@@ -168,12 +168,74 @@ class Our_Product_Job extends CI_Controller
 			$items = $this->competitoranalysisservice->read_single_product($url, $progress);
 			$items_file = APPPATH . 'logs/our_product_crawl/jobs/' . $job['job'] . '.items.json';
 			@file_put_contents($items_file, json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+			// Durably persist the crawled product(s) to the DB (the items file is a cache).
+			$this->persist_crawl_items('our_product', (string) $job['job'], $url, $items);
 
 			$n = count($items);
 			$write(array('state' => 'done', 'phase' => 'reading', 'done' => $n, 'total' => $n,
 				'count' => $n, 'items_file' => $items_file, 'cost_total' => 0));
+			$this->persist_job_record('our_product', $job, 'done', $n, 0);
 		} catch (Exception $e) {
 			$write(array('state' => 'error', 'message' => $e->getMessage()));
+			$this->persist_job_record('our_product', $job, 'error', 0, 0);
+		}
+	}
+
+	/**
+	 * Upsert a crawl's discovered products into competitor_crawl_items so they are
+	 * durable (the items file is only a cache). Best-effort; failure is logged, not fatal.
+	 */
+	private function persist_crawl_items($feature, $job_id, $src_url, $items)
+	{
+		try {
+			$this->load->helper('competitor_analysis');
+			$this->load->model('Competitor_Crawl_Items_Model');
+			$rows = competitor_crawl_items_for_db($items, array(
+				'feature' => $feature,
+				'job_id'  => $job_id,
+				'src_url' => $src_url,
+			));
+			if ( ! empty($rows)) {
+				$this->Competitor_Crawl_Items_Model->Upsert_Many($feature, $rows);
+			}
+		} catch (Exception $e) {
+			log_message('error', 'persist_crawl_items failed: ' . $e->getMessage());
+		}
+	}
+
+	/** Upsert the durable crawl-job record at a terminal state (done/error). Best-effort. */
+	private function persist_job_record($feature, $job, $state, $count, $cost)
+	{
+		try {
+			$this->load->helper('competitor_analysis');
+			$this->load->model('Competitor_Crawl_Jobs_Model');
+			$url = isset($job['url']) ? (string) $job['url'] : '';
+			$this->Competitor_Crawl_Jobs_Model->Upsert_Job($feature, array(
+				'job_id'        => isset($job['job']) ? (string) $job['job'] : '',
+				'host'          => competitor_job_host($url),
+				'src_url'       => $url,
+				'mode'          => 'crawl',
+				'state'         => (string) $state,
+				'product_count' => (int) $count,
+				'cost_total'    => (float) $cost,
+				'created_at'    => isset($job['created']) ? (string) $job['created'] : '',
+			));
+		} catch (Exception $e) {
+			log_message('error', 'persist_job_record failed: ' . $e->getMessage());
+		}
+	}
+
+	/** Link a durable crawl item (feature + crawl job + index) to its analysis row. Best-effort. */
+	private function persist_analysis_link($feature, $src_job, $idx, $analysis_id)
+	{
+		if ($src_job === '' || (int) $analysis_id <= 0) {
+			return;
+		}
+		try {
+			$this->load->model('Competitor_Crawl_Items_Model');
+			$this->Competitor_Crawl_Items_Model->Mark_Analysed($feature, $src_job, (int) $idx, (int) $analysis_id);
+		} catch (Exception $e) {
+			log_message('error', 'persist_analysis_link failed: ' . $e->getMessage());
 		}
 	}
 
@@ -220,6 +282,8 @@ class Our_Product_Job extends CI_Controller
 						$id = (int) $this->Our_Product_Model->Create($rec);
 						$results[(string) $i] = array('id' => $id, 'cost' => (float) $site['cost_usd'], 'at' => date('Y-m-d H:i:s'));
 						$total_cost += (float) $site['cost_usd'];
+						// Link the durable crawl item to the analysis row it produced.
+						$this->persist_analysis_link('our_product', isset($job['src_job']) ? (string) $job['src_job'] : '', (int) $i, $id);
 					}
 				} catch (Exception $e) {
 					log_message('error', 'CompetitorJob analyse item failed: ' . $e->getMessage());

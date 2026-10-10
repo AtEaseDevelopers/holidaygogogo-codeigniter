@@ -3006,6 +3006,16 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 				return strcmp($tb, $ta);
 			});
 			$latest = $runs[0];
+			// The merged row advertises the BEST run's product haul (most products),
+			// NOT the latest run's — otherwise a flaky/empty re-crawl (count 0) shadows a
+			// good earlier crawl, making its products look missing. Runs are newest-first,
+			// so ties keep the newest. best_job lets the listing review that run directly.
+			$best = $latest;
+			foreach ($runs as $r) {
+				if ((int) (isset($r['count']) ? $r['count'] : 0) > (int) (isset($best['count']) ? $best['count'] : 0)) {
+					$best = $r;
+				}
+			}
 
 			$cost = 0.0;
 			$analysed = 0;
@@ -3047,7 +3057,8 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 				'runs_count' => count($runs),
 				'state'      => (string) (isset($face['state']) ? $face['state'] : 'unknown'),
 				'message'    => (string) (isset($face['message']) ? $face['message'] : ''),
-				'count'      => (int) (isset($latest['count']) ? $latest['count'] : 0),
+				'count'      => (int) (isset($best['count']) ? $best['count'] : 0),
+				'best_job'   => (string) (isset($best['job']) ? $best['job'] : ''),
 				'analysed'   => $analysed,
 				'cost_total' => $cost,
 				'keyword'    => (string) (isset($latest['keyword']) ? $latest['keyword'] : ''),
@@ -5438,6 +5449,221 @@ if ( ! function_exists('competitor_orphan_crawl_rows'))
 				'done'        => 1,
 				'total'       => 1,
 				'read_start'  => '',
+				'_sort'       => strtotime($ts) ?: 0,
+			);
+		}
+		return $rows;
+	}
+}
+
+if ( ! function_exists('competitor_crawl_items_for_db'))
+{
+	/**
+	 * Normalise a crawl's discovered products (the jobs/<id>.items.json list of
+	 * {url, text, title}) into rows ready to upsert into competitor_crawl_items, so
+	 * the crawl result is persisted durably instead of living only in that fragile
+	 * file. The array index is preserved as `idx` — it is the stable key the Review
+	 * page and the status file's `analysed` map reference, so DB and file stay aligned
+	 * even when empty slots are skipped.
+	 *
+	 * $items    the raw crawled items (array of arrays); non-arrays / fully-empty
+	 *           slots are skipped.
+	 * $context  feature ('competitor'|'our_product'), job_id, src_url, and optional
+	 *           host (derived from src_url, then the item url, when omitted).
+	 * Returns a list of assoc rows (feature, job_id, host, src_url, idx, url, title,
+	 *         item_text). Pure; no DB/filesystem.
+	 */
+	function competitor_crawl_items_for_db($items, $context = array())
+	{
+		$items   = is_array($items) ? $items : array();
+		$context = is_array($context) ? $context : array();
+		$feature = isset($context['feature']) ? (string) $context['feature'] : 'competitor';
+		$job_id  = isset($context['job_id']) ? (string) $context['job_id'] : '';
+		$src_url = isset($context['src_url']) ? (string) $context['src_url'] : '';
+		$host0   = (isset($context['host']) && $context['host'] !== '')
+			? (string) $context['host']
+			: competitor_job_host($src_url);
+
+		$rows = array();
+		foreach ($items as $i => $it) {
+			if ( ! is_array($it)) {
+				continue;
+			}
+			$url  = isset($it['url']) ? trim((string) $it['url']) : '';
+			$text = isset($it['text']) ? (string) $it['text'] : '';
+			if ($url === '' && $text === '') {
+				continue;   // empty slot — nothing to persist (idx still reserved)
+			}
+			$title = isset($it['title']) ? trim((string) $it['title']) : '';
+			$rows[] = array(
+				'feature'   => $feature,
+				'job_id'    => $job_id,
+				'host'      => $host0 !== '' ? $host0 : competitor_job_host($url),
+				'src_url'   => $src_url,
+				'idx'       => (int) $i,
+				'url'       => $url,
+				'title'     => ($title !== '') ? $title : null,
+				'item_text' => $text,
+			);
+		}
+		return $rows;
+	}
+}
+
+if ( ! function_exists('competitor_items_from_db_rows'))
+{
+	/**
+	 * Rebuild the jobs/<id>.items.json shape (and the status `analysed` map) from the
+	 * durable competitor_crawl_items rows, so Review/Analyse keep working after the
+	 * transient file is gone. Keyed by the stored `idx` (the same index the file used),
+	 * so selection indices stay valid.
+	 *
+	 * $rows  DB rows (objects/arrays) with idx, url, title, item_text, analysis_id.
+	 * Returns array('items' => [idx => {url,text,title}], 'analysed' => [idx => {id}]).
+	 * Pure; no DB/filesystem.
+	 */
+	function competitor_items_from_db_rows($rows)
+	{
+		$rows     = is_array($rows) ? $rows : array();
+		$items    = array();
+		$analysed = array();
+		foreach ($rows as $r) {
+			$r   = (object) $r;
+			$idx = (int) (isset($r->idx) ? $r->idx : 0);
+			$items[$idx] = array(
+				'url'   => (string) (isset($r->url) ? $r->url : ''),
+				'text'  => (string) (isset($r->item_text) ? $r->item_text : ''),
+				'title' => (string) (isset($r->title) ? $r->title : ''),
+			);
+			$aid = (int) (isset($r->analysis_id) ? $r->analysis_id : 0);
+			if ($aid > 0) {
+				$analysed[(string) $idx] = array('id' => $aid);
+			}
+		}
+		return array('items' => $items, 'analysed' => $analysed);
+	}
+}
+
+if ( ! function_exists('competitor_archived_host_rows'))
+{
+	/**
+	 * Synthesise listing rows for crawled sites that still live in competitor_crawl_items
+	 * but whose job files are all gone — so a site never drops off the listing just
+	 * because its transient files were pruned. Each row points Review at that host's
+	 * richest saved crawl (best_job), tagged is_crawled + reviewable so the existing
+	 * single-crawl Review action renders (no view change needed).
+	 *
+	 * $entry_points  per-host rows (objects/arrays) with host, count (DISTINCT urls),
+	 *                best_job, last_at, src_url.
+	 * $covered_hosts hosts already shown by a live job-file group row — skipped here so
+	 *                a site isn't listed twice. Compared case-insensitively.
+	 * Pure; no DB/filesystem.
+	 */
+	function competitor_archived_host_rows($entry_points, $covered_hosts)
+	{
+		$covered = array();
+		foreach ((is_array($covered_hosts) ? $covered_hosts : array()) as $h) {
+			$k = strtolower((string) $h);
+			if ($k !== '') { $covered[$k] = true; }
+		}
+		$rows = array();
+		foreach ((is_array($entry_points) ? $entry_points : array()) as $e) {
+			$e    = (object) $e;
+			$host = strtolower((string) (isset($e->host) ? $e->host : ''));
+			$best = (string) (isset($e->best_job) ? $e->best_job : '');
+			if ($host === '' || $best === '' || isset($covered[$host])) {
+				continue;   // no host / nothing to review / already shown by a live crawl
+			}
+			$ts = (string) (isset($e->last_at) ? $e->last_at : '');
+			$rows[] = array(
+				'job'         => $best,
+				'is_group'    => false,
+				'is_crawled'  => true,     // reuse the "Crawled" label + URL link
+				'is_archived' => true,     // marker: sourced from the DB, files gone
+				'is_upload'   => false,
+				'analysis_id' => 0,
+				'host'        => $host,
+				'url'         => (string) (isset($e->src_url) ? $e->src_url : ''),
+				'title'       => '',
+				'name'        => '',
+				'state'       => 'done',
+				'reviewable'  => true,     // -> "Review & Select" links to best_job
+				'count'       => (int) (isset($e->count) ? $e->count : 0),
+				'analysed'    => 0,
+				'cost_total'  => 0.0,
+				'keyword'     => '',
+				'ts'          => $ts,
+				'_sort'       => strtotime($ts) ?: 0,
+			);
+		}
+		return $rows;
+	}
+}
+
+if ( ! function_exists('competitor_job_archived_rows'))
+{
+	/**
+	 * Build listing rows from the durable crawl-JOB records (competitor_crawl_jobs) for
+	 * sites whose status files are gone — so a crawled site (including one that found 0
+	 * products, or errored) never drops off the listing. Groups records by host, faces
+	 * each with its BEST settled run (most products; ties keep the newest), and skips
+	 * hosts already shown by a live file-based group row.
+	 *
+	 * $records       crawl-job records (objects/arrays): job_id, host, src_url, state,
+	 *                product_count, keyword, competitor_name, cost_total, created_at.
+	 *                Only settled runs (done/error) are considered; in-flight ones are
+	 *                represented by live file views.
+	 * $covered_hosts hosts already shown by a live crawl group — skipped (no double row).
+	 * Pure; no DB/filesystem.
+	 */
+	function competitor_job_archived_rows($records, $covered_hosts)
+	{
+		$covered = array();
+		foreach ((is_array($covered_hosts) ? $covered_hosts : array()) as $h) {
+			$k = strtolower((string) $h);
+			if ($k !== '') { $covered[$k] = true; }
+		}
+		// Best settled run per host (max product_count; records arrive newest-first so a
+		// tie keeps the newest).
+		$best = array();
+		foreach ((is_array($records) ? $records : array()) as $r) {
+			$r     = (object) $r;
+			$host  = strtolower((string) (isset($r->host) ? $r->host : ''));
+			$state = (string) (isset($r->state) ? $r->state : '');
+			if ($host === '' || isset($covered[$host])
+				|| ! in_array($state, array('done', 'error'), true)) {
+				continue;
+			}
+			$cnt = (int) (isset($r->product_count) ? $r->product_count : 0);
+			if ( ! isset($best[$host]) || $cnt > $best[$host]['cnt']) {
+				$best[$host] = array('r' => $r, 'cnt' => $cnt);
+			}
+		}
+
+		$rows = array();
+		foreach ($best as $host => $b) {
+			$r  = $b['r'];
+			$ts = (string) (isset($r->created_at) ? $r->created_at : '');
+			$cnt = (int) (isset($r->product_count) ? $r->product_count : 0);
+			$reviewable = ((string) $r->state === 'done' && $cnt > 0);
+			$rows[] = array(
+				'job'         => (string) (isset($r->job_id) ? $r->job_id : ''),
+				'is_group'    => false,
+				'is_crawled'  => true,
+				'is_archived' => true,
+				'is_upload'   => false,
+				'analysis_id' => 0,
+				'host'        => $host,
+				'url'         => (string) (isset($r->src_url) ? $r->src_url : ''),
+				'title'       => '',
+				'name'        => (string) (isset($r->competitor_name) ? $r->competitor_name : ''),
+				'state'       => (string) $r->state,
+				'reviewable'  => $reviewable,
+				'count'       => $cnt,
+				'analysed'    => 0,
+				'cost_total'  => (float) (isset($r->cost_total) ? $r->cost_total : 0),
+				'keyword'     => (string) (isset($r->keyword) ? $r->keyword : ''),
+				'ts'          => $ts,
 				'_sort'       => strtotime($ts) ?: 0,
 			);
 		}

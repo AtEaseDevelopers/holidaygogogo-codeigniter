@@ -397,11 +397,19 @@ check('group_crawls flags is_group', true, $cg[0]['is_group']);
 check('group_crawls counts runs', 2, $cg[0]['runs_count']);
 check('group_crawls sums cost across runs', 0.5, round($cg[0]['cost_total'], 2));
 check('group_crawls sums analysed across runs', 3, $cg[0]['analysed']);
-check('group_crawls shows latest run product count', 6, $cg[0]['count']);
+check('group_crawls shows best run product count', 6, $cg[0]['count']);
 check('group_crawls uses latest run url', 'https://www.acme.com/tour-2', $cg[0]['url']);
 check('group_crawls uses latest run ts', '2026-09-03 09:00:00', $cg[0]['ts']);
 check('group_crawls done host is reviewable', true, $cg[0]['reviewable']);
 check('group_crawls done host not running', false, $cg[0]['running']);
+// A later empty/flaky re-crawl must NOT hide an earlier good crawl's product count.
+$cg_best = competitor_group_crawl_jobs(array(
+    competitor_job_public_view(array('job' => 'good',  'url' => 'https://tr.com/a', 'state' => 'done', 'count' => 72, 'ts' => '2026-09-28 17:53:00')),
+    competitor_job_public_view(array('job' => 'empty', 'url' => 'https://tr.com/b', 'state' => 'done', 'count' => 0,  'ts' => '2026-09-28 17:57:00')),
+));
+check('group_crawls best-run count beats later empty re-crawl', 72, $cg_best[0]['count']);
+check('group_crawls best_job points at the good run', 'good', $cg_best[0]['best_job']);
+check('group_crawls keeps newest ts for recency', '2026-09-28 17:57:00', $cg_best[0]['ts']);
 // A host with a run still in progress surfaces the running state on the merged row.
 $cg_run = competitor_group_crawl_jobs(array(
     competitor_job_public_view(array('job' => 'r1', 'url' => 'https://live.com/a', 'state' => 'done',
@@ -2215,6 +2223,83 @@ check('ui_labels en traveller_suitability', 'Suitability by Traveller Type', com
 check('ui_labels en segment label', 'Family with Elderly', competitor_ui_labels('en')['seg_family_elderly']);
 check('ui_labels cn segment label', '亲子家庭', competitor_ui_labels('cn')['seg_family_kids']);
 check('ui_labels cn suitability level', '高', competitor_ui_labels('cn')['suit_high']);
+
+// ---- competitor_crawl_items_for_db (persist crawled products to DB) ----
+$cci_raw = array(
+    array('url' => 'https://x.com/a', 'text' => 'Tour A details', 'title' => 'Tour A'),
+    array('url' => 'https://x.com/b', 'text' => 'Tour B',         'title' => ''),   // blank title -> null
+    array('url' => '',                'text' => ''),                                 // empty slot -> skipped
+);
+$cci_rows = competitor_crawl_items_for_db($cci_raw, array('feature' => 'competitor', 'job_id' => 'J1', 'src_url' => 'https://www.x.com/list'));
+check('crawl_items skips empty slot', 2, count($cci_rows));
+check('crawl_items idx preserved 0', 0, $cci_rows[0]['idx']);
+check('crawl_items idx preserved 1', 1, $cci_rows[1]['idx']);          // index survives even though slot 2 skipped
+check('crawl_items host from src_url (www stripped)', 'x.com', $cci_rows[0]['host']);
+check('crawl_items blank title -> null', null, $cci_rows[1]['title']);
+check('crawl_items real title kept', 'Tour A', $cci_rows[0]['title']);
+check('crawl_items job_id carried', 'J1', $cci_rows[0]['job_id']);
+check('crawl_items feature carried', 'competitor', $cci_rows[0]['feature']);
+check('crawl_items text kept', 'Tour A details', $cci_rows[0]['item_text']);
+check('crawl_items src_url kept', 'https://www.x.com/list', $cci_rows[0]['src_url']);
+// host falls back to the item's own URL when the source is a non-URL label (pasted text)
+$cci_fb = competitor_crawl_items_for_db(array(array('url' => 'https://www.foo.com/p', 'text' => 't')), array('src_url' => 'Pasted text'));
+check('crawl_items host falls back to item url', 'foo.com', $cci_fb[0]['host']);
+check('crawl_items empty input', array(), competitor_crawl_items_for_db(null));
+check('crawl_items non-array item skipped', 0, count(competitor_crawl_items_for_db(array('junk', 5))));
+
+// ---- competitor_items_from_db_rows (rebuild items/analysed from durable DB) ----
+$cifdb = competitor_items_from_db_rows(array(
+    (object) array('idx' => 0, 'url' => 'https://x.com/a', 'title' => 'A',  'item_text' => 'ta', 'analysis_id' => 55),
+    (object) array('idx' => 2, 'url' => 'https://x.com/c', 'title' => '',   'item_text' => 'tc', 'analysis_id' => 0),
+));
+check('db items keyed by stored idx', array(0, 2), array_keys($cifdb['items']));
+check('db item url', 'https://x.com/a', $cifdb['items'][0]['url']);
+check('db item text at idx 2', 'tc', $cifdb['items'][2]['text']);
+check('db analysed only when linked', 1, count($cifdb['analysed']));
+check('db analysed id carried', 55, $cifdb['analysed']['0']['id']);
+check('db empty input', array('items' => array(), 'analysed' => array()), competitor_items_from_db_rows(null));
+
+// ---- competitor_archived_host_rows (DB-sourced listing rows when files are gone) ----
+$arch_eps = array(
+    (object) array('host' => 'gd.my',       'count' => 755, 'best_job' => 'job_gd',  'last_at' => '2026-09-28 17:26:00', 'src_url' => 'https://www.gd.my/'),
+    (object) array('host' => 'bestholiday.com.my', 'count' => 60, 'best_job' => 'job_bh', 'last_at' => '2026-09-27 00:05:00', 'src_url' => 'https://bestholiday.com.my/'),
+    (object) array('host' => 'nojob.com',    'count' => 3,   'best_job' => '',         'last_at' => '2026-09-01 00:00:00', 'src_url' => 'https://nojob.com/'),
+);
+// gd.my is still shown by a live crawl -> skipped; nojob has no best_job -> skipped.
+$arch = competitor_archived_host_rows($arch_eps, array('GD.MY'));
+check('archived skips covered + jobless hosts', 1, count($arch));
+check('archived row host', 'bestholiday.com.my', $arch[0]['host']);
+check('archived row reviews best_job', 'job_bh', $arch[0]['job']);
+check('archived row reviewable', true, $arch[0]['reviewable']);
+check('archived row not a group', false, $arch[0]['is_group']);
+check('archived row tagged crawled', true, $arch[0]['is_crawled']);
+check('archived row distinct count', 60, $arch[0]['count']);
+check('archived row url is site', 'https://bestholiday.com.my/', $arch[0]['url']);
+check('archived none when all covered', 0, count(competitor_archived_host_rows($arch_eps, array('gd.my','bestholiday.com.my'))));
+check('archived empty input', array(), competitor_archived_host_rows(null, null));
+
+// ---- competitor_job_archived_rows (listing rows from durable crawl-job records) ----
+$jar_recs = array(
+    // bestholiday: two runs — the 60-product one wins over a later empty re-crawl.
+    (object) array('job_id' => 'bh2', 'host' => 'bestholiday.com.my', 'src_url' => 'https://bestholiday.com.my/', 'state' => 'done', 'product_count' => 0,  'created_at' => '2026-09-27 02:00:00', 'keyword' => '', 'competitor_name' => '', 'cost_total' => 0),
+    (object) array('job_id' => 'bh1', 'host' => 'bestholiday.com.my', 'src_url' => 'https://bestholiday.com.my/', 'state' => 'done', 'product_count' => 60, 'created_at' => '2026-09-27 00:05:00', 'keyword' => 'tour', 'competitor_name' => 'Best Holiday', 'cost_total' => 0.5),
+    // zero-product crawl still produces a row (so the site doesn't vanish), not reviewable.
+    (object) array('job_id' => 'ht1', 'host' => 'holidaytourstravel.com', 'src_url' => 'https://holidaytourstravel.com/', 'state' => 'done', 'product_count' => 0, 'created_at' => '2026-09-26 21:22:00', 'keyword' => '', 'competitor_name' => '', 'cost_total' => 0),
+    // still-running record is ignored (live file view represents it).
+    (object) array('job_id' => 'rn1', 'host' => 'running.com', 'src_url' => 'https://running.com/', 'state' => 'running', 'product_count' => 0, 'created_at' => '2026-09-29 00:00:00', 'keyword' => '', 'competitor_name' => '', 'cost_total' => 0),
+    // gd.my covered by a live crawl -> skipped.
+    (object) array('job_id' => 'gd1', 'host' => 'gd.my', 'src_url' => 'https://www.gd.my/', 'state' => 'done', 'product_count' => 731, 'created_at' => '2026-09-28 17:26:00', 'keyword' => '', 'competitor_name' => '', 'cost_total' => 1.2),
+);
+$jar = competitor_job_archived_rows($jar_recs, array('gd.my'));
+usort($jar, function($a,$b){ return strcmp($a['host'],$b['host']); });
+check('job_archived row count (bestholiday + holidaytours, not gd/running)', 2, count($jar));
+check('job_archived best run wins (60 not 0)', 60, $jar[0]['count']);
+check('job_archived reviews best run', 'bh1', $jar[0]['job']);
+check('job_archived carries competitor name', 'Best Holiday', $jar[0]['name']);
+check('job_archived best run reviewable', true, $jar[0]['reviewable']);
+check('job_archived zero-product row shown', 'holidaytourstravel.com', $jar[1]['host']);
+check('job_archived zero-product not reviewable', false, $jar[1]['reviewable']);
+check('job_archived empty input', array(), competitor_job_archived_rows(null, null));
 
 echo "\n" . ($failures === 0 ? "ALL PASS\n" : "{$failures} FAILURE(S)\n");
 exit($failures === 0 ? 0 : 1);

@@ -44,14 +44,30 @@ class Our_Product extends MY_Controller
 	{
 		$this->load->helper('competitor_analysis');
 		$job_id = preg_replace('/[^A-Za-z0-9_]/', '', (string) $this->input->get('job'));
-		$dir    = APPPATH . 'logs/our_product_crawl/jobs/';
-		$status = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
-		$items  = json_decode((string) @file_get_contents($dir . $job_id . '.items.json'), true);
-		if ($job_id === '' || ! is_array($status) || ! is_array($items)) {
+		if ($job_id === '') {
 			redirect(base_url('Our_Product'));
 			return;
 		}
-		$analysed = isset($status['analysed']) && is_array($status['analysed']) ? $status['analysed'] : array();
+		$dir    = APPPATH . 'logs/our_product_crawl/jobs/';
+		$status = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
+		$src_url  = (is_array($status) && isset($status['url'])) ? (string) $status['url'] : '';
+		$analysed = (is_array($status) && isset($status['analysed']) && is_array($status['analysed'])) ? $status['analysed'] : array();
+		// DB-FIRST: the durable competitor_crawl_items is the source of truth when present;
+		// the transient items file is only a fallback for old (pre-persist) crawls.
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$db = $this->Competitor_Crawl_Items_Model->Read_By_Job('our_product', $job_id);
+		if ( ! empty($db)) {
+			$shaped = competitor_items_from_db_rows($db);
+			$items  = $shaped['items'];
+			if (empty($analysed)) { $analysed = $shaped['analysed']; }
+			if ($src_url === '') { $src_url = (string) $db[0]->src_url; }
+		} else {
+			$items = json_decode((string) @file_get_contents($dir . $job_id . '.items.json'), true);
+		}
+		if ( ! is_array($items) || empty($items)) {
+			redirect(base_url('Our_Product'));
+			return;
+		}
 		$products = array();
 		foreach ($items as $i => $it) {
 			$text = isset($it['text']) ? (string) $it['text'] : '';
@@ -80,7 +96,7 @@ class Our_Product extends MY_Controller
 		$this->load->view('layout/header', $titles);
 		$this->load->view('our_product/review', array(
 			'job'      => $job_id,
-			'src_url'  => isset($status['url']) ? $status['url'] : '',
+			'src_url'  => $src_url,
 			'products' => $products,
 			'has_ai'   => (bool) get_env('OPENAI_API_KEY'),
 		));
@@ -108,9 +124,28 @@ class Our_Product extends MY_Controller
 		$dir     = APPPATH . 'logs/our_product_crawl/jobs/';
 		$status  = json_decode((string) @file_get_contents($dir . $src_id . '.json'), true);
 		$items_file = $dir . $src_id . '.items.json';
-		if ($src_id === '' || ! is_array($status) || ! is_file($items_file)) {
+		if ($src_id === '') {
 			echo json_encode(array('success' => false, 'message' => 'Crawl not found.'));
 			return;
+		}
+		// DB-FIRST: (re)materialise the items file from the durable competitor_crawl_items
+		// when it has this crawl, so the analyse worker reads the authoritative products;
+		// fall back to the existing file only for old (pre-persist) crawls.
+		$this->load->helper('competitor_analysis');
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$db = $this->Competitor_Crawl_Items_Model->Read_By_Job('our_product', $src_id);
+		if ( ! empty($db)) {
+			$shaped = competitor_items_from_db_rows($db);
+			@file_put_contents($items_file, json_encode($shaped['items'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+			if ( ! is_array($status)) {
+				$status = array('url' => (string) $db[0]->src_url);
+			}
+		} elseif ( ! is_file($items_file)) {
+			echo json_encode(array('success' => false, 'message' => 'Crawl not found.'));
+			return;
+		}
+		if ( ! is_array($status)) {
+			$status = array();
 		}
 		if (empty($indices)) {
 			echo json_encode(array('success' => false, 'message' => 'Select at least one product.'));
@@ -170,6 +205,9 @@ class Our_Product extends MY_Controller
 		}
 		@file_put_contents($items_file, json_encode($result['items'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 		@file_put_contents($status_file, json_encode($result['status'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+		// Keep the durable store in step so a deleted product can't resurrect from the DB fallback.
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$this->Competitor_Crawl_Items_Model->Delete_Items_By_Idx('our_product', $job_id, $indices);
 		echo json_encode(array('success' => true));
 	}
 

@@ -17,6 +17,77 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  */
 class Competitor_Product_Job extends CI_Controller
 {
+	/**
+	 * CLI one-shot: backfill competitor_crawl_items from every crawl items file still
+	 * on disk (both tools), so already-crawled products become durable immediately.
+	 * Idempotent (upsert on feature+job_id+idx). Run: php index.php Competitor_Product_Job backfill
+	 */
+	public function backfill()
+	{
+		if ( ! is_cli()) {
+			show_404();
+			return;
+		}
+		$this->load->helper('competitor_analysis');
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$this->load->model('Competitor_Crawl_Jobs_Model');
+		$this->db->db_debug    = false;   // don't dump failing queries to stdout
+		$this->db->save_queries = false;  // don't buffer every INSERT in memory
+		$dirs = array(
+			'competitor'  => APPPATH . 'logs/competitor_crawl/jobs/',
+			'our_product' => APPPATH . 'logs/our_product_crawl/jobs/',
+		);
+		$total_items = 0; $jobs = 0; $job_records = 0;
+		foreach ($dirs as $feature => $dir) {
+			// Products: upsert each surviving items file into competitor_crawl_items.
+			foreach (glob($dir . '*.items.json') ?: array() as $items_path) {
+				$job_id = preg_replace('/\.items\.json$/', '', basename($items_path));
+				$status = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
+				$items  = json_decode((string) @file_get_contents($items_path), true);
+				if ( ! is_array($items) || empty($items)) {
+					continue;
+				}
+				$src_url = is_array($status) && isset($status['url']) ? (string) $status['url'] : '';
+				$rows = competitor_crawl_items_for_db($items, array(
+					'feature' => $feature, 'job_id' => $job_id, 'src_url' => $src_url,
+				));
+				if ( ! empty($rows)) {
+					$this->Competitor_Crawl_Items_Model->Upsert_Many($feature, $rows);
+					$total_items += count($rows); $jobs++;
+				}
+			}
+			// Job records: upsert every settled CRAWL status file into competitor_crawl_jobs
+			// (incl. 0-product crawls whose items file is gone — e.g. bestholiday, arbatravel).
+			foreach (glob($dir . '*.json') ?: array() as $status_path) {
+				if (substr($status_path, -11) === '.items.json') { continue; }
+				$s = json_decode((string) @file_get_contents($status_path), true);
+				if ( ! is_array($s)) { continue; }
+				$mode  = isset($s['mode']) ? (string) $s['mode'] : 'crawl';
+				$state = isset($s['state']) ? (string) $s['state'] : '';
+				if ($mode !== 'crawl' || ! in_array($state, array('done', 'error'), true)) { continue; }
+				$job_id = preg_replace('/\.json$/', '', basename($status_path));
+				$url    = isset($s['url']) ? (string) $s['url'] : '';
+				$this->Competitor_Crawl_Jobs_Model->Upsert_Job($feature, array(
+					'job_id'          => $job_id,
+					'host'            => competitor_job_host($url),
+					'src_url'         => $url,
+					'mode'            => 'crawl',
+					'state'           => $state,
+					'product_count'   => isset($s['count']) ? (int) $s['count'] : 0,
+					'keyword'         => isset($s['keyword']) ? (string) $s['keyword'] : '',
+					'ai_crawl'        => ! empty($s['ai_crawl']),
+					'competitor_name' => isset($s['competitor_name']) ? (string) $s['competitor_name'] : '',
+					'cost_total'      => isset($s['cost_total']) ? (float) $s['cost_total'] : 0,
+					'created_at'      => isset($s['created']) ? (string) $s['created'] : (isset($s['ts']) ? (string) $s['ts'] : ''),
+				));
+				$job_records++;
+			}
+		}
+		echo "Backfill done: {$total_items} items from {$jobs} crawl job(s); {$job_records} job record(s). "
+			. "DB holds " . (int) $this->db->count_all('competitor_crawl_items') . " items, "
+			. (int) $this->db->count_all('competitor_crawl_jobs') . " job records.\n";
+	}
+
 	public function run($job_id = '')
 	{
 		if ( ! is_cli()) {
@@ -245,6 +316,10 @@ class Competitor_Product_Job extends CI_Controller
 			}
 			$items = $this->competitoranalysisservice->crawl_to_text($url, $limit, $progress, $keyword, $ai_crawl);
 			@file_put_contents($items_file, json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+			// Durably persist the crawled products to the DB (the items file is a cache
+			// that re-crawls overwrite and cleanups delete). Idempotent upsert keyed on
+			// (feature, job_id, idx); guarded so a DB hiccup can't fail the crawl itself.
+			$this->persist_crawl_items('competitor', (string) $job['job'], $url, $items);
 
 			// AI-crawl discovery (web_search) spends tokens that aren't tied to any saved
 			// product — seed the crawl's running cost with it so the AI Cost column reflects
@@ -264,11 +339,83 @@ class Competitor_Product_Job extends CI_Controller
 			} else {
 				$write(array('state' => 'done', 'phase' => 'reading', 'done' => $n, 'total' => $n,
 					'count' => $n, 'items_file' => $items_file, 'cost_total' => round($crawl_cost, 6)));
+				// Durable job record at the terminal state (one write, no per-tick churn) so
+				// the listing survives loss of the status file — even a 0-product crawl.
+				$this->persist_job_record('competitor', $job, 'done', $n, $crawl_cost);
 			}
 		} catch (Exception $e) {
 			$write(array('state' => 'error', 'message' => $e->getMessage()));
+			$this->persist_job_record('competitor', $job, 'error', 0, 0);
 		} finally {
 			$this->release_crawl_lock($lock);   // let the next queued crawl proceed
+		}
+	}
+
+	/**
+	 * Upsert a crawl's discovered products into competitor_crawl_items so they are
+	 * durable (the jobs/<id>.items.json file is only a cache). Best-effort: any failure
+	 * is logged and swallowed — the crawl's own success does not depend on it.
+	 */
+	private function persist_crawl_items($feature, $job_id, $src_url, $items)
+	{
+		try {
+			$this->load->helper('competitor_analysis');
+			$this->load->model('Competitor_Crawl_Items_Model');
+			$rows = competitor_crawl_items_for_db($items, array(
+				'feature' => $feature,
+				'job_id'  => $job_id,
+				'src_url' => $src_url,
+			));
+			if ( ! empty($rows)) {
+				$this->Competitor_Crawl_Items_Model->Upsert_Many($feature, $rows);
+			}
+		} catch (Exception $e) {
+			log_message('error', 'persist_crawl_items failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Upsert the durable crawl-job record at a terminal state (done/error). Best-effort;
+	 * a DB hiccup never fails the crawl. Called once per run, not per progress tick.
+	 */
+	private function persist_job_record($feature, $job, $state, $count, $cost)
+	{
+		try {
+			$this->load->helper('competitor_analysis');
+			$this->load->model('Competitor_Crawl_Jobs_Model');
+			$url = isset($job['url']) ? (string) $job['url'] : '';
+			$this->Competitor_Crawl_Jobs_Model->Upsert_Job($feature, array(
+				'job_id'          => isset($job['job']) ? (string) $job['job'] : '',
+				'host'            => competitor_job_host($url),
+				'src_url'         => $url,
+				'mode'            => 'crawl',
+				'state'           => (string) $state,
+				'product_count'   => (int) $count,
+				'keyword'         => isset($job['keyword']) ? (string) $job['keyword'] : '',
+				'ai_crawl'        => ! empty($job['ai_crawl']),
+				'competitor_name' => isset($job['competitor_name']) ? (string) $job['competitor_name'] : '',
+				'cost_total'      => (float) $cost,
+				'created_at'      => isset($job['created']) ? (string) $job['created'] : '',
+			));
+		} catch (Exception $e) {
+			log_message('error', 'persist_job_record failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Link a durable crawl item (feature + crawl job + index) to the analysis row it
+	 * produced, so the DB knows which crawled products are analysed. Best-effort.
+	 */
+	private function persist_analysis_link($feature, $src_job, $idx, $analysis_id)
+	{
+		if ($src_job === '' || (int) $analysis_id <= 0) {
+			return;
+		}
+		try {
+			$this->load->model('Competitor_Crawl_Items_Model');
+			$this->Competitor_Crawl_Items_Model->Mark_Analysed($feature, $src_job, (int) $idx, (int) $analysis_id);
+		} catch (Exception $e) {
+			log_message('error', 'persist_analysis_link failed: ' . $e->getMessage());
 		}
 	}
 
@@ -383,6 +530,8 @@ class Competitor_Product_Job extends CI_Controller
 						// Persist each completed save so the listing updates during the
 						// run and a later failure cannot lose links to earlier DB rows.
 						$this->merge_crawl_analysed($job, array((string) $i => $results[(string) $i]), (float) $site['cost_usd']);
+						// Link the durable crawl item to the analysis row it produced.
+						$this->persist_analysis_link('competitor', isset($job['src_job']) ? (string) $job['src_job'] : '', (int) $i, $id);
 					}
 				} catch (Exception $e) {
 					log_message('error', 'CompetitorJob analyse item failed: ' . $e->getMessage());
