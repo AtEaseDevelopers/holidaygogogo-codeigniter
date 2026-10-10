@@ -2917,6 +2917,31 @@ if ( ! function_exists('competitor_job_public_view'))
 	}
 }
 
+if ( ! function_exists('competitor_crawl_save_progress'))
+{
+	/** Compare a crawl's per-item analysis references with existing DB IDs. Pure. */
+	function competitor_crawl_save_progress($status, $saved_ids)
+	{
+		$total = max(0, (int) (isset($status['count']) ? $status['count'] : 0));
+		$saved = 0;
+		$missing = 0;
+		$references = isset($status['analysed']) && is_array($status['analysed']) ? $status['analysed'] : array();
+		foreach ($references as $reference) {
+			$id = is_array($reference) && isset($reference['id']) ? (int) $reference['id'] : 0;
+			if ($id > 0 && isset($saved_ids[$id])) { $saved++; }
+			else { $missing++; }
+		}
+		$state = isset($status['state']) ? $status['state'] : '';
+		if (in_array($state, array('queued', 'running'), true)) { $db_status = 'waiting'; }
+		elseif ($missing > 0) { $db_status = 'missing'; }
+		elseif ($total === 0) { $db_status = 'empty'; }
+		elseif ($saved === 0) { $db_status = 'not_saved'; }
+		elseif ($saved >= $total) { $db_status = 'saved'; }
+		else { $db_status = 'partial'; }
+		return array('db_status' => $db_status, 'db_saved' => $saved, 'db_total' => $total, 'db_missing' => $missing);
+	}
+}
+
 if ( ! function_exists('competitor_job_host'))
 {
 	/**
@@ -2991,6 +3016,7 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 			// "queued" (the running work is what matters to the user).
 			$active_running = null;
 			$active_queued  = null;
+			$active_analysis = null;
 			foreach ($runs as $r) {
 				$cost     += (float) (isset($r['cost_total']) ? $r['cost_total'] : 0);
 				$analysed += (int) (isset($r['analysed']) ? $r['analysed'] : 0);
@@ -3005,11 +3031,16 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 				if ( ! empty($r['reviewable'])) {
 					$reviewable = true;
 				}
+				$analysis_state = isset($r['analysis_state']) ? $r['analysis_state'] : '';
+				if (in_array($analysis_state, array('queued', 'running'), true)
+					&& ($active_analysis === null || ($analysis_state === 'running' && $active_analysis['analysis_state'] !== 'running'))) {
+					$active_analysis = $r;
+				}
 			}
 			$active = $active_running !== null ? $active_running : $active_queued;
 			$face = $active !== null ? $active : $latest;
 
-			$rows[] = array(
+			$row = array(
 				'is_group'   => true,
 				'host'       => $host,
 				'url'        => (string) (isset($latest['url']) ? $latest['url'] : ''),
@@ -3031,6 +3062,17 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 				'running'    => $running,
 				'reviewable' => $reviewable,
 			);
+			// Save counts match the latest run's product count. An analysis of an
+			// earlier run can still be active; identify that scope explicitly.
+			foreach (array('db_status', 'db_saved', 'db_total', 'db_missing', 'analysis_state', 'analysis_done', 'analysis_total') as $key) {
+				if (isset($latest[$key])) { $row[$key] = $latest[$key]; }
+			}
+			if ($active_analysis !== null) {
+				$row['db_status'] = $active_analysis['db_status'];
+				foreach (array('analysis_state', 'analysis_done', 'analysis_total') as $key) { $row[$key] = $active_analysis[$key]; }
+				$row['analysis_earlier_crawl'] = $active_analysis['job'] !== $latest['job'];
+			}
+			$rows[] = $row;
 		}
 
 		// Newest-crawled host first.

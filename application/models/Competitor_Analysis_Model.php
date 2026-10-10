@@ -98,7 +98,7 @@ class Competitor_Analysis_Model extends CI_Model
 	 * shown as rows in the main results table alongside crawls. Tagged rows come from
 	 * the `source` column; the url-prefix clause keeps legacy uploads (source NULL,
 	 * filename url) while still excluding site-crawl / crawl-analysed http rows.
-	 * Newest first, capped.
+	 * Newest first; a positive limit caps the result, 0 returns every row.
 	 */
 	function Read_Uploads($limit = 20)
 	{
@@ -106,7 +106,9 @@ class Competitor_Analysis_Model extends CI_Model
 		$this->db->where('feature', $this->feature);
 		$this->db->where("(source IN ('upload','paste') OR (source IS NULL AND url NOT LIKE 'http%'))", null, false);
 		$this->db->order_by('id', 'DESC');
-		$this->db->limit((int) $limit);
+		if ((int) $limit > 0) {
+			$this->db->limit((int) $limit);
+		}
 		return $this->db->get('competitor_analyses')->result();
 	}
 
@@ -114,7 +116,7 @@ class Competitor_Analysis_Model extends CI_Model
 	 * Crawl-analysed rows (a pasted/URL crawl, not an upload/paste) — the
 	 * complement of Read_Uploads. These are re-hydrated into the results listing
 	 * so a saved crawl analysis keeps showing when its crawl job files are
-	 * missing. Newest first, capped.
+	 * missing. Newest first; a positive limit caps the result, 0 returns every row.
 	 */
 	function Read_Crawl_Analyses($limit = 30)
 	{
@@ -122,7 +124,9 @@ class Competitor_Analysis_Model extends CI_Model
 		$this->db->where('feature', $this->feature);
 		$this->db->where("url LIKE 'http%' AND (source IS NULL OR source NOT IN ('upload','paste'))", null, false);
 		$this->db->order_by('id', 'DESC');
-		$this->db->limit((int) $limit);
+		if ((int) $limit > 0) {
+			$this->db->limit((int) $limit);
+		}
 		return $this->db->get('competitor_analyses')->result();
 	}
 

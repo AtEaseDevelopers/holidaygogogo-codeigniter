@@ -369,12 +369,13 @@ class Competitor_Product extends MY_Controller
 	 * is omitted (its saved DB row is folded in by the listing); transient analyse
 	 * jobs are skipped. Each view carries a '_sort' (file mtime) for recency order.
 	 */
-	private function read_job_views()
+	private function read_job_views($saved_analysis_ids = null)
 	{
 		$dir = APPPATH . 'logs/competitor_crawl/jobs/';
 		$crawls  = array();
 		$singles = array();
 		$running = false;
+		$analyses = array();
 		foreach (glob($dir . '*.json') ?: array() as $path) {
 			if (substr($path, -11) === '.items.json') {
 				continue;   // crawled-text sidecar, not a status file
@@ -403,7 +404,13 @@ class Competitor_Product extends MY_Controller
 			// Analyse jobs are transient (driven from the Review page), and translate
 			// jobs just cache a language overlay — neither is listed as its own
 			// "Crawled Results" row.
-			if ($mode === 'analyse' || $mode === 'translate') {
+			if ($mode === 'analyse') {
+				$s['_sort'] = filemtime($path);
+				$analyses[] = $s;
+				if (in_array($s['state'], array('queued', 'running'), true)) { $running = true; }
+				continue;
+			}
+			if ($mode === 'translate') {
 				continue;
 			}
 			// A FINISHED paste/upload job is shown via its saved DB row (folded in by
@@ -429,11 +436,49 @@ class Competitor_Product extends MY_Controller
 				}
 			}
 			if ($view['mode'] === 'crawl') {
+				if ($saved_analysis_ids !== null) {
+					$view = array_merge($view, competitor_crawl_save_progress($s, $saved_analysis_ids));
+				}
 				$crawls[] = $view;
 			} else {
 				$singles[] = $view;   // in-progress paste
 			}
 		}
+		// Index analyse jobs by source crawl. Old jobs without src_job can still
+		// expose active progress by host, without guessing which run saved items.
+		$by_job = array();
+		$legacy_by_host = array();
+		usort($analyses, function ($a, $b) {
+			$a_active = $a['state'] === 'running' ? 2 : ($a['state'] === 'queued' ? 1 : 0);
+			$b_active = $b['state'] === 'running' ? 2 : ($b['state'] === 'queued' ? 1 : 0);
+			return ($b_active - $a_active) ?: ($b['_sort'] - $a['_sort']);
+		});
+		foreach ($analyses as $analysis) {
+			$src = isset($analysis['src_job']) ? (string) $analysis['src_job'] : '';
+			$host = competitor_job_host(isset($analysis['url']) ? $analysis['url'] : '');
+			if ($src !== '' && ! isset($by_job[$src])) { $by_job[$src] = $analysis; }
+			elseif ($src === '' && $host !== '' && in_array($analysis['state'], array('queued', 'running'), true)
+				&& ! isset($legacy_by_host[$host])) { $legacy_by_host[$host] = $analysis; }
+		}
+		foreach ($crawls as &$view) {
+			$host = competitor_job_host($view['url']);
+			$analysis = isset($by_job[$view['job']]) ? $by_job[$view['job']]
+				: (isset($legacy_by_host[$host]) ? $legacy_by_host[$host] : null);
+			$view['analysis_state'] = '';
+			$view['analysis_done'] = 0;
+			$view['analysis_total'] = 0;
+			if ($analysis === null) { continue; }
+			$state = $analysis['state'];
+			if ($state === 'done' && isset($analysis['count'], $analysis['total'])
+				&& (int) $analysis['count'] < (int) $analysis['total']) { $state = 'error'; }
+			$view['analysis_state'] = $state;
+			$view['analysis_done'] = (int) (isset($analysis['done']) ? $analysis['done'] : 0);
+			$view['analysis_total'] = (int) (isset($analysis['total']) ? $analysis['total'] : 0);
+			if ($saved_analysis_ids !== null && in_array($state, array('queued', 'running', 'error'), true)) {
+				$view['db_status'] = $state === 'queued' ? 'analysis_queued' : ($state === 'running' ? 'analysing' : 'error');
+			}
+		}
+		unset($view);
 		return array('crawls' => $crawls, 'singles' => $singles, 'running' => $running);
 	}
 
@@ -442,7 +487,7 @@ class Competitor_Product extends MY_Controller
 	 * website are MERGED into one row per host (competitor_group_crawl_jobs) — the
 	 * per-run history lives behind the Timeline page — while pasted text/links and
 	 * uploaded PDFs/images stay as their own rows. Returns
-	 * {jobs: [...], running: <bool>}.
+	 * {jobs: [...current page...], running: <bool>, cost_total, pagination}.
 	 */
 	function Jobs_List()
 	{
@@ -451,7 +496,12 @@ class Competitor_Product extends MY_Controller
 			return;
 		}
 		$this->output->set_content_type('application/json');
-		$collected = $this->read_job_views();
+		$crawl_analyses = $this->Competitor_Analysis_Model->Read_Crawl_Analyses(0);
+		$saved_analysis_ids = array();
+		foreach ($crawl_analyses as $analysis) {
+			if ($analysis->status === 'done') { $saved_analysis_ids[(int) $analysis->id] = true; }
+		}
+		$collected = $this->read_job_views($saved_analysis_ids);
 		$running   = $collected['running'];
 
 		// One merged row per crawled website; recency = its latest run's timestamp.
@@ -474,12 +524,12 @@ class Competitor_Product extends MY_Controller
 			}
 		}
 		$jobs = array_merge($jobs, competitor_orphan_crawl_rows(
-			$this->Competitor_Analysis_Model->Read_Crawl_Analyses(30), $covered_hosts, 'host'
+			$crawl_analyses, $covered_hosts, 'host'
 		));
 
 		// Fold in single (non-crawl) analyses — uploaded PDFs/images and pasted
 		// text/links — so they share the one results table.
-		foreach ($this->Competitor_Analysis_Model->Read_Uploads(20) as $u) {
+		foreach ($this->Competitor_Analysis_Model->Read_Uploads(0) as $u) {
 			$ts       = (string) $u->created_at;
 			$is_paste = ($u->source === 'paste');
 			$jobs[] = array(
@@ -496,6 +546,10 @@ class Competitor_Product extends MY_Controller
 				'count'        => 1,
 				'analysed'     => 1,
 				'cost_total'   => (float) $u->cost_usd,
+				'db_status'    => 'saved',
+				'db_saved'     => 1,
+				'db_total'     => 1,
+				'db_missing'   => 0,
 				'ts'           => $ts,
 				'keyword'      => '',
 				'reviewable'   => false,
@@ -505,12 +559,91 @@ class Competitor_Product extends MY_Controller
 				'_sort'        => strtotime($ts) ?: 0,
 			);
 		}
+		foreach ($jobs as &$job) {
+			if ( ! isset($job['db_status'])) {
+				$job['db_status'] = ! empty($job['analysis_id']) ? 'saved'
+					: ($job['state'] === 'error' ? 'error' : ($job['state'] === 'queued' ? 'analysis_queued' : 'analysing'));
+				$job['db_saved'] = ! empty($job['analysis_id']) ? 1 : 0;
+				$job['db_total'] = 1;
+				$job['db_missing'] = 0;
+			}
+		}
+		unset($job);
 
-		usort($jobs, function ($a, $b) { return $b['_sort'] - $a['_sort']; });
-		$jobs = array_slice($jobs, 0, 30);
+		usort($jobs, function ($a, $b) {
+			$order = $b['_sort'] - $a['_sort'];
+			$key_a = isset($a['job']) ? $a['job'] : 'host_' . $a['host'];
+			$key_b = isset($b['job']) ? $b['job'] : 'host_' . $b['host'];
+			return $order ?: strcmp($key_b, $key_a);
+		});
+		$total_results = count($jobs);
+		$total_cost = 0.0;
+		foreach ($jobs as $j) {
+			$total_cost += (float) (isset($j['cost_total']) ? $j['cost_total'] : 0);
+		}
+		// Status filters apply to the complete history before
+		// pagination. Unknown values are discarded; an empty selection means all.
+		$filters = array(
+			'status' => array('queued', 'running', 'done', 'error'),
+			'db_status' => array('waiting', 'not_saved', 'partial', 'saved', 'analysis_queued', 'analysing', 'error', 'missing', 'empty'),
+		);
+		$selected_filters = array();
+		foreach ($filters as $key => $allowed) {
+			$raw = $this->input->get($key);
+			$values = is_string($raw) ? explode(',', $raw) : (is_array($raw) ? $raw : array());
+			$values = array_values(array_intersect($allowed, array_filter($values, 'is_string')));
+			$selected_filters[$key] = $values;
+		}
+
+		// Search the complete merged history BEFORE paging, so older results can
+		// always be found. The cost and running flag cover the complete history.
+		$search = $this->input->get('search');
+		$search = is_string($search) ? trim($search) : '';
+		if ($search !== '') {
+			$jobs = array_values(array_filter($jobs, function ($j) use ($search) {
+				$parts = array();
+				foreach (array('url', 'host', 'name', 'title', 'keyword') as $key) {
+					if (isset($j[$key])) { $parts[] = (string) $j[$key]; }
+				}
+				return mb_stripos(implode(' ', $parts), $search, 0, 'UTF-8') !== false;
+			}));
+		}
+		// Like FAQ Suggestions, dropdown counts span all pages and honour search
+		// and the other dropdown, so users can see the available status choices.
+		$filter_counts = array();
+		foreach ($filters as $key => $allowed) {
+			$field = $key === 'status' ? 'state' : 'db_status';
+			$other = $key === 'status' ? 'db_status' : 'status';
+			$other_field = $other === 'status' ? 'state' : 'db_status';
+			$filter_counts[$key] = array_fill_keys($allowed, 0);
+			$filter_counts[$key]['all'] = 0;
+			foreach ($jobs as $job) {
+				if ($selected_filters[$other] && ! in_array($job[$other_field], $selected_filters[$other], true)) { continue; }
+				$filter_counts[$key]['all']++;
+				if (isset($filter_counts[$key][$job[$field]])) { $filter_counts[$key][$job[$field]]++; }
+			}
+		}
+		foreach ($selected_filters as $key => $values) {
+			if ( ! $values) { continue; }
+			$field = $key === 'status' ? 'state' : 'db_status';
+			$jobs = array_values(array_filter($jobs, function ($job) use ($field, $values) {
+				return in_array($job[$field], $values, true);
+			}));
+		}
+		$page_size = (int) $this->input->get('page_size');
+		$page_size = in_array($page_size, array(25, 50, 100), true) ? $page_size : 25;
+		$total = count($jobs);
+		$pages = max(1, (int) ceil($total / $page_size));
+		$page = min($pages, max(1, (int) $this->input->get('page')));
+		$offset = ($page - 1) * $page_size;
+		$jobs = array_slice($jobs, $offset, $page_size);
 		foreach ($jobs as &$j) { unset($j['_sort']); }
+		unset($j);
 
-		echo json_encode(array('jobs' => $jobs, 'running' => $running));
+		echo json_encode(array('jobs' => $jobs, 'running' => $running, 'cost_total' => $total_cost, 'filter_counts' => $filter_counts,
+			'pagination' => array('page' => $page, 'page_size' => $page_size, 'pages' => $pages,
+				'total' => $total, 'total_results' => $total_results, 'search' => $search, 'filters' => $selected_filters,
+				'start' => $total > 0 ? $offset + 1 : 0, 'end' => $offset + count($jobs))));
 	}
 
 	/** Sanitise a ?host= param to a bare hostname (a-z 0-9 . -), lowercased. */

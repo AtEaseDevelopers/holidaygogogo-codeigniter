@@ -48,6 +48,7 @@ class Competitor_Product_Job extends CI_Controller
 				'competitor_name' => isset($job['competitor_name']) ? $job['competitor_name'] : '', // user label (persist across writes)
 				'created'      => isset($job['created']) ? $job['created'] : date('Y-m-d H:i:s'),   // fixed submit time
 				'src'          => isset($job['src']) ? $job['src'] : '',   // discovery source (persist for resume headless gating)
+				'src_job'      => isset($job['src_job']) ? $job['src_job'] : '', // keep analysis linked to its crawl for listing progress
 				'ts'           => date('Y-m-d H:i:s'),
 			);
 			@file_put_contents($status_file, json_encode(array_merge($base, $data), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -99,6 +100,7 @@ class Competitor_Product_Job extends CI_Controller
 			$record['competitor_name'] = isset($job['competitor_name']) ? $job['competitor_name'] : null;
 			$record['created_by']      = isset($job['created_by']) ? $job['created_by'] : null;
 			$id = (int) $this->Competitor_Analysis_Model->Create($record);
+			if ($id <= 0) { throw new Exception('Could not save the analysis to the database.'); }
 			@unlink($file);
 			$write(array('state' => 'done', 'phase' => 'analysing', 'done' => 1, 'total' => 1,
 				'count' => 1, 'analysis_id' => $id, 'cost_total' => (float) $record['cost_usd']));
@@ -136,6 +138,7 @@ class Competitor_Product_Job extends CI_Controller
 			$record['competitor_name'] = isset($job['competitor_name']) ? $job['competitor_name'] : null;
 			$record['created_by']      = isset($job['created_by']) ? $job['created_by'] : null;
 			$id = (int) $this->Competitor_Analysis_Model->Create($record);
+			if ($id <= 0) { throw new Exception('Could not save the analysis to the database.'); }
 			$write(array('state' => 'done', 'phase' => 'analysing', 'done' => 1, 'total' => 1,
 				'count' => 1, 'analysis_id' => $id, 'cost_total' => (float) $record['cost_usd']));
 		} catch (Exception $e) {
@@ -374,19 +377,24 @@ class Competitor_Product_Job extends CI_Controller
 						$rec['competitor_name'] = isset($job['competitor_name']) ? $job['competitor_name'] : null;
 						$rec['created_by']      = isset($job['created_by']) ? $job['created_by'] : null;
 						$id = (int) $this->Competitor_Analysis_Model->Create($rec);
+						if ($id <= 0) { throw new Exception('Could not save the analysis to the database.'); }
 						$results[(string) $i] = array('id' => $id, 'cost' => (float) $site['cost_usd'], 'at' => date('Y-m-d H:i:s'));
 						$total_cost += (float) $site['cost_usd'];
+						// Persist each completed save so the listing updates during the
+						// run and a later failure cannot lose links to earlier DB rows.
+						$this->merge_crawl_analysed($job, array((string) $i => $results[(string) $i]), (float) $site['cost_usd']);
 					}
 				} catch (Exception $e) {
 					log_message('error', 'CompetitorJob analyse item failed: ' . $e->getMessage());
 				}
-				$write(array('state' => 'running', 'phase' => 'analysing', 'done' => ++$done, 'total' => $n));
+				$write(array('state' => 'running', 'phase' => 'analysing', 'done' => ++$done, 'total' => $n,
+					'count' => count($results), 'results' => $results));
 			}
-			$this->merge_crawl_analysed($job, $results, $total_cost);
 			// Carry the per-index results ({id,cost,at}) on the done status so the Review
 			// page can update just the analysed rows in place (no full reload) after it
 			// polls Job_State — the user may have kept the page open in the background.
-			$write(array('state' => 'done', 'phase' => 'analysing', 'done' => $n, 'total' => $n, 'count' => count($results), 'results' => $results));
+			$write(array('state' => 'done', 'phase' => 'analysing', 'done' => $n, 'total' => $n,
+				'count' => count($results), 'results' => $results, 'cost_total' => $total_cost));
 		} catch (Exception $e) {
 			$write(array('state' => 'error', 'message' => $e->getMessage()));
 		}

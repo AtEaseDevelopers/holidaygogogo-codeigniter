@@ -119,6 +119,57 @@
                 </div>
             </div>
             <div class="card-body">
+                <form id="jobs_filter_form" class="mb-4">
+                    <div class="row align-items-end">
+                        <div class="col-md-3 form-group">
+                            <label for="jobs_status_filter">Process Status</label>
+                            <select id="jobs_status_filter" class="form-control" name="status">
+                                <option value="" data-label="All">All</option>
+                                <?php foreach (array('queued'=>'Queued', 'running'=>'In Progress', 'done'=>'Completed', 'error'=>'Error') as $value=>$label) { ?>
+                                <option value="<?php echo $value; ?>" data-label="<?php echo $label; ?>"><?php echo $label; ?></option>
+                                <?php } ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4 form-group">
+                            <label for="jobs_db_status_filter">Database Status</label>
+                            <select id="jobs_db_status_filter" class="form-control" name="db_status">
+                                <option value="" data-label="All">All</option>
+                                <?php foreach (array('waiting'=>'Waiting for Crawl', 'not_saved'=>'Awaiting Analysis', 'analysis_queued'=>'Analysis Queued',
+                                    'analysing'=>'Analysing', 'partial'=>'Partly Saved', 'saved'=>'Saved to Database', 'error'=>'Analysis Failed',
+                                    'missing'=>'Saved Record Missing', 'empty'=>'No Products') as $value=>$label) { ?>
+                                <option value="<?php echo $value; ?>" data-label="<?php echo $label; ?>"><?php echo $label; ?></option>
+                                <?php } ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3 form-group">
+                            <label for="jobs_search">Search</label>
+                            <input type="search" id="jobs_search" name="search" class="form-control" autocomplete="off"
+                                   placeholder="Website, name or file…" maxlength="200" aria-label="Search all analysis results">
+                        </div>
+                        <div class="col-md-2 form-group">
+                            <div class="d-flex flex-wrap">
+                                <button type="submit" class="btn btn-light-primary mr-2">Search</button>
+                                <button type="button" id="jobs_filter_reset" class="btn btn-light">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+                <p class="text-muted" style="font-size:12px;">Crawled products stay in JSON. Successful AI analysis saves the results to the database.</p>
+                <div class="dataTables_wrapper dt-bootstrap4">
+                <div class="row align-items-center mb-3">
+                    <div class="col-sm-12 col-md-6">
+                        <div class="dataTables_length">
+                            <label>Show
+                                <select id="jobs_page_size" class="custom-select custom-select-sm form-control form-control-sm" aria-label="Results per page">
+                                    <option value="25">25</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                                entries
+                            </label>
+                        </div>
+                    </div>
+                </div>
                 <div style="overflow-x:auto;">
                     <table class="table table-bordered table-head-custom table-checkable">
                         <thead>
@@ -127,16 +178,29 @@
                                 <th style="text-align:center; width:260px;">Website</th>
                                 <th style="text-align:center;">Products</th>
                                 <th style="text-align:center;">AI Cost (USD)</th>
-                                <th style="text-align:center;">Status</th>
+                                <th style="text-align:center;">Process Status</th>
+                                <th style="text-align:center; min-width:150px;">Database Status</th>
                                 <th style="text-align:center;">Date</th>
                                 <th class="action" style="text-align:center;">Action</th>
                             </tr>
                         </thead>
                         <tbody id="jobs_rows">
-                            <tr id="no_jobs"><td colspan="7" style="text-align:center; padding:12px;" class="text-muted">No crawls yet</td></tr>
+                            <tr id="no_jobs"><td colspan="8" style="text-align:center; padding:12px;" class="text-muted">Loading results…</td></tr>
                         </tbody>
                     </table>
                 </div>
+                <div class="row mt-3 align-items-center">
+                    <div class="col-sm-12 col-md-5">
+                        <div id="jobs_page_info" class="dataTables_info" role="status" aria-live="polite"></div>
+                    </div>
+                    <div class="col-sm-12 col-md-7">
+                        <nav class="dataTables_paginate paging_simple_numbers" aria-label="Analysis result pages">
+                            <ul id="jobs_pagination" class="pagination justify-content-end"></ul>
+                        </nav>
+                    </div>
+                </div>
+                </div>
+                <div id="jobs_load_error" class="text-danger mt-2" style="font-size:12px;" role="alert"></div>
             </div>
         </div>
 
@@ -154,6 +218,9 @@
 
     // ---- Background crawl jobs, shown as rows AT THE TOP of Analysis History ----
     var jobsTimer = null;
+    var jobsPage = 1, jobsPageSize = 25, jobsSearch = '';
+    var jobsStatus = '', jobsDbStatus = '';
+    var jobsRequest = null, jobsRequestVersion = 0, jobsSearchTimer = null;
     var VIEW_URL     = '<?php echo base_url('Competitor_Product/View?id=') ?>';
     var PDF_URL      = '<?php echo base_url('Competitor_Product/Download_Pdf?id=') ?>';
     var REVIEW_URL   = '<?php echo base_url('Competitor_Product/Review') ?>?job=';
@@ -199,6 +266,35 @@
             return badge + (eta ? '<br><span style="font-size:10px; color:#8ba0c4;">' + $('<div>').text(eta).html() + '</span>' : '');
         }
         return '<span class="label label-light-info label-inline font-weight-bold">' + (j.is_paste ? 'Analysed' : (j.is_crawled ? 'Crawled' : (j.is_upload ? 'Uploaded' : 'Crawled'))) + '</span>';
+    }
+    function jobDatabaseStatus(j) {
+        var badges = {
+            waiting: ['dark', 'Waiting for crawl'],
+            not_saved: ['warning', 'Awaiting analysis'],
+            analysis_queued: ['warning', 'Analysis queued'],
+            analysing: ['primary', 'Analysing'],
+            partial: ['warning', 'Partly saved'],
+            saved: ['success', 'Saved to database'],
+            error: ['danger', 'Analysis failed'],
+            missing: ['danger', 'Saved record missing'],
+            empty: ['dark', 'No products']
+        };
+        var badge = badges[j.db_status] || ['dark', 'Unknown'];
+        var html = '<span class="label label-light-' + badge[0] + ' label-inline font-weight-bold">' + badge[1] + '</span>';
+        if(j.db_total > 0) {
+            html += '<div class="text-muted mt-1" style="font-size:11px;">'
+                + Number(j.db_saved || 0).toLocaleString() + ' of ' + Number(j.db_total).toLocaleString() + ' saved'
+                + (j.is_group && j.runs_count > 1 ? ' (latest crawl)' : '') + '</div>';
+        }
+        if(j.db_missing > 0) {
+            html += '<div class="text-danger mt-1" style="font-size:11px;">' + Number(j.db_missing).toLocaleString() + ' saved record(s) unavailable</div>';
+        }
+        if(j.analysis_state === 'running' || j.analysis_state === 'queued') {
+            html += '<div class="text-muted mt-1" style="font-size:11px;">'
+                + (j.analysis_earlier_crawl ? 'Earlier crawl: ' : '')
+                + Number(j.analysis_done || 0).toLocaleString() + ' of ' + Number(j.analysis_total || 0).toLocaleString() + ' processed</div>';
+        }
+        return html;
     }
     function jobActionCell(j) {
         var items = [];
@@ -263,25 +359,33 @@
     });
 
     // Render crawl rows into the Crawled Results table (No · Website · Products ·
-    // AI Cost · Status · Date · Action) and total up the cumulative AI cost.
+    // AI Cost · Status · Date · Action). Paging happens on the server; only the
+    // selected page is returned, while the cost still covers the complete history.
     function renderJobs(res) {
         var $rows = $('#jobs_rows');
         if(!$rows.length) return;
         var jobs = (res && res.jobs) ? res.jobs : [];
         var esc = function(s){ return $('<div>').text(s == null ? '' : s).html(); };
-        var total = 0, no = 0;
+        var paging = res.pagination;
+        jobsPage = paging.page;
+        jobsPageSize = paging.page_size;
+        $('#jobs_page_size').val(jobsPageSize);
+        if(res.filter_counts) {
+            updateJobFilterCounts('#jobs_status_filter', res.filter_counts.status);
+            updateJobFilterCounts('#jobs_db_status_filter', res.filter_counts.db_status);
+        }
+        var no = paging.start > 0 ? paging.start - 1 : 0;
         if(!jobs.length) {
-            $rows.html('<tr id="no_jobs"><td colspan="7" style="text-align:center; padding:12px;" class="text-muted">No results yet — crawl a site or upload a PDF/image</td></tr>');
+            $rows.html('<tr id="no_jobs"><td colspan="8" style="text-align:center; padding:12px;" class="text-muted">'
+                + (jobsSearch || jobsStatus || jobsDbStatus ? 'No results match your filters' : 'No results yet — crawl a site or upload a PDF/image') + '</td></tr>');
         } else {
             $rows.html(jobs.map(function(j) {
                 no++;
-                total += (j.cost_total || 0);
-                var analysedChip = j.analysed ? ' <span class="label label-light-success label-inline" style="font-size:9px;">' + j.analysed + ' analysed</span>' : '';
                 var products = (j.is_upload && !j.is_crawled)
                     ? '<span class="text-muted">—</span>'
                     : (j.is_group
-                        ? ((j.count > 0 ? j.count : '—') + analysedChip)
-                        : ((j.state === 'done') ? (j.count + analysedChip) : '—'));
+                        ? ((j.count > 0 ? j.count.toLocaleString() : '—') + (j.runs_count > 1 ? '<div class="text-muted" style="font-size:10px;">Latest crawl</div>' : ''))
+                        : ((j.state === 'done') ? j.count.toLocaleString() : '—'));
                 var cost = (j.cost_total > 0) ? Number(j.cost_total).toFixed(4) : '—';
                 // Source cell: a merged website row shows the host + a "N crawls" tag;
                 // a single crawl shows a clickable URL (+ keyword/full-render chips);
@@ -317,22 +421,141 @@
                     + '<td style="text-align:center; font-size:12px;">' + products + '</td>'
                     + '<td style="text-align:center; font-size:12px;">' + cost + '</td>'
                     + '<td style="text-align:center;">' + jobStatusBadge(j) + '</td>'
+                    + '<td style="text-align:center;">' + jobDatabaseStatus(j) + '</td>'
                     + '<td style="text-align:center; font-size:12px;">' + esc(j.ts) + '</td>'
                     + '<td style="text-align:center;">' + jobActionCell(j) + '</td>'
                     + '</tr>';
             }).join(''));
         }
-        $('#total_cost').text(total.toFixed(4));
+        $('#total_cost').text(Number(res.cost_total || 0).toFixed(4));
+        var info = 'Showing ' + paging.start.toLocaleString() + ' to ' + paging.end.toLocaleString()
+            + ' of ' + paging.total.toLocaleString() + ' entries';
+        if(paging.total !== paging.total_results) {
+            info += ' (filtered from ' + paging.total_results.toLocaleString() + ')';
+        }
+        $('#jobs_page_info').text(info);
+        var pager = [];
+        var addPage = function(page, label, disabled, active, direction) {
+            pager.push('<li class="page-item' + (direction ? ' ' + direction : '') + (disabled ? ' disabled' : '') + (active ? ' active' : '') + '">'
+                + '<button type="button" class="page-link" data-jobs-page="' + page + '"'
+                + (disabled || active ? ' disabled' : '') + (active ? ' aria-current="page"' : '')
+                + (direction ? ' aria-label="' + (direction === 'previous' ? 'Previous page' : 'Next page') + '"' : '')
+                + '>' + label + '</button></li>');
+        };
+        addPage(jobsPage - 1, '<i class="ki ki-arrow-back" aria-hidden="true"></i>', jobsPage <= 1, false, 'previous');
+        var lastPage = 0;
+        for(var p = 1; p <= paging.pages; p++) {
+            if(p !== 1 && p !== paging.pages && Math.abs(p - jobsPage) > 2) continue;
+            if(lastPage && p > lastPage + 1) {
+                pager.push('<li class="page-item disabled"><span class="page-link">…</span></li>');
+            }
+            addPage(p, p, false, p === jobsPage);
+            lastPage = p;
+        }
+        addPage(jobsPage + 1, '<i class="ki ki-arrow-next" aria-hidden="true"></i>', jobsPage >= paging.pages, false, 'next');
+        $('#jobs_pagination').html(pager.join(''));
 
         var running = (res && res.running) ? 1 : 0;
-        if(running) { if(!jobsTimer) jobsTimer = setInterval(loadJobs, 3000); }
+        if(running) {
+            if(!jobsTimer) jobsTimer = setInterval(function() {
+                if(!jobsRequest) loadJobs();
+            }, 3000);
+        }
         else if(jobsTimer) { clearInterval(jobsTimer); jobsTimer = null; }
     }
     function loadJobs() {
         if(!$('#jobs_rows').length) return;
-        $.getJSON('<?php echo base_url('Competitor_Product/Jobs_List') ?>').done(renderJobs);
+        var version = ++jobsRequestVersion;
+        if(jobsRequest) jobsRequest.abort();
+        $('#jobs_load_error').text('');
+        jobsRequest = $.getJSON('<?php echo base_url('Competitor_Product/Jobs_List') ?>', {
+            page: jobsPage, page_size: jobsPageSize, search: jobsSearch, status: jobsStatus, db_status: jobsDbStatus
+        }).done(function(res) {
+            if(version === jobsRequestVersion) renderJobs(res);
+        }).fail(function(xhr, status) {
+            if(status !== 'abort' && version === jobsRequestVersion) {
+                $('#jobs_load_error').text('Could not load results. Please try again.');
+            }
+        }).always(function() {
+            if(version === jobsRequestVersion) jobsRequest = null;
+        });
     }
-    $(document).ready(loadJobs);
+    $('#jobs_page_size').on('change', function() {
+        jobsPageSize = Number($(this).val());
+        jobsPage = 1;
+        loadJobs();
+    });
+    $('#jobs_search').on('input', function() {
+        jobsSearch = $.trim($(this).val());
+        jobsPage = 1;
+        updateJobFilterUrl();
+        clearTimeout(jobsSearchTimer);
+        ++jobsRequestVersion;
+        if(jobsRequest) {
+            jobsRequest.abort();
+            jobsRequest = null;
+        }
+        jobsSearchTimer = setTimeout(loadJobs, 250);
+    });
+    $(document).on('click', '#jobs_pagination button[data-jobs-page]', function() {
+        if(this.disabled) return;
+        jobsPage = Number($(this).attr('data-jobs-page'));
+        loadJobs();
+    });
+    function refreshJobFilters() {
+        $('#jobs_status_filter').val(jobsStatus);
+        $('#jobs_db_status_filter').val(jobsDbStatus);
+    }
+    function updateJobFilterCounts(selector, counts) {
+        $(selector + ' option').each(function() {
+            var count = counts[this.value || 'all'] || 0;
+            $(this).text($(this).attr('data-label') + ' (' + Number(count).toLocaleString() + ')');
+        });
+    }
+    function updateJobFilterUrl() {
+        var url = new URL(window.location.href);
+        if(jobsStatus) url.searchParams.set('status', jobsStatus); else url.searchParams.delete('status');
+        if(jobsDbStatus) url.searchParams.set('db_status', jobsDbStatus); else url.searchParams.delete('db_status');
+        if(jobsSearch) url.searchParams.set('search', jobsSearch); else url.searchParams.delete('search');
+        window.history.replaceState(null, '', url.toString());
+    }
+    function applyJobFilters() {
+        jobsStatus = $('#jobs_status_filter').val() || '';
+        jobsDbStatus = $('#jobs_db_status_filter').val() || '';
+        jobsSearch = $.trim($('#jobs_search').val());
+        jobsPage = 1;
+        clearTimeout(jobsSearchTimer);
+        updateJobFilterUrl();
+        loadJobs();
+    }
+    $('#jobs_filter_form').on('submit', function(event) {
+        event.preventDefault();
+        applyJobFilters();
+    });
+    $('#jobs_status_filter, #jobs_db_status_filter').on('change', applyJobFilters);
+    $('#jobs_filter_reset').on('click', function() {
+        jobsStatus = '';
+        jobsDbStatus = '';
+        jobsSearch = '';
+        jobsPage = 1;
+        $('#jobs_search').val('');
+        clearTimeout(jobsSearchTimer);
+        refreshJobFilters();
+        updateJobFilterUrl();
+        loadJobs();
+    });
+    $(document).ready(function() {
+        var params = new URL(window.location.href).searchParams;
+        jobsStatus = (params.get('status') || '').split(',')[0];
+        jobsDbStatus = (params.get('db_status') || '').split(',')[0];
+        jobsSearch = params.get('search') || '';
+        $('#jobs_search').val(jobsSearch);
+        refreshJobFilters();
+        jobsStatus = $('#jobs_status_filter').val() || '';
+        jobsDbStatus = $('#jobs_db_status_filter').val() || '';
+        updateJobFilterUrl();
+        loadJobs();
+    });
 
     // Shared: POST a FormData to Analyze. All three inputs (URL crawl, pasted
     // text/links, uploaded PDF/image) run as fire-and-forget background jobs —
@@ -356,6 +579,14 @@
                     $('#competitor_file').val('');
                     $('#competitor_file_label').text('Choose a PDF or image…');
                     $('#competitor_name').val('');
+                    jobsPage = 1;
+                    jobsSearch = '';
+                    jobsStatus = '';
+                    jobsDbStatus = '';
+                    $('#jobs_search').val('');
+                    clearTimeout(jobsSearchTimer);
+                    refreshJobFilters();
+                    updateJobFilterUrl();
                     Swal.fire({ toast: true, position: 'top-end', icon: 'success',
                         title: 'Started in the background',
                         text: 'It appears at the top of Analysis Results — you can keep working.',

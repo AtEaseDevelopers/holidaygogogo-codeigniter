@@ -353,6 +353,21 @@ check('job_view name blank by default', '', $pv['name']);
 check('job_view exposes competitor_name as name', 'Apple Vacations',
     competitor_job_public_view(array('state' => 'done', 'competitor_name' => 'Apple Vacations'))['name']);
 
+// ---- competitor_crawl_save_progress -----------------------------------------
+$save_crawl = array('state' => 'done', 'count' => 3);
+check('crawl_save awaits analysis with no saved references', 'not_saved', competitor_crawl_save_progress($save_crawl, array())['db_status']);
+$save_crawl['analysed'] = array('0' => array('id' => 12));
+check('crawl_save verifies actual DB presence', 'missing', competitor_crawl_save_progress($save_crawl, array())['db_status']);
+check('crawl_save reports partial saves', array('partial', 1, 3), array_values(array_intersect_key(
+    competitor_crawl_save_progress($save_crawl, array(12 => true)), array('db_status' => 1, 'db_saved' => 1, 'db_total' => 1))));
+$save_crawl['analysed']['1'] = array('id' => 13);
+$save_crawl['analysed']['2'] = array('id' => 14);
+check('crawl_save all references present means saved', 'saved', competitor_crawl_save_progress($save_crawl, array(12 => true, 13 => true, 14 => true))['db_status']);
+check('crawl_save stale reference prevents fully-saved claim', array('missing', 2, 1), array_values(array_intersect_key(
+    competitor_crawl_save_progress($save_crawl, array(12 => true, 13 => true)), array('db_status' => 1, 'db_saved' => 1, 'db_missing' => 1))));
+check('crawl_save empty crawl has no products', 'empty', competitor_crawl_save_progress(array('state' => 'done', 'count' => 0), array())['db_status']);
+check('crawl_save incomplete crawl waits for completion', 'waiting', competitor_crawl_save_progress(array('state' => 'running', 'count' => 3), array())['db_status']);
+
 // ---- competitor_job_host ----------------------------------------------------
 check('job_host lowercases + strips www', 'example.com',
     competitor_job_host('https://WWW.Example.com/tour/5d4n'));
@@ -419,6 +434,25 @@ $cg_name = competitor_group_crawl_jobs(array(
         'count' => 1, 'competitor_name' => 'Apple Vacations', 'ts' => '2026-09-05 10:00:00')),
 ));
 check('group_crawls carries competitor name', 'Apple Vacations', $cg_name[0]['name']);
+$save_latest = competitor_job_public_view(array('job' => 'new', 'url' => 'https://save.example/', 'state' => 'done',
+    'count' => 10, 'created' => '2026-10-02 10:00:00'));
+$save_latest = array_merge($save_latest, array('db_status' => 'not_saved', 'db_saved' => 0, 'db_total' => 10, 'db_missing' => 0,
+    'analysis_state' => '', 'analysis_done' => 0, 'analysis_total' => 0));
+$save_old = competitor_job_public_view(array('job' => 'old', 'url' => 'https://save.example/', 'state' => 'done',
+    'count' => 2, 'created' => '2026-10-01 10:00:00'));
+$save_old = array_merge($save_old, array('db_status' => 'saved', 'db_saved' => 2, 'db_total' => 2, 'db_missing' => 0,
+    'analysis_state' => '', 'analysis_done' => 0, 'analysis_total' => 0));
+$save_group = competitor_group_crawl_jobs(array($save_old, $save_latest))[0];
+check('group_crawls save counts belong to latest crawl', array('not_saved', 0, 10),
+    array($save_group['db_status'], $save_group['db_saved'], $save_group['db_total']));
+$save_old['db_status'] = 'analysing';
+$save_old['analysis_state'] = 'running';
+$save_old['analysis_done'] = 1;
+$save_old['analysis_total'] = 2;
+$save_group = competitor_group_crawl_jobs(array($save_old, $save_latest))[0];
+check('group_crawls surfaces an older active analysis with its scope', array('analysing', true, 0, 10, 1, 2),
+    array($save_group['db_status'], $save_group['analysis_earlier_crawl'], $save_group['db_saved'], $save_group['db_total'],
+        $save_group['analysis_done'], $save_group['analysis_total']));
 
 // ---- competitor_model_supports_temperature ----------------------------------
 check('temp: gpt-4o-mini yes', true, competitor_model_supports_temperature('gpt-4o-mini'));
