@@ -592,9 +592,23 @@ class Competitor_Product extends MY_Controller
 		// so a crawled site never drops off the listing, even one that found 0 products.
 		// Deduped against the live crawl group rows above.
 		$this->load->model('Competitor_Crawl_Jobs_Model');
-		$jobs = array_merge($jobs, competitor_job_archived_rows(
+		$job_archived = competitor_job_archived_rows(
 			$this->Competitor_Crawl_Jobs_Model->Read_All('competitor'),
 			$covered_hosts
+		);
+		$jobs = array_merge($jobs, $job_archived);
+
+		// Safety net: a site with saved PRODUCTS but no job record (e.g. items backfilled
+		// before the job-record table existed) would otherwise have no row — surface it
+		// from the crawled items too, deduped against live groups AND job-record rows.
+		$covered_with_jobs = $covered_hosts;
+		foreach ($job_archived as $r) {
+			if (isset($r['host'])) { $covered_with_jobs[] = $r['host']; }
+		}
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$jobs = array_merge($jobs, competitor_archived_host_rows(
+			$this->Competitor_Crawl_Items_Model->Read_Host_Entry_Points('competitor'),
+			$covered_with_jobs
 		));
 
 		// Fold in single (non-crawl) analyses — uploaded PDFs/images and pasted
