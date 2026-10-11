@@ -1,8 +1,9 @@
 <?php
 /**
  * Print-ready (DomPDF) rendering of a saved Competitor Product. Mirrors the
- * on-screen View (view.php + _product.php) but uses a table/inline-block layout
- * DomPDF can render (no flexbox / Bootstrap grid). Handles both shapes:
+ * on-screen View (view.php + _product.php). Long sections use normal block flow
+ * so DomPDF can split them across pages; tables are only used for short facts
+ * and the BC/TV company letterhead. Handles both shapes:
  *   - Site crawl ($a->products non-empty): one section per product.
  *   - Single (upload / single URL / paste): one product built from the row.
  * Expects $a (the analysis row) — the same object View() passes to the screen.
@@ -20,6 +21,10 @@ $labels   = (isset($labels) && is_array($labels)) ? $labels
     : (function_exists('competitor_ui_labels') ? competitor_ui_labels(isset($lang) ? $lang : 'en') : array());
 $lbl      = function ($k, $fallback) use ($labels) { return isset($labels[$k]) ? $labels[$k] : $fallback; };
 $pdf_font = isset($pdf_font) ? $pdf_font : '"DejaVu Sans", sans-serif';
+$company = isset($company) && is_array($company) ? $company : array();
+$company_address = isset($company_address) ? $company_address : (isset($company['Address']) ? $company['Address'] : '');
+$logo_path = FCPATH . 'assets/image/pdflogo-new.jpeg';
+$logo_src = is_file($logo_path) ? 'data:image/jpeg;base64,' . base64_encode(file_get_contents($logo_path)) : '';
 ?>
 <!DOCTYPE html>
 <html>
@@ -27,28 +32,34 @@ $pdf_font = isset($pdf_font) ? $pdf_font : '"DejaVu Sans", sans-serif';
 <meta charset="utf-8">
 <style>
     * { box-sizing: border-box; }
-    body { font-family: <?php echo $pdf_font; ?>; color: #2B2B3F; font-size: 12px; line-height: 1.45; }
+    @page { margin: 165px 40px 35px 40px; }
+    body { margin: 0; font-family: <?php echo $pdf_font; ?>; color: #2B2B3F; font-size: 12px; line-height: 1.45; }
+    .company-header { position: fixed; top: -145px; left: 0; right: 0; height: 135px; font-family: Helvetica, sans-serif; color: #000; line-height: 1.25; }
+    .company-header table { width: 100%; border-collapse: collapse; }
+    .company-header td { vertical-align: middle; }
+    .company-header .company-name { font-size: 24px; font-weight: bold; margin: 0 0 5px; }
+    .company-header p { margin: 0 0 2px; font-size: 11px; }
+    .company-header hr { margin: 10px 0 0; }
     h1 { font-size: 20px; color: #4F6D9E; margin: 0 0 2px 0; }
     h2 { font-size: 15px; color: #3F4254; margin: 18px 0 6px 0; border-bottom: 1px solid #E4E6EF; padding-bottom: 4px; }
     h3 { font-size: 13px; color: #4F6D9E; margin: 12px 0 5px 0; }
     h4 { font-size: 12px; margin: 8px 0 4px 0; }
+    h1, h2, h3, h4, .prod-title, .itinerary-title { page-break-after: avoid; }
     .muted { color: #8A94A6; }
-    .meta { font-size: 10px; color: #8A94A6; margin-bottom: 4px; }
+    .meta { font-size: 10px; color: #8A94A6; margin-bottom: 4px; word-wrap: break-word; }
     .prod { padding-top: 6px; page-break-inside: auto; }
     .prod + .prod { border-top: 2px solid #D7E2F2; margin-top: 22px; padding-top: 14px; }
     .prod-title { font-size: 15px; color: #1B2A4A; font-weight: bold; margin-bottom: 8px; }
     /* table-layout:fixed makes columns honour their declared width so long CJK
        cell text wraps inside the column instead of expanding it past the page
        edge (DomPDF's default auto layout grows columns to fit content). */
-    table.facts, table.two, table.three { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    table.facts { margin-bottom: 10px; }
+    table.facts { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 10px; }
     table.facts td { width: 25%; background: #F3F6F9; border: 3px solid #fff; padding: 6px 8px; vertical-align: top; }
     table.facts .lbl { font-size: 9px; color: #8A94A6; font-weight: bold; text-transform: uppercase; }
     table.facts .val { font-size: 12px; font-weight: bold; color: #2B2B3F; }
-    table.group { margin-top: 12px; }   /* separates banner-less column groups (web has no header here) */
-    table.two td { width: 50%; vertical-align: top; padding: 0 8px 0 0; }
-    table.three td { width: 33.33%; vertical-align: top; padding: 0 8px 0 0; }
-    /* Break long unspaced runs so nothing overflows a fixed-width cell. */
+    /* DomPDF cannot paginate a table row containing an entire long section. */
+    .detail-section { margin-top: 12px; page-break-inside: auto; }
+    /* Break long unspaced runs within the available page or cell width. */
     td, .val, .tags, .box, li { word-wrap: break-word; overflow-wrap: break-word; word-break: break-word; }
     /* Tag lists render as wrapping text — DomPDF clips wide inline-block "chips"
        inside table cells, so we avoid them and let words wrap naturally. */
@@ -64,6 +75,23 @@ $pdf_font = isset($pdf_font) ? $pdf_font : '"DejaVu Sans", sans-serif';
 </style>
 </head>
 <body>
+
+<div class="company-header">
+    <table>
+        <tr>
+            <?php if ($logo_src !== '') { ?>
+            <td style="width:25%;"><img src="<?php echo $logo_src; ?>" style="width:160px;"></td>
+            <?php } ?>
+            <td style="text-align:center;">
+                <div class="company-name"><?php echo htmlspecialchars(isset($company['Name']) ? $company['Name'] : 'HolidayGoGoGo'); ?></div>
+                <p>(Co. Reg. No. - <?php echo htmlspecialchars(isset($company['RegistrationNumber']) ? $company['RegistrationNumber'] : ''); ?> | Travel Agent License No. - <?php echo htmlspecialchars(isset($company['LicenseNumber']) ? $company['LicenseNumber'] : ''); ?>)</p>
+                <p>Address : <?php echo htmlspecialchars($company_address); ?></p>
+                <p>Website : <?php echo htmlspecialchars(isset($company['Website']) ? $company['Website'] : ''); ?></p>
+            </td>
+        </tr>
+    </table>
+    <hr>
+</div>
 
 <?php
 $sv   = function ($P, $k) { $v = isset($P[$k]) ? $P[$k] : ''; return is_array($v) ? '' : trim((string) $v); };
@@ -219,67 +247,54 @@ $justified = function ($items) use ($flat) {
 
     <!-- Coverage -->
     <h2><?php echo htmlspecialchars($lbl('coverage', 'Coverage')); ?></h2>
-    <table class="two">
-        <tr>
-            <td><h4><?php echo htmlspecialchars($lbl('countries', 'Countries')); ?></h4><?php echo $chips($av($p, 'countries')); ?></td>
-            <td><h4><?php echo htmlspecialchars($lbl('cities', 'Cities')); ?></h4><?php echo $chips($av($p, 'cities')); ?></td>
-        </tr>
-        <tr>
-            <td><h4><?php echo htmlspecialchars($lbl('travel_months', 'Travel Months')); ?></h4><?php echo $chips($av($p, 'travel_months')); ?></td>
-            <td><h4><?php echo htmlspecialchars($lbl('themes', 'Themes')); ?></h4><?php echo $chips($av($p, 'themes')); ?></td>
-        </tr>
-        <tr>
-            <td><h4><?php echo htmlspecialchars($lbl('tour_style', 'Tour Style')); ?></h4><?php echo $chips($av($p, 'tour_styles')); ?></td>
-            <td><h4><?php echo htmlspecialchars($lbl('local_transport', 'Local Transport')); ?></h4><?php echo $chips($av($p, 'local_transport')); ?></td>
-        </tr>
-    </table>
+    <?php foreach (array(
+        'countries' => array('countries', 'Countries'),
+        'cities' => array('cities', 'Cities'),
+        'travel_months' => array('travel_months', 'Travel Months'),
+        'themes' => array('themes', 'Themes'),
+        'tour_styles' => array('tour_style', 'Tour Style'),
+        'local_transport' => array('local_transport', 'Local Transport'),
+    ) as $key => $heading) { ?>
+        <div class="detail-section">
+            <h4><?php echo htmlspecialchars($lbl($heading[0], $heading[1])); ?></h4>
+            <?php echo $chips($av($p, $key)); ?>
+        </div>
+    <?php } ?>
 
     <!-- Flights & Meals (no section banner — the web view groups these by column
          header only, so the PDF follows suit). Flight block shows only when the
          analysis has flight data, exactly like the web. -->
-    <table class="two group">
-        <tr>
-            <?php if($has($sv($p, 'flight_departure')) || $has($sv($p, 'flight_return'))) { ?>
-            <td>
-                <h4><?php echo htmlspecialchars($lbl('flight_details', 'Flight Details')); ?></h4>
-                <div class="box">
-                    <div class="kv"><span class="k"><?php echo htmlspecialchars($lbl('departure', 'Departure')); ?>:</span> <?php echo htmlspecialchars($sv($p, 'flight_departure') !== '' ? $sv($p, 'flight_departure') : '-'); ?></div>
-                    <div class="kv"><span class="k"><?php echo htmlspecialchars($lbl('return', 'Return')); ?>:</span> <?php echo htmlspecialchars($sv($p, 'flight_return') !== '' ? $sv($p, 'flight_return') : '-'); ?></div>
-                </div>
-            </td>
-            <?php } ?>
-            <td>
-                <h4><?php echo htmlspecialchars($lbl('meals', 'Meals')); ?></h4>
-                <div class="box">
-                    <?php
-                    $meal_labels = array('breakfast' => $lbl('breakfast', 'Breakfast'), 'lunch' => $lbl('lunch', 'Lunch'), 'dinner' => $lbl('dinner', 'Dinner'));
-                    foreach($meal_labels as $key => $label) {
-                        $mv = trim((string) (isset($meals[$key]) ? $meals[$key] : ''));
-                        echo '<div class="kv"><span class="k">' . htmlspecialchars($label) . ':</span> ' . htmlspecialchars($mv !== '' ? $mv : '-') . '</div>';
-                    }
-                    ?>
-                </div>
-            </td>
-        </tr>
-    </table>
+    <?php if($has($sv($p, 'flight_departure')) || $has($sv($p, 'flight_return'))) { ?>
+        <div class="detail-section">
+            <h4><?php echo htmlspecialchars($lbl('flight_details', 'Flight Details')); ?></h4>
+            <div class="box">
+                <div class="kv"><span class="k"><?php echo htmlspecialchars($lbl('departure', 'Departure')); ?>:</span> <?php echo htmlspecialchars($sv($p, 'flight_departure') !== '' ? $sv($p, 'flight_departure') : '-'); ?></div>
+                <div class="kv"><span class="k"><?php echo htmlspecialchars($lbl('return', 'Return')); ?>:</span> <?php echo htmlspecialchars($sv($p, 'flight_return') !== '' ? $sv($p, 'flight_return') : '-'); ?></div>
+            </div>
+        </div>
+    <?php } ?>
+    <div class="detail-section">
+        <h4><?php echo htmlspecialchars($lbl('meals', 'Meals')); ?></h4>
+        <div class="box">
+            <?php
+            $meal_labels = array('breakfast' => $lbl('breakfast', 'Breakfast'), 'lunch' => $lbl('lunch', 'Lunch'), 'dinner' => $lbl('dinner', 'Dinner'));
+            foreach($meal_labels as $key => $label) {
+                $mv = trim((string) (isset($meals[$key]) ? $meals[$key] : ''));
+                echo '<div class="kv"><span class="k">' . htmlspecialchars($label) . ':</span> ' . htmlspecialchars($mv !== '' ? $mv : '-') . '</div>';
+            }
+            ?>
+        </div>
+    </div>
 
     <!-- Stay & Highlights -->
-    <table class="three group">
-        <tr>
-            <td><h4><?php echo htmlspecialchars($lbl('hotels', 'Hotels')); ?></h4><?php echo $bullets($av($p, 'hotels')); ?></td>
-            <td><h4><?php echo htmlspecialchars($lbl('scenic_highlights', 'Scenic Highlights')); ?></h4><?php echo $scenic($av($p, 'scenic_highlights')); ?></td>
-            <td><h4><?php echo htmlspecialchars($lbl('shopping_stops', 'Shopping Stops')); ?></h4><?php echo $justified($av($p, 'shopping_stops')); ?></td>
-        </tr>
-    </table>
+    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('hotels', 'Hotels')); ?></h4><?php echo $bullets($av($p, 'hotels')); ?></div>
+    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('scenic_highlights', 'Scenic Highlights')); ?></h4><?php echo $scenic($av($p, 'scenic_highlights')); ?></div>
+    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('shopping_stops', 'Shopping Stops')); ?></h4><?php echo $justified($av($p, 'shopping_stops')); ?></div>
 
     <!-- Inclusions / Exclusions / Optional -->
-    <table class="three group">
-        <tr>
-            <td><h4><?php echo htmlspecialchars($lbl('inclusions', 'Inclusions')); ?></h4><?php echo $bullets($av($p, 'inclusions')); ?></td>
-            <td><h4><?php echo htmlspecialchars($lbl('exclusions', 'Exclusions')); ?></h4><?php echo $bullets($av($p, 'exclusions')); ?></td>
-            <td><h4><?php echo htmlspecialchars($lbl('optional_tours', 'Optional Tours')); ?></h4><?php echo $bullets($av($p, 'optional_tours')); ?></td>
-        </tr>
-    </table>
+    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('inclusions', 'Inclusions')); ?></h4><?php echo $bullets($av($p, 'inclusions')); ?></div>
+    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('exclusions', 'Exclusions')); ?></h4><?php echo $bullets($av($p, 'exclusions')); ?></div>
+    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('optional_tours', 'Optional Tours')); ?></h4><?php echo $bullets($av($p, 'optional_tours')); ?></div>
 
     <?php if($has($av($p, 'special_remarks'))) { ?>
         <h3><?php echo htmlspecialchars($lbl('special_remarks', 'Special Remarks')); ?></h3>
@@ -296,7 +311,7 @@ $justified = function ($items) use ($flat) {
             $d_desc  = trim((string) (isset($day['description']) ? $day['description'] : ''));
         ?>
             <div style="margin-bottom:7px;">
-                <div style="font-weight:bold; color:#4F6D9E;"><?php echo htmlspecialchars($d_label); ?><?php if($d_title !== '') { echo ' &mdash; <span style="color:#3F4254;">' . htmlspecialchars($d_title) . '</span>'; } ?></div>
+                <div class="itinerary-title" style="font-weight:bold; color:#4F6D9E;"><?php echo htmlspecialchars($d_label); ?><?php if($d_title !== '') { echo ' &mdash; <span style="color:#3F4254;">' . htmlspecialchars($d_title) . '</span>'; } ?></div>
                 <?php if($d_desc !== '') { ?><div class="pre" style="color:#5E6278;"><?php echo htmlspecialchars($d_desc); ?></div><?php } ?>
             </div>
         <?php } ?>
@@ -314,12 +329,8 @@ $justified = function ($items) use ($flat) {
     <?php } ?>
 
     <!-- Pros / Cons -->
-    <table class="two group">
-        <tr>
-            <td><h4 style="color:#1BC5BD;"><?php echo htmlspecialchars($lbl('pros', 'Pros')); ?></h4><?php echo $justified($av($p, 'pros')); ?></td>
-            <td><h4 style="color:#F64E60;"><?php echo htmlspecialchars($lbl('cons', 'Cons')); ?></h4><?php echo $justified($av($p, 'cons')); ?></td>
-        </tr>
-    </table>
+    <div class="detail-section"><h4 style="color:#1BC5BD;"><?php echo htmlspecialchars($lbl('pros', 'Pros')); ?></h4><?php echo $justified($av($p, 'pros')); ?></div>
+    <div class="detail-section"><h4 style="color:#F64E60;"><?php echo htmlspecialchars($lbl('cons', 'Cons')); ?></h4><?php echo $justified($av($p, 'cons')); ?></div>
 
     <?php if($has($sv($p, 'comparison'))) { ?>
         <h2><?php echo htmlspecialchars($lbl('comparison', 'Comparison vs Our Products')); ?></h2>

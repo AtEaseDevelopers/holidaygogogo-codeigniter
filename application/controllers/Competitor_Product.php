@@ -1145,11 +1145,15 @@ class Competitor_Product extends MY_Controller
 		$cjk_font = $this->pdf_cjk_font_path();
 		$use_cjk  = ($lang !== 'en' && $cjk_font !== '');
 
+		$this->load->model('Company_Model');
+		$this->load->helper('company_address');
 		$html = $this->load->view('competitor_product/pdf', array(
 			'a'        => $analysis,
 			'lang'     => $lang,
 			'labels'   => competitor_ui_labels($lang),
 			'pdf_font' => $use_cjk ? 'cjk, "DejaVu Sans", sans-serif' : '"DejaVu Sans", sans-serif',
+			'company'  => $this->Company_Model->Read(),
+			'company_address' => pdf_company_address_for_date($analysis->created_at),
 		), true);
 
 		require_once APPPATH . 'libraries/dompdf/autoload.inc.php';
