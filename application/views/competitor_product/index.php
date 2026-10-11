@@ -1,4 +1,52 @@
-<div class="d-flex flex-column-fluid">
+<style>
+    .competitor-product-page,
+    .competitor-product-page > .container-fluid {
+        min-width: 0;
+    }
+    .competitor-product-page .jobs-table-scroll {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    #competitor_jobs_table {
+        min-width: 1180px;
+    }
+    #competitor_jobs_table .jobs-website {
+        width: 380px;
+        min-width: 380px;
+        overflow-wrap: anywhere;
+        word-break: normal;
+    }
+    #competitor_jobs_table .jobs-website .label {
+        max-width: 100%;
+        height: auto;
+        min-height: 20px;
+        white-space: normal;
+        text-align: left;
+    }
+    #competitor_jobs_table .jobs-date {
+        width: 190px;
+        min-width: 190px;
+        white-space: nowrap;
+    }
+    @media (max-width: 767.98px) {
+        .competitor-product-page .card.card-custom > .card-body,
+        .competitor-product-page .card.card-custom > .card-header {
+            padding-left: 1.25rem;
+            padding-right: 1.25rem;
+        }
+        #jobs_pagination {
+            flex-wrap: wrap;
+            justify-content: flex-start !important;
+        }
+        #jobs_page_info {
+            padding-bottom: 1rem;
+        }
+    }
+</style>
+
+<div class="d-flex flex-column-fluid competitor-product-page">
     <div class="container-fluid">
 
         <!-- Analyse a competitor URL -->
@@ -170,17 +218,17 @@
                         </div>
                     </div>
                 </div>
-                <div style="overflow-x:auto;">
-                    <table class="table table-bordered table-head-custom table-checkable">
+                <div class="jobs-table-scroll" role="region" aria-label="Analysis results" tabindex="0">
+                    <table id="competitor_jobs_table" class="table table-bordered table-head-custom table-checkable">
                         <thead>
                             <tr>
                                 <th style="text-align:center;">No.</th>
-                                <th style="text-align:center; width:260px;">Website</th>
+                                <th class="jobs-website" style="text-align:center;">Website</th>
                                 <th style="text-align:center;">Products</th>
                                 <th style="text-align:center;">AI Cost (USD)</th>
                                 <th style="text-align:center;">Process Status</th>
                                 <th style="text-align:center; min-width:150px;">Database Status</th>
-                                <th style="text-align:center;">Date</th>
+                                <th class="jobs-date" style="text-align:center;">Date</th>
                                 <th class="action" style="text-align:center;">Action</th>
                             </tr>
                         </thead>
@@ -417,12 +465,12 @@
                 var nameChip = j.name ? '<div class="mb-1"><span class="label label-light-success label-inline font-weight-bold" style="font-size:11px;"><i class="la la-building mr-1"></i>' + esc(j.name) + '</span></div>' : '';
                 return '<tr>'
                     + '<td style="text-align:center; padding:12px 8px;">' + no + '</td>'
-                    + '<td style="max-width:260px; word-break:break-all;">' + nameChip + source + '</td>'
+                    + '<td class="jobs-website">' + nameChip + source + '</td>'
                     + '<td style="text-align:center; font-size:12px;">' + products + '</td>'
                     + '<td style="text-align:center; font-size:12px;">' + cost + '</td>'
                     + '<td style="text-align:center;">' + jobStatusBadge(j) + '</td>'
                     + '<td style="text-align:center;">' + jobDatabaseStatus(j) + '</td>'
-                    + '<td style="text-align:center; font-size:12px;">' + esc(j.ts) + '</td>'
+                    + '<td class="jobs-date" style="text-align:center; font-size:12px;">' + esc(j.ts) + '</td>'
                     + '<td style="text-align:center;">' + jobActionCell(j) + '</td>'
                     + '</tr>';
             }).join(''));
