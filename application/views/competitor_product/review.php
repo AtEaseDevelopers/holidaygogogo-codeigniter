@@ -9,6 +9,9 @@
                     </h3>
                 </div>
                 <div class="card-toolbar">
+                    <a href="<?php echo base_url('Competitor_Product/Download_Crawl_Excel?job=' . rawurlencode($job)); ?>" class="btn btn-light-success font-weight-bold mr-3" title="Download all crawled products and available saved analyses">
+                        <i class="la la-file-excel"></i> Download All (Excel)
+                    </a>
                     <a href="<?php echo base_url('Competitor_Product'); ?>" id="back_btn" class="btn btn-secondary font-weight-bold mr-3"><i class="la la-arrow-left"></i> Back</a>
                     <button type="button" id="analyse_selected" class="btn btn-primary font-weight-bold" <?php echo empty($has_ai) ? 'disabled title="AI analysis is currently unavailable"' : ''; ?>>
                         <i class="la la-robot"></i> Analyse Selected (<span id="sel_count">0</span>)

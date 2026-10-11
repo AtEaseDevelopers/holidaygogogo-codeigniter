@@ -271,6 +271,8 @@
     var jobsRequest = null, jobsRequestVersion = 0, jobsSearchTimer = null;
     var VIEW_URL     = '<?php echo base_url('Competitor_Product/View?id=') ?>';
     var PDF_URL      = '<?php echo base_url('Competitor_Product/Download_Pdf?id=') ?>';
+    var EXCEL_URL    = '<?php echo base_url('Competitor_Product/Download_Excel?id=') ?>';
+    var CRAWL_EXCEL_URL = '<?php echo base_url('Competitor_Product/Download_Crawl_Excel') ?>?job=';
     var REVIEW_URL   = '<?php echo base_url('Competitor_Product/Review') ?>?job=';
     var TIMELINE_URL = '<?php echo base_url('Competitor_Product/Timeline') ?>?host=';
 
@@ -350,6 +352,7 @@
             // A merged website row — its per-run history (Review & Select, Terminate,
             // Delete) lives on the Timeline page.
             items.push('<a href="' + TIMELINE_URL + encodeURIComponent(j.host) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-history mr-2"></i>View Timeline</a>');
+            if(j.reviewable && j.best_job) items.push('<a href="' + CRAWL_EXCEL_URL + encodeURIComponent(j.best_job) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-file-excel mr-2"></i>Download Crawl Excel</a>');
         } else if(j.state !== 'done' && j.state !== 'error') {
             // Running → Terminate (kills the worker + drops the task).
             items.push('<a href="javascript:;" class="dropdown-item terminate-job" data-job="' + j.job + '" style="font-size:11px;"><i class="la la-times mr-2"></i>Terminate</a>');
@@ -357,8 +360,10 @@
             if(j.analysis_id) {
                 items.push('<a href="' + VIEW_URL + j.analysis_id + '" class="dropdown-item" style="font-size:11px;"><i class="la la-search mr-2"></i>View Analysis</a>');
                 items.push('<a href="' + PDF_URL + j.analysis_id + '" class="dropdown-item" style="font-size:11px;"><i class="la la-file-pdf mr-2"></i>Download PDF</a>');
+                items.push('<a href="' + EXCEL_URL + j.analysis_id + '" class="dropdown-item" style="font-size:11px;"><i class="la la-file-excel mr-2"></i>Download Excel</a>');
             }
             else if(j.reviewable) items.push('<a href="' + REVIEW_URL + encodeURIComponent(j.job) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-list-alt mr-2"></i>Review &amp; Select</a>');
+            if(j.reviewable && !j.is_upload && !j.is_paste) items.push('<a href="' + CRAWL_EXCEL_URL + encodeURIComponent(j.job) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-file-excel mr-2"></i>Download Crawl Excel</a>');
             if(j.is_upload) items.push('<a href="javascript:;" class="dropdown-item delete-upload" data-id="' + j.analysis_id + '" style="font-size:11px;"><i class="la la-trash mr-2"></i>Delete</a>');
             else items.push('<a href="javascript:;" class="dropdown-item delete-job" data-job="' + j.job + '" style="font-size:11px;"><i class="la la-trash mr-2"></i>Delete</a>');
         }

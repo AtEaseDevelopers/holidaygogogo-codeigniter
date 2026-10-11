@@ -150,6 +150,22 @@ class Competitor_Analysis_Model extends CI_Model
 		if ( ! $row) {
 			return null;
 		}
+		return $this->decode_row($row);
+	}
+
+	/** Full analyses for a crawl export, scoped to this tool in one query. */
+	function Read_By_Ids($ids)
+	{
+		$ids = array_values(array_filter(array_unique(array_map('intval', (array) $ids)), function ($id) { return $id > 0; }));
+		if (empty($ids)) { return array(); }
+		$rows = $this->db->where('feature', $this->feature)->where_in('id', $ids)
+			->order_by('id', 'ASC')->get('competitor_analyses')->result();
+		foreach ($rows as $row) { $this->decode_row($row); }
+		return $rows;
+	}
+
+	private function decode_row($row)
+	{
 		$row->inclusions = $this->decode_list($row->inclusions);
 		$row->pros       = $this->decode_list($row->pros);
 		$row->cons       = $this->decode_list($row->cons);

@@ -46,6 +46,7 @@
     var CA_IMG = '<?php echo base_url('assets/image/sweetalert.jpg') ?>';
     var HOST         = '<?php echo htmlspecialchars($host, ENT_QUOTES); ?>';
     var REVIEW_URL   = '<?php echo base_url('Competitor_Product/Review') ?>?job=';
+    var CRAWL_EXCEL_URL = '<?php echo base_url('Competitor_Product/Download_Crawl_Excel') ?>?job=';
     var LIST_URL     = '<?php echo base_url('Competitor_Product/Timeline_List') ?>?host=';
     var TERMINATE_URL = '<?php echo base_url('Competitor_Product/Terminate_Job') ?>';
 
@@ -96,6 +97,7 @@
             items.push('<a href="javascript:;" class="dropdown-item terminate-job" data-job="' + j.job + '" style="font-size:11px;"><i class="la la-times mr-2"></i>Terminate</a>');
         } else {
             if(j.reviewable) items.push('<a href="' + REVIEW_URL + encodeURIComponent(j.job) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-list-alt mr-2"></i>Review &amp; Select</a>');
+            if(j.reviewable) items.push('<a href="' + CRAWL_EXCEL_URL + encodeURIComponent(j.job) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-file-excel mr-2"></i>Download Crawl Excel</a>');
             items.push('<a href="javascript:;" class="dropdown-item delete-job" data-job="' + j.job + '" style="font-size:11px;"><i class="la la-trash mr-2"></i>Delete</a>');
         }
         return '<div class="btn-group">'

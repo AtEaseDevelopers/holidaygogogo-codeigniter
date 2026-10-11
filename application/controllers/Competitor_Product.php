@@ -1197,6 +1197,68 @@ class Competitor_Product extends MY_Controller
 		exit;
 	}
 
+	/** Download a saved analysis, following the language currently being viewed. */
+	function Download_Excel()
+	{
+		@set_time_limit(120);
+		$id = (int) $this->input->get('id');
+		$analysis = $this->Competitor_Analysis_Model->Read_One($id);
+		if ( ! $analysis) { show_404(); return; }
+		$lang = competitor_normalize_lang($this->input->get('lang'));
+		if ($lang !== 'en') { $analysis = $this->apply_language($analysis, $id, $lang); }
+		$this->load->library('CompetitorExcelExport');
+		$book = $this->competitorexcelexport->analysis(array($analysis), $lang);
+		$name = competitor_pdf_filename($analysis->product_name ?: $analysis->page_title, $analysis->id);
+		$this->stream_excel($book, substr($name, 0, -4) . '.xlsx');
+	}
+
+	/** All captured products and available saved analyses for one crawl run. */
+	function Download_Crawl_Excel()
+	{
+		@set_time_limit(120);
+		$job = (string) $this->input->get('job');
+		if ( ! preg_match('/^[A-Za-z0-9_]{1,100}$/D', $job)) { show_404(); return; }
+		$dir = APPPATH . 'logs/competitor_crawl/jobs/';
+		$status = json_decode((string) @file_get_contents($dir . $job . '.json'), true);
+		$source = isset($status['url']) ? (string) $status['url'] : '';
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$stored = $this->Competitor_Crawl_Items_Model->Read_By_Job('competitor', $job);
+		if ( ! empty($stored)) {
+			$shaped = competitor_items_from_db_rows($stored);
+			$items = $shaped['items'];
+			$analysed = $shaped['analysed'];
+			if ($source === '') { $source = (string) $stored[0]->src_url; }
+		} else {
+			$items = json_decode((string) @file_get_contents($dir . $job . '.items.json'), true);
+			$analysed = isset($status['analysed']) && is_array($status['analysed']) ? $status['analysed'] : array();
+		}
+		if ( ! is_array($items) || empty($items)) { show_404(); return; }
+		$ids = array();
+		foreach ($items as $idx => $item) {
+			if (isset($analysed[$idx]['id'])) { $ids[] = (int) $analysed[$idx]['id']; }
+		}
+		$analyses = $this->Competitor_Analysis_Model->Read_By_Ids($ids);
+		$this->load->library('CompetitorExcelExport');
+		$book = $this->competitorexcelexport->crawl($items, $analysed, $analyses, $job, $source);
+		unset($stored, $shaped, $items, $analysed, $analyses, $status);
+		$this->stream_excel($book, 'crawl-' . $job . '.xlsx');
+	}
+
+	private function stream_excel($book, $filename)
+	{
+		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+		header('Content-Disposition: attachment; filename="' . $filename . '"');
+		header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+		header('Pragma: no-cache');
+		header('Expires: 0');
+		$writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($book);
+		$writer->setPreCalculateFormulas(false);
+		$writer->setUseDiskCaching(true, sys_get_temp_dir());
+		$writer->save('php://output');
+		$book->disconnectWorksheets();
+		exit;
+	}
+
 	function Delete()
 	{
 		if ( ! $this->input->is_ajax_request()) {

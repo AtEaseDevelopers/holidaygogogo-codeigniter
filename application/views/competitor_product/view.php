@@ -48,6 +48,9 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
                     <a href="<?php echo base_url('Competitor_Product/Download_Pdf?' . $pdf_qs); ?>" class="btn btn-light-danger font-weight-bold mr-2" data-toggle="tooltip" title="Download this analysis as a PDF">
                         <i class="la la-file-pdf"></i> <?php echo htmlspecialchars($L('download_pdf', 'Download PDF')); ?>
                     </a>
+                    <a href="<?php echo base_url('Competitor_Product/Download_Excel?' . $pdf_qs); ?>" class="btn btn-light-success font-weight-bold mr-2" data-toggle="tooltip" title="Download this analysis as an Excel workbook">
+                        <i class="la la-file-excel"></i> <?php echo $lang === 'cn' ? '下载 Excel' : 'Download Excel'; ?>
+                    </a>
                     <a href="<?php echo base_url('Competitor_Product'); ?>" class="btn btn-light-primary font-weight-bold">
                         <i class="la la-arrow-left"></i> <?php echo htmlspecialchars($L('back', 'Back')); ?>
                     </a>
