@@ -96,14 +96,25 @@
     var JOB        = '<?php echo $job; ?>';
     var DELETE_URL = '<?php echo base_url('Our_Product/Delete_Crawl_Items') ?>';
 
+    // Bulk actions apply only to enabled checkboxes in the current search results.
+    function selectableItems() {
+        return $('#products_body tr.product-row:visible .sel-item:not(:disabled)');
+    }
+    function selectedItems() {
+        return selectableItems().filter(':checked');
+    }
     function refreshSel() {
-        var n = $('.sel-item:checked').length;
+        var total = selectableItems().length;
+        var n = selectedItems().length;
         $('#sel_count').text(n);
         $('#del_count').text(n);
         $('#delete_selected').prop('disabled', n === 0);
+        $('#sel_all').prop('checked', total > 0 && n === total)
+            .prop('indeterminate', n > 0 && n < total)
+            .prop('disabled', total === 0);
     }
     $('#sel_all').on('change', function() {
-        $('.sel-item').prop('checked', this.checked);
+        selectableItems().prop('checked', this.checked);
         refreshSel();
     });
     $(document).on('change', '.sel-item', refreshSel);
@@ -128,9 +139,12 @@
         var q = $.trim($(this).val()).toLowerCase();
         $('#products_body tr.product-row').each(function() {
             var hay = String($(this).attr('data-search') || '');
-            $(this).toggle(q === '' || hay.indexOf(q) !== -1);
+            var matches = q === '' || hay.indexOf(q) !== -1;
+            $(this).toggle(matches);
+            if (!matches) $(this).find('.sel-item').prop('checked', false);
         });
         renumber();
+        refreshSel();
     });
 
     // Resync selection / numbering / empty-state after rows are removed.
@@ -170,9 +184,9 @@
             'It is removed from this crawl. Any saved analysis for it is also deleted.');
     });
 
-    // Bulk delete of every checked product.
+    // Bulk delete of the checked products in the current search results.
     $('#delete_selected').click(function() {
-        var $checked = $('.sel-item:checked');
+        var $checked = selectedItems();
         var indices = $checked.map(function() { return $(this).val(); }).get();
         if (!indices.length) { Display_Message(CA_IMG, 'Select at least one product', null); return; }
         deleteProducts(indices, $checked.closest('tr'),
@@ -200,7 +214,7 @@
     }
 
     $('#analyse_selected').click(function() {
-        var indices = $('.sel-item:checked').map(function() { return $(this).val(); }).get();
+        var indices = selectedItems().map(function() { return $(this).val(); }).get();
         if (!indices.length) { Display_Message(CA_IMG, 'Select at least one product', null); return; }
         var $btn = $(this), html = $btn.html();
         $btn.prop('disabled', true).html('<i class="la la-spinner la-spin"></i> Starting…');
