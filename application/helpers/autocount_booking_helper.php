@@ -82,3 +82,36 @@ if (!function_exists('enrich_autocount_booking')) {
         return $booking;
     }
 }
+
+/**
+ * Decide the AutoCount sync flags to write when a booking's content changes
+ * (guest list OR rooms edited) and must be pushed again.
+ *
+ * The pax head-count in the AutoCount "Remark 3" line comes from Room
+ * Management, so a room edit must re-flag the booking for re-sync — otherwise
+ * remark3 stays stale (e.g. "0 A" after rooms were filled in post-sync). This
+ * is the single source of that decision so the guest-list and room edit paths
+ * agree.
+ *
+ *   - Already synced ('S') via a Create/Update action → queue an Update ('U')
+ *     and reset status to Pending ('P') so the Cron/button re-pushes it.
+ *   - Otherwise (never synced yet, or a Delete pending) → just reset status to
+ *     Pending, keeping whatever action is already queued.
+ *
+ * @param string|null $sync_action Current booking.AutocountSyncAction (C/U/S/D).
+ * @param string|null $sync_status Current booking.AutocountSyncStatus (P/S/F).
+ * @return array Fields to update on the booking row.
+ */
+if (!function_exists('autocount_resync_flags')) {
+    function autocount_resync_flags($sync_action, $sync_status)
+    {
+        if (($sync_action === 'C' || $sync_action === 'U') && $sync_status === 'S') {
+            return array(
+                'AutocountSyncAction' => 'U',
+                'AutocountSyncStatus' => 'P',
+            );
+        }
+
+        return array('AutocountSyncStatus' => 'P');
+    }
+}

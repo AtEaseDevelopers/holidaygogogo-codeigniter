@@ -25,6 +25,7 @@ class Guest_List_Room extends MY_Controller
 			}
 			$room_id = $this->Guest_List_Room_Model->Create();
 			$this->Booking_Model->Sync_GL_From_Rooms($booking_id);
+			$this->Booking_Model->Flag_Autocount_Resync($booking_id);
 			echo json_encode(array('success' => true, 'room_id' => $room_id, 'message' => 'Room successfully created'));
 		} else {
 			echo json_encode(array('success' => false, 'message' => 'Invalid request'));
@@ -41,6 +42,7 @@ class Guest_List_Room extends MY_Controller
 			}
 			$this->Guest_List_Room_Model->Update();
 			$this->Booking_Model->Sync_GL_From_Rooms($room['booking_id']);
+			$this->Booking_Model->Flag_Autocount_Resync($room['booking_id']);
 			echo json_encode(array('success' => true, 'message' => 'Room successfully updated'));
 		} else {
 			echo json_encode(array('success' => false, 'message' => 'Invalid request'));
@@ -56,6 +58,7 @@ class Guest_List_Room extends MY_Controller
 		}
 		$this->Guest_List_Room_Model->Delete();
 		$this->Booking_Model->Sync_GL_From_Rooms($room['booking_id']);
+		$this->Booking_Model->Flag_Autocount_Resync($room['booking_id']);
 		echo json_encode(array('success' => true, 'message' => 'Room successfully deleted'));
 	}
 
@@ -82,6 +85,7 @@ class Guest_List_Room extends MY_Controller
 			$this->db->where('id', $room_id);
 			$this->db->update('guest_list_room');
 			$this->Booking_Model->Sync_GL_From_Rooms($room['booking_id']);
+			$this->Booking_Model->Flag_Autocount_Resync($room['booking_id']);
 			echo json_encode(array('success' => true, 'message' => 'Count increased'));
 		} else {
 			echo json_encode(array('success' => false, 'message' => 'Invalid request'));
@@ -113,6 +117,7 @@ class Guest_List_Room extends MY_Controller
 			$this->db->update('guest_list_room');
 			if($this->db->affected_rows() > 0) {
 				$this->Booking_Model->Sync_GL_From_Rooms($room['booking_id']);
+				$this->Booking_Model->Flag_Autocount_Resync($room['booking_id']);
 			}
 			echo json_encode(array('success' => true, 'message' => 'Count decreased'));
 		} else {

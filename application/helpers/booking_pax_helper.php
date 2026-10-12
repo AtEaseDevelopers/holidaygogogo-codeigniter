@@ -52,7 +52,14 @@ if (!function_exists('booking_pax_counts')) {
                     $counts[$type]++;
                 }
             }
-            return $counts;
+            // Only trust the roster when it actually yields a head-count. A
+            // roster made entirely of untyped/blank rows sums to 0 — treating
+            // that as "0 pax" would print "0 A, 0 C, 0 IN" even though the
+            // booking has pax recorded in its frozen columns, so fall through
+            // to those instead of returning a spurious zero.
+            if ($counts['ADULT'] + $counts['CHILD'] + $counts['INFANT'] > 0) {
+                return $counts;
+            }
         }
 
         if (!empty($booking)) {

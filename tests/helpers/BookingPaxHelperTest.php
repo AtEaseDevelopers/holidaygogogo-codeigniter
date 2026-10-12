@@ -146,6 +146,29 @@ check(
     booking_pax_counts(array(), array(guest('ADULT'), guest('SENIOR')))
 );
 
+// --- roster that sums to 0 falls through to the frozen columns --------------
+// A roster made entirely of untyped/blank rows must NOT report "0 A, 0 C, 0 IN"
+// over a booking that has pax in its frozen columns — the e-invoice Remark 3 and
+// the PDF both rely on this, otherwise the "0 A" bug reappears via the roster.
+
+check(
+    'roster of only untyped rows falls through to frozen columns',
+    array('ADULT' => 5, 'CHILD' => 0, 'INFANT' => 0),
+    booking_pax_counts(array(), array(guest(''), guest('SENIOR')), legacy_booking(5, 0, 0))
+);
+
+check(
+    'untyped-only roster remark uses frozen columns, not "0 A"',
+    '5 A, 0 C, 0 IN',
+    booking_pax_remark(array(), array(guest(''), guest('')), legacy_booking(5, 0, 0))
+);
+
+check(
+    'untyped-only roster with no frozen columns stays all zero',
+    array('ADULT' => 0, 'CHILD' => 0, 'INFANT' => 0),
+    booking_pax_counts(array(), array(guest(''), guest('')), null)
+);
+
 // --- robustness: array-shaped rows and missing keys -------------------------
 
 check(

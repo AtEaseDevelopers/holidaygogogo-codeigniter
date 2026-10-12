@@ -1944,27 +1944,30 @@ class Booking_Model extends CI_Model
 	// meaningful figure. Room management changes never write back to those fields.
 	function Compute_Pax_Counts($booking_id)
 	{
+		// Single source of truth for the booking pax, shared with the Booking
+		// Confirmation / Travel Voucher PDF (Booking_PDF_Generator::prepare_data)
+		// and the e-invoice "Remark 3" line (enrich_autocount_booking) via the
+		// booking_pax_counts helper, so every artifact tallies. Resolution order
+		// mirrors the PDF exactly: rooms first, then the guest_list roster, then
+		// the frozen booking.Adult/Children/Infant columns.
+		//
+		// Previously this skipped the guest_list step (rooms -> frozen), so a
+		// no-room booking whose frozen columns were NULL (common — they're left
+		// blank when pax is set via rooms/roster) read differently here than on
+		// the PDF and the e-invoice, letting the two disagree.
+		$this->load->helper('booking_pax');
 		$this->load->model('Guest_List_Room_Model');
+		$this->load->model('Guest_List_Model');
 
-		$adult = 0; $child = 0; $infant = 0;
-		$rooms = $this->Guest_List_Room_Model->Read_Rooms_By_Booking_ID($booking_id);
-		if(!empty($rooms)) {
-			foreach($rooms as $r) {
-				$adult  += (int)$r->adult_count;
-				$child  += (int)$r->child_count;
-				$infant += (int)$r->infant_count;
-			}
-		} else {
-			$this->db->select('Adult, Children, Infant');
-			$this->db->where('BookingID', $booking_id);
-			$row = $this->db->get('booking')->row();
-			if(!empty($row)) {
-				$adult  = (int)$row->Adult;
-				$child  = (int)$row->Children;
-				$infant = (int)$row->Infant;
-			}
-		}
-		return array('adult' => $adult, 'child' => $child, 'infant' => $infant);
+		$rooms  = $this->Guest_List_Room_Model->Read_Rooms_By_Booking_ID($booking_id);
+		$guests = empty($rooms) ? $this->Guest_List_Model->Read_Guests_By_Booking_ID($booking_id) : array();
+
+		$this->db->select('Adult, Children, Infant');
+		$this->db->where('BookingID', $booking_id);
+		$booking = $this->db->get('booking')->row();
+
+		$c = booking_pax_counts($rooms, $guests, $booking);
+		return array('adult' => $c['ADULT'], 'child' => $c['CHILD'], 'infant' => $c['INFANT']);
 	}
 
 	function Detect()
@@ -2815,6 +2818,27 @@ class Booking_Model extends CI_Model
 			$booking->CountryCodeID,
 			$email
 		);
+	}
+
+	/**
+	 * Re-flag a booking so the next AutoCount sync re-pushes it. Call this after
+	 * any change that affects the pushed content (guest list / room pax) — the
+	 * "Remark 3" pax line in AutoCount is derived from rooms, so a room edit made
+	 * after the first sync would otherwise leave remark3 stale. Decision logic
+	 * lives in the pure autocount_resync_flags() helper (tested).
+	 */
+	function Flag_Autocount_Resync($booking_id)
+	{
+		$this->load->helper('autocount_booking');
+		$booking = $this->find($booking_id);
+		if (empty($booking)) {
+			return;
+		}
+		$flags = autocount_resync_flags(
+			isset($booking->AutocountSyncAction) ? $booking->AutocountSyncAction : null,
+			isset($booking->AutocountSyncStatus) ? $booking->AutocountSyncStatus : null
+		);
+		$this->update_by_id($booking_id, $flags);
 	}
 
 	function Sync_GL_From_Rooms($booking_id)
