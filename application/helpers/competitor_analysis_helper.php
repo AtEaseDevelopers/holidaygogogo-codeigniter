@@ -172,8 +172,8 @@ if ( ! function_exists('competitor_output_contract'))
 			. '"tour_styles": string[] (DERIVE e.g. "Group tour","Free & easy","Luxury"), '
 			. '"difficulty": string (DERIVE physical difficulty e.g. "Easy","Moderate","Challenging"), '
 			. '"local_transport": string[] (coach, bullet train, cruise, ferry, etc.), '
-			. '"inclusions": string[] (what the price includes), '
-			. '"exclusions": string[] (what is NOT included), '
+			. '"inclusions": string[] (one included item per entry, only when the source explicitly confirms it is covered by the price; preserve quantities, dates, prices, exceptions and conditions with that item), '
+			. '"exclusions": string[] (one explicitly excluded item per entry; preserve quantities, prices, exceptions and conditions with that item. Missing inclusion information is UNKNOWN, not proof that something is excluded), '
 			. '"hotels": string[] (hotels/accommodation named), '
 			. '"meals": {"breakfast": string, "lunch": string, "dinner": string} (for each meal, work through the day-by-day meal plan and give the COUNT plus the exact days it is provided e.g. "3 (Day 2,3,4)"; "" if the plan never provides that meal — do not guess a count), '
 			. '"shopping_stops": string[] (EVERY shopping/factory/retail stop the source states. Format EACH item as "<stop> — <justification>" where the justification is GROUNDED IN FACT FROM THE SOURCE — state the concrete detail directly (the itinerary day and what happens there), e.g. "Pearl gallery — Day 3 includes a guided visit to a pearl factory". Do NOT invent stops or reasons; if the source names a stop but gives no supporting detail, list the stop alone with no justification), '
@@ -184,12 +184,12 @@ if ( ! function_exists('competitor_output_contract'))
 			. '"suitable_age": string (DERIVE suitable age range), '
 			. '"child_friendly": string (DERIVE "Yes"/"No" + short reason), '
 			. '"senior_friendly": string (DERIVE "Yes"/"No" + short reason), '
-			. '"usp": string[] (DERIVE unique selling points for the target traveller), '
+			. '"usp": string[] (DERIVE unique selling points for the target traveller, ONE specific selling point per entry in the format "<Category>: <selling point>". Use these exact category names consistently across products: "Destination coverage", "Scenic transport", "Unique experience", "Travel style", "Accommodation", "Meals", "Value", "Traveller features". Repeat a category for separate points, e.g. "Scenic transport: Bergen Railway" and "Scenic transport: Flåm Railway". For Scenic transport, create a separate entry for each named railway, cruise or ferry crossing; do not combine different modes or routes into one point. Do not imply that an experience is included in the price unless explicitly confirmed), '
 			. '"traveller_segments": [{"segment": string (EXACTLY one of: "single","elderly","teenager","couple","family_kids","family_elderly","company"), "suitability": string ("High"/"Medium"/"Low"), "justification": string (a THOROUGH, well-reasoned verdict of AT LEAST 4-6 sentences on WHY this tour does or does not suit that traveller type. Do NOT give a thin one-liner. Build the case by: (1) citing SEVERAL CONCRETE tour attributes by name — pace & walking difficulty, itinerary intensity & free time, meals, hotel tier, specific activities/attractions, child/senior friendliness, price/value, group vs free-and-easy style; (2) explaining HOW each cited attribute helps or hurts THIS specific traveller type (e.g. why long walking days matter for elderly, why the activity mix matters for teenagers); (3) naming BOTH the strongest reasons it fits AND the main caveats or trade-offs, so the reasoning is balanced; (4) ending with a clear takeaway that justifies the High/Medium/Low level given. Ground every claim in the source — do NOT invent facts.)}] '
 				. '(Assess ALL SEVEN traveller types once each, in that order. Judge each strictly from concrete clues in the source; give a suitability level and a rich, well-evidenced justification as described above. If the source genuinely gives no basis to judge a type, still include it with suitability "" and a short note on exactly what information is missing to make the call — do NOT invent facts), '
 			. '"itinerary": [{"day": string, "title": string, "description": string}] (one entry per day; the description must list ALL places/activities visited that day, not just a few), '
-			. '"pros": string[] (advantages FROM THE CUSTOMER\'S POINT OF VIEW — what a traveller booking this tour actually gains, not marketing spin. Format EACH item as "<benefit> — <justification>" where the justification explains WHY it matters to the customer, e.g. "Direct flights — less travel fatigue and a full extra day at the destination"), '
-			. '"cons": string[] (drawbacks FROM THE CUSTOMER\'S POINT OF VIEW — what a traveller should be wary of before booking. Format EACH item as "<drawback> — <justification>" explaining WHY it matters to the customer, e.g. "Many shopping stops — less sightseeing time and possible sales pressure"), '
+			. '"pros": string[] (advantages FROM THE CUSTOMER\'S POINT OF VIEW — what a traveller booking this tour actually gains, not marketing spin. ONE observation per entry, formatted "<benefit> — <justification>". The benefit must be supported by concrete tour details; explain its relevance without inventing outcomes, savings or extra sightseeing time), '
+			. '"cons": string[] (evidence-based drawbacks FROM THE CUSTOMER\'S POINT OF VIEW, ONE observation per entry. Distinguish a confirmed product limitation from a possible concern for a particular traveller: use "Product limitation: <drawback> — <justification>" for an explicit exclusion, restriction or extra cost; use "Traveller concern: <concern> — <affected traveller type and why it may matter>" for a potential suitability concern supported by concrete tour details. Use conditional language for concerns; never present them as universal defects. A missing price, child policy, accessibility detail or other unstated arrangement is NEVER eligible for cons, even if phrased as something to check or confirm; put it ONLY in special_remarks as "Information gap: <detail>". Do not invent sales pressure, tiring transfers, missing facilities or exclusions merely because the source does not mention them), '
 			. '"summary": string (a DETAILED overview, roughly 150-250 words, written as several short labelled paragraphs each separated by a BLANK LINE. Use these exact labels, each on its own line immediately followed by its text: '
 				. '"Overview:" (what the tour is — main destination, the FULL route through the key cities/regions in order, total duration, departure city, and the overall tour style & pace); '
 				. '"Best for:" (the ideal traveller for this tour and, if the source hints it, who it is NOT suited to, each with a short reason); '
@@ -197,16 +197,21 @@ if ( ! function_exists('competitor_output_contract'))
 				. '"Highlights:" (the 2-3 standout experiences that make this tour worth booking); '
 				. '"Watch-outs:" (the main limitations, extra costs or things a traveller should check before booking). '
 				. 'SYNTHESISE the source into genuine insight — do NOT merely restate raw field values. Omit any single labelled paragraph whose information is genuinely absent from the source rather than guessing, but keep the rest.), '
-			. '"comparison": string (FIRST find a product in OUR PRODUCTS below that MATCHES or is SIMILAR to this competitor product — same/overlapping destination or tour type. If one matches, compare against THAT product only: pricing, value, gaps, and a recommendation. If NONE of our products match or are similar, do NOT force a comparison — state plainly that we have no comparable product on our side for this destination/type.), '
+			. '"comparison": string (FIRST find a product in OUR PRODUCTS below that MATCHES or is SIMILAR to this competitor product — same/overlapping destination or tour type. If one matches, compare against THAT product only using these exact labels, each on its own line followed by its text, with a blank line between sections: "Matched product:", "Pricing:", "Competitor advantages:", "Our advantages:", "Gaps / unknowns:", "Recommendation:". Put each advantage or gap on its own line within its section. Separate confirmed advantages from missing information; never treat an unmentioned inclusion as an exclusion. Compare prices only on a stated, comparable currency and basis; otherwise explain the missing basis without guessing conversions. If NONE of our products match or are similar, do NOT force a comparison — use "No comparable product:" and state plainly that we have no comparable product on our side for this destination/type.), '
 			. '"matched_product": string (the EXACT "name" from OUR PRODUCTS you compared against in "comparison"; "" if none matched)'
 			. '}';
 		return "Reply with ONLY a single JSON object, no markdown, no code fences, matching exactly this shape: "
 			. $schema_hint . ". "
+			. "LIST FORMAT: every string[] field must be a JSON array of individual items, with ONE item per array entry. Do not pack multiple items into a paragraph, a comma/semicolon-delimited list, or a string containing several bullet points. Do not put bullet markers, numbering, or line breaks inside an entry. Keep each item's related qualifiers and conditions in the SAME entry; commas and semicolons within those conditions are allowed. The Excel export places each entry on its own line. Keep summary as prose, itinerary as one object per day, scenic_highlights as one object per place, and traveller_segments as one object per traveller type. "
+			. "Split source lines that bundle independent included/excluded items: for example, 'One lunch, one dinner and one breakfast' becomes THREE entries, 'One lunch', 'One dinner', 'One breakfast'; 'Airfare, insurance and camera fees (if any)' becomes THREE entries, preserving '(if any)' with camera fees. A qualification such as 'hotel accommodation including breakfast' stays together; a destination-coverage point may name several countries because it describes one coverage benefit. Never use a Value USP to repeat a bundle of all inclusions. "
 			. "CRITICAL: make NO assumptions. Every value must be grounded in the supplied source (the scraped/pasted/attached content and the itinerary) — treat the source as your only evidence. "
+			. "An itinerary mentioning a rail journey, cruise, flight, meal or activity does NOT by itself confirm that its cost is included. Preserve every stated quantity, duration, price, exception and condition; do not broaden 'selected journeys' into 'all journeys' or 'as specified' into 'daily'. "
+			. "Missing prices, child policies, facilities or arrangements are information gaps, not product drawbacks. When material, record them in special_remarks as 'Information gap: <detail that needs confirmation>' instead of putting them in cons or assuming they are unavailable. Ignore navigation, related tours and recommendation cards; never use another tour's price or inclusions for this product. If conflicting details cannot be resolved, leave the affected field unknown and preserve the conflict in special_remarks. "
 			. "WRITING STYLE: every human-readable value (all descriptions, justifications, pros, cons, highlights, summary and notes) is shown to — and shared directly with — the traveller, so write it as ready-to-send customer copy. State facts directly as facts and speak to the traveller naturally. NEVER refer to the evidence or how you know it: do not write \"the source states\", \"the source mentions\", \"the itinerary states/says/lists\", \"the terms require/state\", \"according to the source/page\" or any similar meta-reference. Grounding governs WHAT you may say, not HOW you phrase it — e.g. instead of \"The source states guests can relax by the pool\" write \"Unwind by the resort swimming pool\"; instead of \"the itinerary states 566KM for Aswan-Abu Simbel\" write \"Long drives such as 566KM Aswan-Abu Simbel-Aswan can be tiring\"; instead of \"the terms require travellers to be physically and medically fit\" write \"You should be physically and medically fit\". "
 			. "Fields marked DERIVE: only fill them when the source contains concrete clues that support the value; base the value strictly on those clues, not on general knowledge, typical-tour patterns, or what is likely. "
 			. "If the source gives no clue for a DERIVE field, leave it \"\" or []. Do NOT guess. "
-			. "For every other field use \"\" or [] when the source does not state it — never invent literal facts like prices, hotel names, dates or codes.";
+			. "For every other field use \"\" or [] when the source does not state it — never invent literal facts like prices, hotel names, dates or codes. "
+			. "FINAL REVIEW before returning JSON: verify that every list entry contains only ONE item with all its related conditions; every inclusion is explicitly confirmed; and every cons entry describes a confirmed attribute, restriction, exclusion or cost. Remove missing-information claims from cons and record them only as Information gap entries in special_remarks. For example, 'headline price is not displayed' is an Information gap, never a Product limitation. Unknown child policies, accessibility arrangements and luggage assistance are likewise Information gaps; a stated 2-berth cabin or transport change can support a conditional Traveller concern without claiming missing arrangements are drawbacks. Do not duplicate information gaps in cons. An unresolved conflict between a headline price and a dated price table is also an Information gap; leave affected price fields unknown and preserve both figures with their dates, adult/child basis and group-size conditions in special_remarks. Different adult/child or group-size rates are not themselves conflicts; keep each rate's conditions attached. An activity or food available at a visited attraction is not automatically included in the package price.";
 	}
 }
 
@@ -4359,6 +4364,49 @@ if ( ! function_exists('competitor_estimate_cost'))
 	}
 }
 
+if ( ! function_exists('competitor_list_items'))
+{
+	/**
+	 * Normalise multi-item fields for storage and Excel without interpreting prose.
+	 * Only explicit line/bullet boundaries are split. Commas and semicolons may
+	 * contain places, prices or conditions, so they stay with their original item.
+	 * Legacy JSON arrays and nested values are tolerated without losing labels.
+	 */
+	function competitor_list_items($value)
+	{
+		if (is_object($value)) { $value = (array) $value; }
+		if (is_string($value)) {
+			$decoded = json_decode($value, true);
+			$value = is_array($decoded) ? $decoded : array($value);
+		}
+		if ( ! is_array($value)) { return array(); }
+		$out = array();
+		foreach ($value as $key => $item) {
+			if (is_array($item) || is_object($item)) {
+				$parts = competitor_list_items($item);
+				$item_keys = array_keys((array) $item);
+				if (is_int($key) && $item_keys === range(0, count($item_keys) - 1)) {
+					// Flatten a nested list; each entry is already a separate item.
+					$out = array_merge($out, $parts);
+					continue;
+				}
+				// A structured item stays together, including its price/conditions.
+				$item = implode('; ', $parts);
+			}
+			if ( ! is_scalar($item)) { continue; }
+			$lines = preg_split('/(?:\r\n|[\r\n\x{2028}\x{2029}•▪●◦■])+/u', (string) $item);
+			foreach ($lines as $line) {
+				$line = preg_replace('/[\t\x{00A0}]+/u', ' ', $line);
+				$line = trim(preg_replace('/^\s*(?:[-*–—]\s+|\d+[.)]\s+)/u', '', $line));
+				if ($line !== '') {
+					$out[] = is_int($key) ? $line : ucfirst(str_replace('_', ' ', $key)) . ': ' . $line;
+				}
+			}
+		}
+		return $out;
+	}
+}
+
 if ( ! function_exists('competitor_parse_ai_response'))
 {
 	/**
@@ -4394,22 +4442,7 @@ if ( ! function_exists('competitor_parse_ai_response'))
 			}
 			return trim((string) $v);
 		};
-		$list = function ($v) {
-			if (is_string($v)) {
-				$v = $v === '' ? array() : preg_split('/\s*[\n;•]\s*/u', $v);
-			}
-			if ( ! is_array($v)) {
-				return array();
-			}
-			$out = array();
-			foreach ($v as $item) {
-				$item = trim((string) (is_array($item) ? implode(' ', $item) : $item));
-				if ($item !== '') {
-					$out[] = $item;
-				}
-			}
-			return array_values($out);
-		};
+		$list = 'competitor_list_items';
 		// Meals always returns the three known slots (blank when unknown) so the
 		// view can render a stable breakfast/lunch/dinner row.
 		$meals = function ($v) use ($str) {
@@ -5052,7 +5085,8 @@ if ( ! function_exists('competitor_build_translation_agent'))
 			. "(3) DO NOT translate or alter numbers, prices, currency codes, dates, tour codes, "
 			. "airport/flight codes, or URLs — copy them verbatim. "
 			. "(4) Render place names naturally in {$target}. "
-			. "(5) Return ONLY the JSON object — no commentary, no markdown, no code fence.";
+			. "(5) Keep ONE item per list entry, with its conditions and exceptions attached; do not combine entries, add bullet markers, or put line breaks inside an entry. Preserve category prefixes and labelled comparison sections in a consistent translated format. "
+			. "(6) Return ONLY the JSON object — no commentary, no markdown, no code fence.";
 		// The input must mention "json" for the Responses API json_object format mode
 		// (which guarantees a syntactically valid reply — the model otherwise
 		// occasionally emits an unbalanced brace on long CJK output).

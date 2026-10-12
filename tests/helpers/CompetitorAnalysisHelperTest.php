@@ -1782,6 +1782,41 @@ $str_list = json_encode(array('product_name' => 'X', 'inclusions' => "Hotel\nBre
 check('parse coerces string list', array('Hotel', 'Breakfast', 'Transfer'),
     competitor_parse_ai_response($str_list)['inclusions']);
 
+// List formatting must keep price/quantity/exception evidence with its item.
+check('list keeps commas and conditional semicolons',
+    array('Breakfast on Days 2, 3; except early departures', 'Camera fees (if any)'),
+    competitor_list_items("- Breakfast on Days 2, 3; except early departures\r\n• Camera fees (if any)"));
+check('list removes numbering without losing quantities',
+    array('11 nights of hotel accommodation', '2-hour Flåm–Gudvangen cruise'),
+    competitor_list_items("1. 11 nights of hotel accommodation\r2) 2-hour Flåm–Gudvangen cruise"));
+check('list preserves destination coverage as one point',
+    array('Destination coverage: Denmark, Norway, Sweden and Finland'),
+    competitor_list_items('Destination coverage: Denmark, Norway, Sweden and Finland'));
+check('list supports inline explicit bullets', array('Hotel', 'Breakfast', 'Transfers'),
+    competitor_list_items('Hotel • Breakfast ▪ Transfers'));
+check('list handles Unicode separators and whitespace', array('Hotel', 'Breakfast', 'Transfer'),
+    competitor_list_items("–\u{00A0}Hotel\u{00A0}\u{2028}◦ Breakfast\u{2029}■\tTransfer"));
+check('list decodes legacy JSON arrays', array('Hotel', 'Selected scenic rail journeys'),
+    competitor_list_items('["Hotel", "Selected scenic rail journeys"]'));
+check('list flattens nested lists', array('Hotel', 'Breakfast', 'Lunch'),
+    competitor_list_items(array('Hotel', array('Breakfast', 'Lunch'))));
+check('list keeps structured item conditions together',
+    array('Name: Fjord cruise; Price: EUR 50; Conditions: Minimum 2 travellers; weather permitting'),
+    competitor_list_items(array(array('name' => 'Fjord cruise', 'price' => 'EUR 50',
+        'conditions' => 'Minimum 2 travellers; weather permitting'))));
+check('list drops empty entries', array('Hotel'), competitor_list_items(array(null, '', ' ', array(), 'Hotel')));
+check('list unknown stays empty', array(), competitor_list_items(null));
+check('list never invents boundaries in legacy prose', array('Hotel, breakfast and transfers; selected days only'),
+    competitor_list_items('Hotel, breakfast and transfers; selected days only'));
+$multi = competitor_parse_ai_response(json_encode(array(
+    'usp' => array("• Scenic transport: Bergen Railway\n• Scenic transport: Flåm Railway"),
+    'cons' => "Product limitation: Flight excluded — book separately\nTraveller concern: Self-guided — may not suit escorted-tour travellers",
+    'optional_tours' => array('Boat trip: RM 80; minimum 4 pax (subject to weather)'),
+)));
+check('parse normalises multiline entries inside arrays', array('Scenic transport: Bergen Railway', 'Scenic transport: Flåm Railway'), $multi['usp']);
+check('parse keeps limitation and concern separate', 2, count($multi['cons']));
+check('parse preserves optional price and conditions', array('Boat trip: RM 80; minimum 4 pax (subject to weather)'), $multi['optional_tours']);
+
 // scalar arriving as array is joined
 $arr_scalar = json_encode(array('product_name' => array('A', 'B')));
 check('parse joins array scalar', 'A, B', competitor_parse_ai_response($arr_scalar)['product_name']);
@@ -1893,6 +1928,14 @@ check_true('contract asks for detailed summary', stripos($contract, 'DETAILED ov
 check_true('contract summary lists labelled sections', stripos($contract, '"Best for:"') !== false
     && stripos($contract, '"Watch-outs:"') !== false);
 check_true('contract summary wants synthesis not restatement', stripos($contract, 'SYNTHESISE') !== false);
+check_true('contract requires one item per list entry', strpos($contract, 'ONE item per array entry') !== false);
+check_true('contract gives stable USP categories', strpos($contract, 'Use these exact category names consistently across products') !== false);
+check_true('contract distinguishes limitations and concerns', strpos($contract, 'Product limitation:') !== false && strpos($contract, 'Traveller concern:') !== false);
+check_true('contract treats missing inclusion as unknown', strpos($contract, 'Missing inclusion information is UNKNOWN') !== false);
+check_true('contract preserves selected journeys and meal conditions', strpos($contract, "do not broaden 'selected journeys' into 'all journeys' or 'as specified' into 'daily'") !== false);
+check_true('contract separates comparison advantages and gaps', strpos($contract, '"Competitor advantages:"') !== false && strpos($contract, '"Gaps / unknowns:"') !== false);
+check_true('contract final review excludes missing prices from cons', strpos($contract, "'headline price is not displayed' is an Information gap, never a Product limitation") !== false);
+check_true('contract preserves conflicting price evidence and bases', strpos($contract, 'preserve both figures with their dates, adult/child basis and group-size conditions') !== false);
 
 // ---- competitor_summary_sections -------------------------------------------
 $labelled = "Overview: A 5D4N Bali tour through Denpasar and Ubud.\n\n"

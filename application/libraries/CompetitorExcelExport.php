@@ -75,6 +75,7 @@ class CompetitorExcelExport
             array('Breakfast', 'Lunch', 'Dinner'));
         $products = array(); $days = array(); $scenic = array(); $segments = array();
         $labels = competitor_ui_labels($lang);
+        $list_fields = competitor_translate_list_keys();
         foreach ($analyses as $a) {
             foreach (competitor_display_products($a) as $p) {
                 $number = count($products) + 1;
@@ -82,7 +83,11 @@ class CompetitorExcelExport
                 $row = array($number, (int) $a->id, isset($a->competitor_name) ? (string) $a->competitor_name : '',
                     (string) $a->url, (string) $a->created_at, (float) $a->cost_usd, (string) $a->status,
                     isset($a->error_message) ? (string) $a->error_message : '');
-                foreach ($fields as $key => $label) { $row[] = $this->text(isset($p[$key]) ? $p[$key] : ''); }
+                foreach ($fields as $key => $label) {
+                    $value = isset($p[$key]) ? $p[$key] : '';
+                    $row[] = in_array($key, $list_fields, true)
+                        ? implode("\n", competitor_list_items($value)) : $this->text($value);
+                }
                 foreach (array('breakfast', 'lunch', 'dinner') as $meal) {
                     $row[] = $this->text(isset($p['meals'][$meal]) ? $p['meals'][$meal] : '');
                 }
@@ -165,6 +170,7 @@ class CompetitorExcelExport
         foreach ($columns as $index => $label) {
             $column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index + 1);
             $width = preg_match('/Text|Description|Summary|Comparison|Justification|Remarks/', $label) ? 70 : 25;
+            if (in_array($label, array('Unique Selling Points', 'Inclusions', 'Exclusions', 'Pros', 'Cons', 'Optional Tours', 'Shopping Stops'), true)) { $width = 60; }
             if (strpos($label, 'URL') !== false || strpos($label, 'Source') !== false) { $width = 45; }
             if (strpos($label, 'No.') !== false || $label === 'Part') { $width = 12; }
             $sheet->getColumnDimension($column)->setWidth($width);
