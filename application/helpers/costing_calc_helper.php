@@ -280,6 +280,69 @@ if (!function_exists('costing_combination_summary')) {
     }
 }
 
+if (!function_exists('costing_normalize_headcount')) {
+    /**
+     * Normalise a posted per-category headcount map (category code => count) for a
+     * combination. Keeps only codes in $allowed_codes (the categories flagged with a
+     * headcount multiplier on the master) and only counts ≥ 2 (a count of 1 is the
+     * no-op default, so it is dropped to keep the stored map minimal). Codes are
+     * lowercased/trimmed. Pure so it stays testable.
+     *
+     * @param mixed    $raw           posted map (assoc array) or anything else
+     * @param string[] $allowed_codes category codes permitted to carry a count
+     * @return array<string,int> clean map, e.g. ['tour_leader' => 2]
+     */
+    function costing_normalize_headcount($raw, $allowed_codes)
+    {
+        $allowed = array();
+        foreach ((array) $allowed_codes as $code) {
+            $allowed[strtolower(trim((string) $code))] = true;
+        }
+        $out = array();
+        foreach ((array) $raw as $code => $count) {
+            $code = strtolower(trim((string) $code));
+            if ($code === '' || !isset($allowed[$code])) {
+                continue;
+            }
+            $n = (int) $count;
+            if ($n >= 2) {
+                $out[$code] = $n;
+            }
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('costing_decode_headcount')) {
+    /**
+     * Decode a combination's stored headcount_json into a clean map (category code =>
+     * int ≥ 2). Invalid JSON / non-array / counts < 2 collapse to an empty map (the
+     * no-op default). Pure, mirrors costing_normalize_headcount's output shape.
+     *
+     * @param mixed $json JSON string (or null)
+     * @return array<string,int>
+     */
+    function costing_decode_headcount($json)
+    {
+        if (!is_string($json) || trim($json) === '') {
+            return array();
+        }
+        $decoded = json_decode($json, true);
+        if (!is_array($decoded)) {
+            return array();
+        }
+        $out = array();
+        foreach ($decoded as $code => $count) {
+            $code = strtolower(trim((string) $code));
+            $n = (int) $count;
+            if ($code !== '' && $n >= 2) {
+                $out[$code] = $n;
+            }
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('costing_fold_general_combination')) {
     /**
      * Fold the "General Combination" cost into every other combination (feedback
@@ -298,35 +361,43 @@ if (!function_exists('costing_fold_general_combination')) {
      * not twice (feedback 29 Sep 2026). Each item row carries 'base_total' (its pure
      * MYR conversion), 'currency_id' and 'bank_charges_myr'.
      *
-     * "No. of Tour Leaders" ($combo['tour_leader_count'], default 1) sits on the
-     * Tour Leader section of the combination that OWNS those rows and scales ONLY
-     * that section's cost — the summary / quotation PDF price reflects N tour leaders
-     * while the item-card line totals are left untouched. A combination's extra =
-     * (N − 1) × sum of ITS OWN tour-leader rows' MYR. The General combination's own
-     * tour-leader extra is computed with the General's count and then folds into
-     * every regular combination. Anything below 1 is treated as 1 (no change). Bank
-     * charges are a per-currency transaction fee and are NOT scaled.
+     * A headcount multiplier (e.g. "No. of Tour Leaders") sits on each flagged
+     * category's section of the combination that OWNS those rows and scales ONLY
+     * that section's cost — the summary / quotation PDF price reflects N of that
+     * resource while the item-card line totals are left untouched. Which categories
+     * can be scaled is configured on the Costing category master, so the per-combo
+     * counts arrive here as a map keyed by category code:
+     *   $combo['headcount'] = ['tour_leader' => 2, 'tour_guide' => 3, ...]
+     * A combination's extra = Σ over each item whose category code is in the map:
+     * (count − 1) × that item's MYR. The General combination's own extra is computed
+     * from its map and then folds into every regular combination. Any count below 1
+     * is treated as 1 (no change). Bank charges are a per-currency transaction fee
+     * and are NOT scaled.
      *
-     * @param array $combinations each: ['cost_myr', 'items'(rows), 'is_general'(opt), 'tour_leader_count'(opt), ...]
+     * @param array $combinations each: ['cost_myr', 'items'(rows), 'is_general'(opt), 'headcount'(opt map), ...]
      * @return array regular combinations with cost_myr including the general cost + bank
      */
     function costing_fold_general_combination($combinations)
     {
-        // A combination's extra cost for additional tour leaders, from its OWN
-        // tour-leader rows scaled by its OWN count (0 when count <= 1 / no tl rows).
-        $tl_extra = function ($combo) {
-            $count = max(1.0, (float) (isset($combo['tour_leader_count']) ? $combo['tour_leader_count'] : 1));
-            if ($count <= 1.0) {
+        // A combination's extra cost for additional headcount, from its OWN rows in
+        // flagged categories scaled by that category's OWN count.
+        $hc_extra = function ($combo) {
+            $counts = (isset($combo['headcount']) && is_array($combo['headcount'])) ? $combo['headcount'] : array();
+            if (empty($counts)) {
                 return 0.0;
             }
-            $sum = 0.0;
+            $extra = 0.0;
             foreach ((array) (isset($combo['items']) ? $combo['items'] : array()) as $item) {
                 $cat = strtolower(trim((string) (isset($item['category']) ? $item['category'] : '')));
-                if ($cat === 'tour_leader') {
-                    $sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
+                if ($cat === '' || !isset($counts[$cat])) {
+                    continue;
+                }
+                $count = max(1.0, (float) $counts[$cat]);
+                if ($count > 1.0) {
+                    $extra += ($count - 1.0) * (float) (isset($item['base_total']) ? $item['base_total'] : 0);
                 }
             }
-            return ($count - 1.0) * $sum;
+            return $extra;
         };
 
         $general_items = array();
@@ -337,8 +408,8 @@ if (!function_exists('costing_fold_general_combination')) {
                     $general_items[] = $item;
                     $general_sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
                 }
-                // General's own tour-leader count scales its folded tour-leader cost.
-                $general_sum += $tl_extra($combo);
+                // General's own headcount counts scale its folded cost.
+                $general_sum += $hc_extra($combo);
             }
         }
 
@@ -352,8 +423,8 @@ if (!function_exists('costing_fold_general_combination')) {
             foreach ($own_items as $item) {
                 $own_sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
             }
-            // This combination's own tour-leader count scales its own tour-leader rows.
-            $own_sum += $tl_extra($combo);
+            // This combination's own headcount counts scale its own rows.
+            $own_sum += $hc_extra($combo);
             $union = array_merge($own_items, $general_items);
             $combo['cost_myr'] = round($own_sum + $general_sum + costing_bank_total($union), 2);
             $out[] = $combo;

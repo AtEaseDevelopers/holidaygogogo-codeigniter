@@ -53,6 +53,29 @@ class Costing_Category_Model extends CI_Model
     }
 
     /**
+     * Active category codes flagged with a headcount multiplier (e.g. Tour Leader).
+     * These are the categories whose section header shows a "No. of …" count in each
+     * combination and whose cost is scaled by it in the summary / quotation PDF.
+     *
+     * @return string[] lowercased category codes
+     */
+    public function Read_Headcount_Codes()
+    {
+        $rows = $this->db
+            ->select('code')
+            ->where('Status', 'Y')
+            ->where('has_headcount_multiplier', 1)
+            ->get('costing_categories')
+            ->result_array();
+
+        $codes = array();
+        foreach ($rows as $row) {
+            $codes[] = strtolower(trim((string) $row['code']));
+        }
+        return $codes;
+    }
+
+    /**
      * One active category by id, or null.
      */
     public function Read_Category($id)
@@ -79,9 +102,15 @@ class Costing_Category_Model extends CI_Model
             return false;
         }
 
+        // Does this category carry a headcount multiplier (e.g. No. of Tour Leaders)?
+        $has_headcount = !empty($data['has_headcount_multiplier']) ? 1 : 0;
+
         if ($id > 0) {
             $this->db->where('id', $id);
-            $this->db->update('costing_categories', array('name' => $name));
+            $this->db->update('costing_categories', array(
+                'name' => $name,
+                'has_headcount_multiplier' => $has_headcount,
+            ));
             return true;
         }
 
@@ -94,6 +123,7 @@ class Costing_Category_Model extends CI_Model
             'code'       => $code,
             'name'       => $name,
             'sort_order' => $next_sort,
+            'has_headcount_multiplier' => $has_headcount,
         ));
         return $this->db->insert_id() > 0;
     }

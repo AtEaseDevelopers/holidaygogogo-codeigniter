@@ -159,10 +159,11 @@ class Costing_Seed extends CI_Controller
 
         $combinations = array(
             // Each combination owns its Tour Leader section, so the count input shows
-            // next to its label and scales that combo independently.
-            array('name' => 'Standard', 'tour_leader_count' => 1, 'rows' => array($flight(), $hotel(3), $leader())),
+            // next to its label and scales that combo independently. Headcount is a
+            // per-category map keyed by category code (only flagged categories apply).
+            array('name' => 'Standard', 'headcount' => array('tour_leader' => 1), 'rows' => array($flight(), $hotel(3), $leader())),
             // Premium seeds 2 leaders so the effect is visible on first open.
-            array('name' => 'Premium', 'tour_leader_count' => 2, 'rows' => array($flight(), $hotel(4), $leader())),
+            array('name' => 'Premium', 'headcount' => array('tour_leader' => 2), 'rows' => array($flight(), $hotel(4), $leader())),
         );
 
         $booking_id = $this->Costing_Model->Generate_Booking_Snapshot($package_id, array(

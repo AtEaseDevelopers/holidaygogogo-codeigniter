@@ -385,18 +385,18 @@ $gc_multi = costing_fold_general_combination([
 $assertions['general: multiple general sum']      = $approx($gc_multi[0]['cost_myr'], 1150.0);
 
 /* ------------------------------------------------------------------ *
- * 6d) TOUR-LEADER COUNT ("No. of Tour Leaders"), owner-scales-own      *
+ * 6d) HEADCOUNT MULTIPLIER (category-master driven), owner-scales-own  *
  * ------------------------------------------------------------------ *
- * The count sits on the Tour Leader section of the combination that    *
- * OWNS those rows and scales ONLY that section (summary / PDF; item-    *
- * card line totals untouched). A combo's extra = (N - 1) × its OWN      *
- * tour-leader MYR. The General's own count scales the folded General    *
- * tour-leader cost. Absent / < 1 behaves as 1.                         */
+ * Each combo carries a per-category count map $combo['headcount'] =    *
+ * ['tour_leader'=>2,...]. A combo scales ONLY its OWN rows in those     *
+ * categories (summary / PDF; item-card line totals untouched). extra =  *
+ * Σ (count-1) × row MYR. The General's own map scales its folded cost.  *
+ * Absent / < 1 behaves as 1.                                           */
 
 // Tour leader lives in the General combo (300). The count sits on the section that
 // OWNS the rows -> the General's count scales the folded 300 for every regular.
 $tl_gen = [
-    ['name' => 'General', 'is_general' => 1, 'tour_leader_count' => 2, 'items' => [
+    ['name' => 'General', 'is_general' => 1, 'headcount' => ['tour_leader' => 2], 'items' => [
         ['base_total' => 300.0, 'category' => 'tour_leader',   'currency_id' => 1, 'bank_charges_myr' => 0.0],
     ]],
     ['name' => 'Standard', 'items' => [
@@ -408,47 +408,73 @@ $tl_gen = [
 ];
 $g = costing_fold_general_combination($tl_gen);
 // General tl 300×2=600 folds into both. Standard 1000+600=1600; Premium 2000+600=2600.
-$assertions['tl: general count scales folded (std)'] = $approx($g[0]['cost_myr'], 1600.0);
-$assertions['tl: general count scales folded (prm)'] = $approx($g[1]['cost_myr'], 2600.0);
+$assertions['hc: general count scales folded (std)'] = $approx($g[0]['cost_myr'], 1600.0);
+$assertions['hc: general count scales folded (prm)'] = $approx($g[1]['cost_myr'], 2600.0);
 // General count 1 -> unchanged (1000 + 300).
-$tl_gen1 = $tl_gen; $tl_gen1[0]['tour_leader_count'] = 1;
-$assertions['tl: general count 1 unchanged']  = $approx(costing_fold_general_combination($tl_gen1)[0]['cost_myr'], 1300.0);
-// Absent count -> treated as 1.
-$tl_gen0 = $tl_gen; unset($tl_gen0[0]['tour_leader_count']);
-$assertions['tl: absent count is 1']          = $approx(costing_fold_general_combination($tl_gen0)[0]['cost_myr'], 1300.0);
+$tl_gen1 = $tl_gen; $tl_gen1[0]['headcount'] = ['tour_leader' => 1];
+$assertions['hc: general count 1 unchanged']  = $approx(costing_fold_general_combination($tl_gen1)[0]['cost_myr'], 1300.0);
+// Absent map -> treated as 1.
+$tl_gen0 = $tl_gen; unset($tl_gen0[0]['headcount']);
+$assertions['hc: absent map is 1']            = $approx(costing_fold_general_combination($tl_gen0)[0]['cost_myr'], 1300.0);
 
 // Own tour leader on a regular combo scaled by its own count. 700 + (3-1)×200 = 1100.
 $tl_own = [
-    ['name' => 'A', 'tour_leader_count' => 3, 'items' => [
+    ['name' => 'A', 'headcount' => ['tour_leader' => 3], 'items' => [
         ['base_total' => 200.0, 'category' => 'tour_leader', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
         ['base_total' => 500.0, 'category' => 'flight',      'currency_id' => 1, 'bank_charges_myr' => 0.0],
     ]],
 ];
-$assertions['tl: own-combo count scales own tl'] = $approx(costing_fold_general_combination($tl_own)[0]['cost_myr'], 1100.0);
+$assertions['hc: own-combo count scales own section'] = $approx(costing_fold_general_combination($tl_own)[0]['cost_myr'], 1100.0);
 
 // Mixed: general own tl (count 2) + regular own tl (count 3) stack independently.
 // general_sum = 100 + (2-1)×100 = 200; own = (50+1000) + (3-1)×50 = 1150; total 1350.
 $tl_mix = [
-    ['name' => 'G', 'is_general' => 1, 'tour_leader_count' => 2, 'items' => [
+    ['name' => 'G', 'is_general' => 1, 'headcount' => ['tour_leader' => 2], 'items' => [
         ['base_total' => 100.0, 'category' => 'tour_leader', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
     ]],
-    ['name' => 'R', 'tour_leader_count' => 3, 'items' => [
+    ['name' => 'R', 'headcount' => ['tour_leader' => 3], 'items' => [
         ['base_total' => 50.0,   'category' => 'tour_leader',   'currency_id' => 1, 'bank_charges_myr' => 0.0],
         ['base_total' => 1000.0, 'category' => 'accommodation', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
     ]],
 ];
-$assertions['tl: mixed own+general counts'] = $approx(costing_fold_general_combination($tl_mix)[0]['cost_myr'], 1350.0);
-// Count < 1 clamps to 1; no tour-leader rows -> no-op.
-$assertions['tl: no tour-leader rows -> no-op'] = $approx(costing_fold_general_combination([
-    ['name' => 'B', 'tour_leader_count' => 5, 'items' => [['base_total' => 400.0, 'category' => 'flight', 'currency_id' => 1, 'bank_charges_myr' => 0.0]]],
+$assertions['hc: mixed own+general counts'] = $approx(costing_fold_general_combination($tl_mix)[0]['cost_myr'], 1350.0);
+
+// Multiple flagged categories in ONE combo, each with its own count.
+// flight 500×(2-1)=500 + guide 300×(3-1)=600 extra; base 500+300+1000=1800 -> 2900.
+$tl_multi = [
+    ['name' => 'M', 'headcount' => ['flight' => 2, 'tour_guide' => 3], 'items' => [
+        ['base_total' => 500.0,  'category' => 'flight',       'currency_id' => 1, 'bank_charges_myr' => 0.0],
+        ['base_total' => 300.0,  'category' => 'tour_guide',   'currency_id' => 1, 'bank_charges_myr' => 0.0],
+        ['base_total' => 1000.0, 'category' => 'accommodation','currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+];
+$assertions['hc: multiple flagged categories'] = $approx(costing_fold_general_combination($tl_multi)[0]['cost_myr'], 2900.0);
+// Count < 1 clamps to 1; category not in map -> no-op.
+$assertions['hc: unflagged category -> no-op'] = $approx(costing_fold_general_combination([
+    ['name' => 'B', 'headcount' => ['tour_leader' => 5], 'items' => [['base_total' => 400.0, 'category' => 'flight', 'currency_id' => 1, 'bank_charges_myr' => 0.0]]],
 ])[0]['cost_myr'], 400.0);
+
+/* ------------------------------------------------------------------ *
+ * 6e) HEADCOUNT MAP normalize / decode                                *
+ * ------------------------------------------------------------------ */
+// Keeps only flagged codes, counts >= 2, lowercased.
+$hn = costing_normalize_headcount(['tour_leader' => '3', 'flight' => 2, 'meals' => 1, 'accommodation' => 5], ['tour_leader', 'flight', 'meals']);
+$assertions['hc-norm: keeps flagged >=2']      = ($hn === ['tour_leader' => 3, 'flight' => 2]);
+$assertions['hc-norm: drops count 1']          = (!isset($hn['meals']));
+$assertions['hc-norm: drops unflagged']        = (!isset($hn['accommodation']));
+$assertions['hc-norm: non-array -> empty']     = (costing_normalize_headcount('x', ['tour_leader']) === []);
+// Decode JSON back to a clean map.
+$assertions['hc-dec: valid json']              = (costing_decode_headcount('{"tour_leader":2,"flight":3}') === ['tour_leader' => 2, 'flight' => 3]);
+$assertions['hc-dec: drops <2']                = (costing_decode_headcount('{"tour_leader":1}') === []);
+$assertions['hc-dec: null -> empty']           = (costing_decode_headcount(null) === []);
+$assertions['hc-dec: garbage -> empty']        = (costing_decode_headcount('not json') === []);
 
 /* ------------------------------------------------------------------ *
  * 7) SOURCE CONTRACT                                                  *
  * ------------------------------------------------------------------ */
 
 $helper = @file_get_contents(__DIR__ . '/../../application/helpers/costing_calc_helper.php');
-foreach (['costing_categories', 'costing_line_to_myr', 'costing_sum_by_category', 'costing_apply_markup', 'costing_cost_after_markup', 'costing_build_snapshot_rows', 'costing_normalize_rate', 'costing_multiplier_types', 'costing_multiplier_count', 'costing_row_myr', 'costing_row_totals', 'costing_bank_total', 'costing_supplier_payment_count', 'costing_currency_breakdown', 'costing_combination_summary', 'costing_fold_general_combination'] as $fn) {
+foreach (['costing_categories', 'costing_line_to_myr', 'costing_sum_by_category', 'costing_apply_markup', 'costing_cost_after_markup', 'costing_build_snapshot_rows', 'costing_normalize_rate', 'costing_multiplier_types', 'costing_multiplier_count', 'costing_row_myr', 'costing_row_totals', 'costing_bank_total', 'costing_supplier_payment_count', 'costing_currency_breakdown', 'costing_combination_summary', 'costing_fold_general_combination', 'costing_normalize_headcount', 'costing_decode_headcount'] as $fn) {
     $assertions["helper: defines {$fn}()"] = (bool) preg_match('/function\s+' . preg_quote($fn, '/') . '\s*\(/', (string) $helper);
 }
 

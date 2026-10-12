@@ -72,12 +72,13 @@ $filter_open = !empty($category_filters['name']);
                                 <th style="text-align:center; width:70px;">No.</th>
                                 <th style="text-align:center;">Category Name</th>
                                 <th style="text-align:center; width:220px;">Code</th>
+                                <th style="text-align:center; width:160px;">Headcount No.</th>
                                 <th class="action" style="text-align:center; width:200px;">Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (empty($categories)) { ?>
-                                <tr><td colspan="4" style="text-align:center; padding:16px;">Categories Not Found</td></tr>
+                                <tr><td colspan="5" style="text-align:center; padding:16px;">Categories Not Found</td></tr>
                             <?php } else { $count = 1; ?>
                                 <?php foreach ($categories as $category) { $is_fallback = ((string) $category['code'] === $fallback_code); ?>
                                     <tr>
@@ -85,6 +86,13 @@ $filter_open = !empty($category_filters['name']);
                                         <td><div class="font-weight-bold text-dark"><?php echo html_escape($category['name']); ?></div></td>
                                         <td style="text-align:center;">
                                             <span class="label label-lg label-light-primary label-inline costing-cat-code"><?php echo html_escape($category['code']); ?></span>
+                                        </td>
+                                        <td style="text-align:center;">
+                                            <?php if (!empty($category['has_headcount_multiplier'])) { ?>
+                                                <span class="label label-lg label-light-success label-inline" title="This category shows a 'No. of …' count per combination that scales its cost">On</span>
+                                            <?php } else { ?>
+                                                <span class="text-muted">—</span>
+                                            <?php } ?>
                                         </td>
                                         <td>
                                             <div class="d-flex justify-content-center flex-wrap" style="gap:6px;">
@@ -120,10 +128,19 @@ $filter_open = !empty($category_filters['name']);
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close"><i aria-hidden="true" class="ki ki-close"></i></button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-group mb-0">
+                    <div class="form-group">
                         <label>Name</label>
                         <input type="text" name="name" id="modal_category_name" class="form-control" required>
                         <span class="form-text text-muted">A short code is generated automatically on create and stays fixed after.</span>
+                    </div>
+                    <div class="form-group mb-0">
+                        <label>Headcount Multiplier</label>
+                        <div class="checkbox-inline" style="margin-top:8px;">
+                            <label class="checkbox checkbox-lg">
+                                <input type="checkbox" name="has_headcount_multiplier" id="modal_category_headcount" value="1"><span></span> Show a "No. of …" count (e.g. <strong>No. of Tour Leaders</strong>)
+                            </label>
+                        </div>
+                        <span class="form-text text-muted">When on, each combination shows a count next to this category's section that multiplies its cost in the summary &amp; quotation PDF (the cost rows stay unchanged).</span>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -140,11 +157,13 @@ $filter_open = !empty($category_filters['name']);
         var title = document.getElementById('category_modal_title');
         var idInput = document.getElementById('modal_category_id');
         var nameInput = document.getElementById('modal_category_name');
+        var headcountInput = document.getElementById('modal_category_headcount');
 
         function resetModal() {
             title.textContent = 'Add Category';
             idInput.value = '';
             nameInput.value = '';
+            headcountInput.checked = false;
         }
 
         document.getElementById('add_category_button').addEventListener('click', resetModal);
@@ -156,6 +175,7 @@ $filter_open = !empty($category_filters['name']);
                 title.textContent = 'Edit Category';
                 idInput.value = category.id || '';
                 nameInput.value = category.name || '';
+                headcountInput.checked = (String(category.has_headcount_multiplier) === '1');
                 $('#category_modal').modal('show');
             } catch (e) { console.error('Unable to read category data.', e); }
         });

@@ -545,8 +545,8 @@ class Costing_Model extends CI_Model
                 'selling_price_per_pax' => isset($combo['selling_price_per_pax']) ? $combo['selling_price_per_pax'] : null,
                 // General combination (item 6): its cost folds into every other combo.
                 'is_general' => !empty($combo['is_general']) ? 1 : 0,
-                // Per-combination No. of Tour Leaders (default 1).
-                'tour_leader_count' => isset($combo['tour_leader_count']) ? max(1, (int) $combo['tour_leader_count']) : 1,
+                // Per-combination, per-category headcount counts (JSON map or NULL).
+                'headcount_json' => isset($combo['headcount_json']) ? $combo['headcount_json'] : null,
                 'sort_order' => $sort,
             ));
             $combination_id = (int) $this->db->insert_id();
@@ -1700,7 +1700,7 @@ class Costing_Model extends CI_Model
         $booking_id = (int) $booking_id;
 
         $combos = $this->db
-            ->select('id, name, selling_price_per_pax, is_general, tour_leader_count')
+            ->select('id, name, selling_price_per_pax, is_general, headcount_json')
             ->where('costing_booking_id', $booking_id)
             ->order_by('sort_order', 'ASC')
             ->order_by('id', 'ASC')
@@ -1745,9 +1745,9 @@ class Costing_Model extends CI_Model
                     ? null
                     : round((float) $combo['selling_price_per_pax'], 2),
                 'is_general' => !empty($combo['is_general']) ? 1 : 0,
-                // Per-combination No. of Tour Leaders — scales this combo's
-                // tour-leader cost in the summary + quotation PDF (default 1).
-                'tour_leader_count' => isset($combo['tour_leader_count']) ? max(1, (int) $combo['tour_leader_count']) : 1,
+                // Per-combination, per-category headcount counts (category code =>
+                // count) — scale those sections' cost in the summary + quotation PDF.
+                'headcount' => costing_decode_headcount(isset($combo['headcount_json']) ? $combo['headcount_json'] : null),
                 'items'    => $items,
             );
         }
@@ -1976,6 +1976,12 @@ class Costing_Model extends CI_Model
      */
     private function Prepare_Combinations($posted)
     {
+        $this->load->helper('costing_calc');
+        // Categories flagged on the master as carrying a headcount multiplier — only
+        // these may receive a per-combination count (guards against crafted input).
+        $this->load->model('Costing_Category_Model');
+        $headcount_codes = $this->Costing_Category_Model->Read_Headcount_Codes();
+
         $out = array();
         $seq = 0;
 
@@ -2010,11 +2016,12 @@ class Costing_Model extends CI_Model
             $selling = isset($combo['selling_price_per_pax']) ? trim((string) $combo['selling_price_per_pax']) : '';
             $selling_price_per_pax = (!$is_general && $selling !== '' && is_numeric($selling)) ? round(max(0, (float) $selling), 2) : null;
 
-            // Per-combination No. of Tour Leaders (default 1, never below 1). Scales
-            // only this combo's tour-leader cost in the summary / quotation PDF.
-            $tour_leader_count = isset($combo['tour_leader_count']) ? max(1, (int) $combo['tour_leader_count']) : 1;
+            // Per-combination, per-category headcount counts (only for flagged
+            // categories, only counts ≥ 2). Stored as a JSON map on the combination.
+            $headcount = costing_normalize_headcount(isset($combo['headcount']) ? $combo['headcount'] : array(), $headcount_codes);
+            $headcount_json = empty($headcount) ? null : json_encode($headcount);
 
-            $out[] = array('name' => $name, 'rows' => $rows, 'selling_price_per_pax' => $selling_price_per_pax, 'is_general' => $is_general, 'tour_leader_count' => $tour_leader_count);
+            $out[] = array('name' => $name, 'rows' => $rows, 'selling_price_per_pax' => $selling_price_per_pax, 'is_general' => $is_general, 'headcount_json' => $headcount_json);
         }
 
         return $out;
