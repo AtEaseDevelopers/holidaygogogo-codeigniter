@@ -9,9 +9,9 @@
                     </h3>
                 </div>
                 <div class="card-toolbar">
-                    <a href="<?php echo base_url('Competitor_Product/Download_Crawl_Excel?job=' . rawurlencode($job)); ?>" class="btn btn-light-success font-weight-bold mr-3" title="Download all crawled products and available saved analyses">
-                        <i class="la la-file-excel"></i> Download All (Excel)
-                    </a>
+                    <button type="button" id="download_excel" class="btn btn-light-success font-weight-bold mr-3" title="Download checked products, or all products when none are checked">
+                        <i class="la la-file-excel"></i> <span id="download_excel_label">Download All (Excel)</span>
+                    </button>
                     <a href="<?php echo base_url('Competitor_Product'); ?>" id="back_btn" class="btn btn-secondary font-weight-bold mr-3"><i class="la la-arrow-left"></i> Back</a>
                     <button type="button" id="analyse_selected" class="btn btn-primary font-weight-bold" <?php echo empty($has_ai) ? 'disabled title="AI analysis is currently unavailable"' : ''; ?>>
                         <i class="la la-robot"></i> Analyse Selected (<span id="sel_count">0</span>)
@@ -22,6 +22,10 @@
                 </div>
             </div>
             <div class="card-body">
+                <form id="crawl_export_form" method="post" action="<?php echo base_url('Competitor_Product/Download_Crawl_Excel'); ?>" style="display:none;">
+                    <input type="hidden" name="job" value="<?php echo htmlspecialchars($job); ?>">
+                    <input type="hidden" name="indices" id="crawl_export_indices">
+                </form>
                 <?php if (empty($has_ai)) { ?>
                     <div class="alert alert-light-warning" style="font-size:12px;">AI analysis is currently unavailable. You can still review the crawled products below.</div>
                 <?php } ?>
@@ -107,6 +111,7 @@
     var CA_IMG = '<?php echo base_url('assets/image/sweetalert.jpg') ?>';
     var JOB        = '<?php echo $job; ?>';
     var DELETE_URL = '<?php echo base_url('Competitor_Product/Delete_Crawl_Items') ?>';
+    var EXCEL_URL  = '<?php echo base_url('Competitor_Product/Download_Crawl_Excel') ?>';
 
     // Bulk actions apply only to enabled checkboxes in the current search results.
     function selectableItems() {
@@ -121,6 +126,7 @@
         $('#sel_count').text(n);
         $('#del_count').text(n);
         $('#delete_selected').prop('disabled', n === 0);
+        $('#download_excel_label').text(n > 0 ? 'Download Selected (' + n + ') (Excel)' : 'Download All (Excel)');
         $('#sel_all').prop('checked', total > 0 && n === total)
             .prop('indeterminate', n > 0 && n < total)
             .prop('disabled', total === 0);
@@ -130,6 +136,15 @@
         refreshSel();
     });
     $(document).on('change', '.sel-item', refreshSel);
+    $('#download_excel').on('click', function() {
+        var indices = selectedItems().map(function() { return this.value; }).get();
+        if (!indices.length) {
+            window.location.href = EXCEL_URL + '?job=' + encodeURIComponent(JOB);
+            return;
+        }
+        $('#crawl_export_indices').val(indices.join(','));
+        document.getElementById('crawl_export_form').submit();
+    });
     $(document).ready(function() {
         refreshSel();
         $('[data-toggle="tooltip"]').tooltip();

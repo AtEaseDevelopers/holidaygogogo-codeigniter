@@ -4,7 +4,7 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 /**
  * Master_Product — an Owner-only (level 10) overview that lists EVERY analysed
  * record from both product tools (Competitor Product + Our Product) in one table.
- * Read-only: each row links View / Download PDF to its owning tool (by the row's
+ * Each row links View / Download PDF to its owning tool (by the row's
  * `feature`), and Delete removes it. The analyses themselves are produced by those
  * two tools; this page only aggregates and manages them.
  */
@@ -33,6 +33,39 @@ class Master_Product extends MY_Controller
 			'total_cost' => $this->Master_Product_Model->Read_Total_Cost(),
 		));
 		$this->load->view('layout/footer');
+	}
+
+	/** One workbook for the selected or filtered rows submitted by the listing. */
+	function Download_Excel()
+	{
+		if ($this->input->method() !== 'post') {
+			redirect(base_url('Master_Product'));
+			return;
+		}
+		$ids = $this->input->post('ids');
+		if ( ! is_string($ids) || ! preg_match('/^[1-9][0-9]*(?:,[1-9][0-9]*)*$/D', $ids)) {
+			show_error('Select at least one product record to download.', 400);
+			return;
+		}
+		@set_time_limit(180);
+		$analyses = $this->Master_Product_Model->Read_For_Export(explode(',', $ids));
+		if (empty($analyses)) {
+			show_error('The selected product records are no longer available.', 404);
+			return;
+		}
+		$this->load->helper('competitor_analysis');
+		$this->load->library('CompetitorExcelExport');
+		$book = $this->competitorexcelexport->analysis($analyses, 'en', true);
+		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+		header('Content-Disposition: attachment; filename="master-products-' . date('Ymd-His') . '.xlsx"');
+		header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+		header('Pragma: no-cache');
+		header('Expires: 0');
+		$writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($book);
+		$writer->setPreCalculateFormulas(false);
+		$writer->save('php://output');
+		$book->disconnectWorksheets();
+		exit;
 	}
 
 	function Delete()

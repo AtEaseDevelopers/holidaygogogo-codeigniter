@@ -1212,12 +1212,22 @@ class Competitor_Product extends MY_Controller
 		$this->stream_excel($book, substr($name, 0, -4) . '.xlsx');
 	}
 
-	/** All captured products and available saved analyses for one crawl run. */
+	/** All crawl products (GET), or only the checked product indices (POST). */
 	function Download_Crawl_Excel()
 	{
 		@set_time_limit(120);
-		$job = (string) $this->input->get('job');
-		if ( ! preg_match('/^[A-Za-z0-9_]{1,100}$/D', $job)) { show_404(); return; }
+		$selected_only = $this->input->method() === 'post';
+		$job = $selected_only ? $this->input->post('job') : $this->input->get('job');
+		if ( ! is_string($job) || ! preg_match('/^[A-Za-z0-9_]{1,100}$/D', $job)) { show_404(); return; }
+		$selected_indices = array();
+		if ($selected_only) {
+			$indices = $this->input->post('indices');
+			if ( ! is_string($indices) || ! preg_match('/^(?:0|[1-9][0-9]*)(?:,(?:0|[1-9][0-9]*))*$/D', $indices)) {
+				show_error('Select at least one crawled product to download.', 400);
+				return;
+			}
+			$selected_indices = array_fill_keys(explode(',', $indices), true);
+		}
 		$dir = APPPATH . 'logs/competitor_crawl/jobs/';
 		$status = json_decode((string) @file_get_contents($dir . $job . '.json'), true);
 		$source = isset($status['url']) ? (string) $status['url'] : '';
@@ -1233,15 +1243,24 @@ class Competitor_Product extends MY_Controller
 			$analysed = isset($status['analysed']) && is_array($status['analysed']) ? $status['analysed'] : array();
 		}
 		if ( ! is_array($items) || empty($items)) { show_404(); return; }
+		if ($selected_only) {
+			// Preserve the stable crawl indices, including index 0 and gaps after deletion.
+			$items = array_intersect_key($items, $selected_indices);
+			$analysed = array_intersect_key($analysed, $items);
+			if (empty($items)) {
+				show_error('The selected crawled products are no longer available.', 404);
+				return;
+			}
+		}
 		$ids = array();
 		foreach ($items as $idx => $item) {
 			if (isset($analysed[$idx]['id'])) { $ids[] = (int) $analysed[$idx]['id']; }
 		}
 		$analyses = $this->Competitor_Analysis_Model->Read_By_Ids($ids);
 		$this->load->library('CompetitorExcelExport');
-		$book = $this->competitorexcelexport->crawl($items, $analysed, $analyses, $job, $source);
+		$book = $this->competitorexcelexport->crawl($items, $analysed, $analyses, $job, $source, $selected_only);
 		unset($stored, $shaped, $items, $analysed, $analyses, $status);
-		$this->stream_excel($book, 'crawl-' . $job . '.xlsx');
+		$this->stream_excel($book, 'crawl-' . $job . ($selected_only ? '-selected' : '') . '.xlsx');
 	}
 
 	private function stream_excel($book, $filename)

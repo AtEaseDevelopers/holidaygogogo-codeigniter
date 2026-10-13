@@ -84,10 +84,24 @@ sort($destinations);
                     </div>
                 </div>
 
+                <div class="d-flex flex-wrap align-items-center mb-4">
+                    <button type="button" id="mp_download_results" class="btn btn-light-success font-weight-bold mr-3 mb-2" <?php echo empty($records) ? 'disabled' : ''; ?>>
+                        <i class="la la-file-excel"></i> <span id="mp_download_results_label">Download All (Excel)</span>
+                    </button>
+                    <button type="button" id="mp_download_selected" class="btn btn-light-primary font-weight-bold mr-3 mb-2" disabled>
+                        <i class="la la-file-excel"></i> Download Selected (<span id="mp_selected_count">0</span>)
+                    </button>
+                    <span class="text-muted mb-2" style="font-size:12px;">Downloads include records matching the current filters.</span>
+                </div>
+                <form id="mp_export_form" method="post" action="<?php echo base_url('Master_Product/Download_Excel'); ?>" style="display:none;">
+                    <input type="hidden" name="ids" id="mp_export_ids">
+                </form>
+
                 <div style="overflow-x:auto;">
                     <table class="table table-bordered table-head-custom table-checkable">
                         <thead>
                             <tr>
+                                <th style="width:40px; text-align:center;"><input type="checkbox" id="mp_select_all" aria-label="Select all filtered records"></th>
                                 <th style="text-align:center;">No.</th>
                                 <th>Product</th>
                                 <th style="text-align:center;">Source</th>
@@ -114,6 +128,7 @@ sort($destinations);
                                 data-status="<?php echo ($r->status === 'error') ? 'error' : 'done'; ?>"
                                 data-dest="<?php echo htmlspecialchars(trim((string) $r->destination)); ?>"
                                 data-search="<?php echo htmlspecialchars($search); ?>">
+                                <td style="text-align:center;"><input type="checkbox" class="mp-select" value="<?php echo (int) $r->id; ?>" aria-label="Select <?php echo htmlspecialchars($name); ?>"></td>
                                 <td class="mp-no" style="text-align:center; padding:12px 8px;"><?php echo $no; ?></td>
                                 <td style="max-width:280px; word-break:break-word;">
                                     <span style="font-size:13px;"><strong><?php echo htmlspecialchars($name); ?></strong></span>
@@ -152,7 +167,7 @@ sort($destinations);
                                 </td>
                             </tr>
                         <?php } ?>
-                            <tr id="mp_empty" style="display:none;"><td colspan="10" style="text-align:center; padding:12px;" class="text-muted">No records match the filters</td></tr>
+                            <tr id="mp_empty" style="display:none;"><td colspan="11" style="text-align:center; padding:12px;" class="text-muted">No records match the filters</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -165,6 +180,20 @@ sort($destinations);
 
 <script>
     var CA_IMG = '<?php echo base_url('assets/image/sweetalert.jpg') ?>';
+
+    function mpFilteredCheckboxes() {
+        return $('.mp-row:visible .mp-select');
+    }
+    function mpUpdateSelection() {
+        var $boxes = mpFilteredCheckboxes();
+        var count = $boxes.filter(':checked').length;
+        $('#mp_selected_count').text(count);
+        $('#mp_download_selected').prop('disabled', count === 0);
+        $('#mp_download_results').prop('disabled', $boxes.length === 0);
+        $('#mp_select_all').prop('disabled', $boxes.length === 0)
+            .prop('checked', $boxes.length > 0 && count === $boxes.length)
+            .prop('indeterminate', count > 0 && count < $boxes.length);
+    }
 
     // Client-side filtering over the rendered rows (Search + Source + Status +
     // Destination). Renumbers the visible rows and toggles the empty-state row.
@@ -181,11 +210,29 @@ sort($destinations);
             if(ok && dest && String($r.data('dest'))   !== dest) ok = false;
             if(ok && q    && String($r.data('search') || '').indexOf(q) === -1) ok = false;
             $r.toggle(ok);
+            if(!ok) { $r.find('.mp-select').prop('checked', false); }
             if(ok) { n++; $r.find('.mp-no').text(n); }
         });
         $('#mp_empty').toggle(n === 0);
         $('#mp_count').text(n);
+        $('#mp_download_results_label').text(q || src || st || dest ? 'Download Filtered (Excel)' : 'Download All (Excel)');
+        mpUpdateSelection();
     }
+    $('#mp_select_all').on('change', function() {
+        mpFilteredCheckboxes().prop('checked', this.checked);
+        mpUpdateSelection();
+    });
+    $(document).on('change', '.mp-select', mpUpdateSelection);
+    function mpDownloadExcel(selectedOnly) {
+        var $boxes = mpFilteredCheckboxes();
+        if(selectedOnly) { $boxes = $boxes.filter(':checked'); }
+        var ids = $boxes.map(function() { return this.value; }).get();
+        if(!ids.length) { return; }
+        $('#mp_export_ids').val(ids.join(','));
+        document.getElementById('mp_export_form').submit();
+    }
+    $('#mp_download_results').on('click', function() { mpDownloadExcel(false); });
+    $('#mp_download_selected').on('click', function() { mpDownloadExcel(true); });
     $('#mp_search').on('input', mpApplyFilters);
     $('#mp_source, #mp_status, #mp_dest').on('change', mpApplyFilters);
     $('#mp_reset').on('click', function() {
@@ -194,6 +241,7 @@ sort($destinations);
         if($.fn.selectpicker) { $sel.selectpicker('refresh'); }
         mpApplyFilters();
     });
+    mpApplyFilters();
 
     // Delete one analysed record (routes to Master_Product/Delete, cross-feature).
     $(document).on('click', '.delete-record', function() {

@@ -9,14 +9,14 @@ class CompetitorExcelExport
     private $book;
     private $long_text = array();
 
-    public function analysis($analyses, $lang = 'en')
+    public function analysis($analyses, $lang = 'en', $include_product_source = false)
     {
         $this->start();
-        $this->add_analysis_sheets($analyses, $lang);
+        $this->add_analysis_sheets($analyses, $lang, $include_product_source);
         return $this->finish();
     }
 
-    public function crawl($items, $analysed, $analyses, $job, $source)
+    public function crawl($items, $analysed, $analyses, $job, $source, $selected_only = false)
     {
         $this->start();
         $saved = array();
@@ -39,7 +39,9 @@ class CompetitorExcelExport
         $this->add_sheet('Crawl Info', array('Field', 'Value'), array(
             array('Crawl', $job), array('Website', $source), array('Products', count($items)),
             array('Saved analyses', count($analyses)), array('Exported at', date('Y-m-d H:i:s')),
-            array('Scope', 'All products currently stored for this crawl, including available saved analyses.'),
+            array('Scope', $selected_only
+                ? 'Selected products from this crawl, including available saved analyses.'
+                : 'All products currently stored for this crawl, including available saved analyses.'),
         ));
         if ( ! empty($analyses)) { $this->add_analysis_sheets($analyses, 'en'); }
         return $this->finish();
@@ -54,7 +56,7 @@ class CompetitorExcelExport
         $this->long_text = array();
     }
 
-    private function add_analysis_sheets($analyses, $lang)
+    private function add_analysis_sheets($analyses, $lang, $include_product_source = false)
     {
         $fields = array(
             'product_name' => 'Product Name', 'url' => 'Product URL', 'tour_code' => 'Tour Code',
@@ -73,6 +75,7 @@ class CompetitorExcelExport
         $columns = array_merge(array('Product No.', 'Analysis ID', 'Competitor Name', 'Report Source',
             'Analysed At', 'AI Cost (USD)', 'Status', 'Error Message'), array_values($fields),
             array('Breakfast', 'Lunch', 'Dinner'));
+        if ($include_product_source) { $columns[] = 'Product Source'; }
         $products = array(); $days = array(); $scenic = array(); $segments = array();
         $labels = competitor_ui_labels($lang);
         $list_fields = competitor_translate_list_keys();
@@ -90,6 +93,9 @@ class CompetitorExcelExport
                 }
                 foreach (array('breakfast', 'lunch', 'dinner') as $meal) {
                     $row[] = $this->text(isset($p['meals'][$meal]) ? $p['meals'][$meal] : '');
+                }
+                if ($include_product_source) {
+                    $row[] = isset($a->feature) && $a->feature === 'our_product' ? 'Our Product' : 'Competitor';
                 }
                 $products[] = $row;
                 $reference = array($number, (int) $a->id, $name);

@@ -25,6 +25,20 @@ class Master_Product_Model extends CI_Model
 		return $row && $row->total !== null ? (float) $row->total : 0.0;
 	}
 
+	/** Full selected analyses from both tools, decoded by their owning models. */
+	function Read_For_Export($ids)
+	{
+		if (empty($ids)) { return array(); }
+		$this->load->model('Competitor_Analysis_Model');
+		$this->load->model('Our_Product_Model');
+		$rows = array_merge(
+			$this->Competitor_Analysis_Model->Read_By_Ids($ids),
+			$this->Our_Product_Model->Read_By_Ids($ids)
+		);
+		usort($rows, function ($a, $b) { return (int) $b->id <=> (int) $a->id; });
+		return $rows;
+	}
+
 	/** Delete one record by id, regardless of feature. */
 	function Delete($id)
 	{
