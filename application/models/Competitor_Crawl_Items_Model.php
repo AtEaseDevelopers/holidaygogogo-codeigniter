@@ -14,6 +14,14 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  */
 class Competitor_Crawl_Items_Model extends CI_Model
 {
+	private $metadata_supported = null;
+	private function supports_metadata()
+	{
+		if ($this->metadata_supported === null) {
+			$this->metadata_supported = $this->db->field_exists('metadata_json', 'competitor_crawl_items');
+		}
+		return $this->metadata_supported;
+	}
 	/**
 	 * Insert/refresh a crawl's items (rows from competitor_crawl_items_for_db()).
 	 * Upsert on the (feature, job_id, idx) unique key so a chunked crawl writing the
@@ -27,6 +35,7 @@ class Competitor_Crawl_Items_Model extends CI_Model
 			return 0;
 		}
 		$now      = date('Y-m-d H:i:s');
+		$metadata_supported = $this->supports_metadata();
 		$affected = 0;
 		// Batch in chunks so one INSERT never approaches max_allowed_packet (item_text
 		// is LONGTEXT; a big crawl is tens of MB). Each chunk is its own upsert.
@@ -46,15 +55,18 @@ class Competitor_Crawl_Items_Model extends CI_Model
 					. $this->db->escape((string) (isset($r['url']) ? $r['url'] : '')) . ','
 					. $title . ','
 					. $text . ','
+					. ($metadata_supported ? $this->db->escape(isset($r['metadata_json']) ? $r['metadata_json'] : null) . ',' : '')
 					. $this->db->escape($now)
 					. ')';
 			}
 			$sql = 'INSERT INTO `competitor_crawl_items` '
-				. '(`feature`, `job_id`, `host`, `src_url`, `idx`, `url`, `title`, `item_text`, `created_at`) VALUES '
+				. '(`feature`, `job_id`, `host`, `src_url`, `idx`, `url`, `title`, `item_text`, '
+				. ($metadata_supported ? '`metadata_json`, ' : '') . '`created_at`) VALUES '
 				. implode(',', $values)
 				. ' ON DUPLICATE KEY UPDATE '
 				. '`host` = VALUES(`host`), `src_url` = VALUES(`src_url`), `url` = VALUES(`url`), '
-				. '`title` = VALUES(`title`), `item_text` = VALUES(`item_text`)';
+				. '`title` = VALUES(`title`), `item_text` = VALUES(`item_text`)'
+				. ($metadata_supported ? ', `metadata_json` = VALUES(`metadata_json`)' : '');
 			$this->db->query($sql);
 			$affected += $this->db->affected_rows();
 		}
@@ -64,7 +76,7 @@ class Competitor_Crawl_Items_Model extends CI_Model
 	/** One crawl's items, ordered by idx (Review reads this when the file is gone). */
 	function Read_By_Job($feature, $job_id)
 	{
-		return $this->db->select('id, idx, url, title, item_text, analysis_id, src_url, host')
+		return $this->db->select('id, idx, url, title, item_text, analysis_id, src_url, host' . ($this->supports_metadata() ? ', metadata_json' : ''))
 			->where('feature', (string) $feature)
 			->where('job_id', (string) $job_id)
 			->order_by('idx', 'ASC')

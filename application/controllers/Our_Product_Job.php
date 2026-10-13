@@ -172,6 +172,7 @@ class Our_Product_Job extends CI_Controller
 			$this->persist_crawl_items('our_product', (string) $job['job'], $url, $items);
 
 			$n = count($items);
+			$write(array('crawl_summary' => competitor_prepare_crawl_items($items, $url)['summary']));
 			$write(array('state' => 'done', 'phase' => 'reading', 'done' => $n, 'total' => $n,
 				'count' => $n, 'items_file' => $items_file, 'cost_total' => 0));
 			$this->persist_job_record('our_product', $job, 'done', $n, 0);

@@ -69,6 +69,8 @@ class Competitor_Product extends MY_Controller
 			return;
 		}
 		$products = array();
+		$prepared = competitor_prepare_crawl_items($items, $src_url, $analysed);
+		$items = $prepared['items'];
 		foreach ($items as $i => $it) {
 			$text = isset($it['text']) ? (string) $it['text'] : '';
 			$url  = isset($it['url']) ? (string) $it['url'] : '';
@@ -88,6 +90,8 @@ class Competitor_Product extends MY_Controller
 				'analysis_id' => isset($a['id']) ? (int) $a['id'] : 0,
 				'cost'        => isset($a['cost']) ? (float) $a['cost'] : 0.0,
 				'analysed_at' => isset($a['at']) ? (string) $a['at'] : '',
+				'quality_flags' => $it['crawl_metadata']['quality_flags'],
+				'source_records' => $it['crawl_metadata']['source_records'],
 			);
 		}
 		$titles = array(
@@ -100,6 +104,7 @@ class Competitor_Product extends MY_Controller
 			'src_url'  => $src_url,
 			'products' => $products,
 			'has_ai'   => (bool) get_env('OPENAI_API_KEY'),
+			'crawl_summary' => $prepared['summary'],
 		));
 		$this->load->view('layout/footer');
 	}
@@ -139,7 +144,9 @@ class Competitor_Product extends MY_Controller
 		$db = $this->Competitor_Crawl_Items_Model->Read_By_Job('competitor', $src_id);
 		if ( ! empty($db)) {
 			$shaped = competitor_items_from_db_rows($db);
-			@file_put_contents($items_file, json_encode($shaped['items'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+			$prepared = competitor_prepare_crawl_items($shaped['items'], (string) $db[0]->src_url, $shaped['analysed']);
+			@file_put_contents($items_file, json_encode($prepared['items'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+			$indices = array_values(array_unique(array_map(function ($idx) use ($prepared) { return isset($prepared['index_map'][$idx]) ? $prepared['index_map'][$idx] : $idx; }, $indices)));
 			if ( ! is_array($status)) {
 				$status = array('url' => (string) $db[0]->src_url);
 			}
@@ -190,7 +197,7 @@ class Competitor_Product extends MY_Controller
 		$dir     = APPPATH . 'logs/competitor_crawl/jobs/';
 		$status_file = $dir . $job_id . '.json';
 		$items_file  = $dir . $job_id . '.items.json';
-		if ($job_id === '' || ! is_file($status_file) || ! is_file($items_file)) {
+		if ($job_id === '') {
 			echo json_encode(array('success' => false, 'message' => 'Crawl not found.'));
 			return;
 		}
@@ -200,11 +207,25 @@ class Competitor_Product extends MY_Controller
 		}
 		$status = json_decode((string) @file_get_contents($status_file), true);
 		$items  = json_decode((string) @file_get_contents($items_file), true);
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$db = $this->Competitor_Crawl_Items_Model->Read_By_Job('competitor', $job_id);
+		if ($db) {
+			$shaped = competitor_items_from_db_rows($db);
+			$items = $shaped['items'];
+			if (!is_array($status)) { $status = array('url' => (string) $db[0]->src_url); }
+			$status['analysed'] = array_replace($shaped['analysed'], isset($status['analysed']) ? $status['analysed'] : array());
+		}
 		if ( ! is_array($status) || ! is_array($items)) {
 			echo json_encode(array('success' => false, 'message' => 'Crawl not found.'));
 			return;
 		}
+		$prepared = competitor_prepare_crawl_items($items, isset($status['url']) ? $status['url'] : '', isset($status['analysed']) ? $status['analysed'] : array());
+		$representatives = array();
+		foreach ($indices as $idx) { if (isset($prepared['index_map'][$idx])) { $representatives[$prepared['index_map'][$idx]] = true; } }
+		$indices = array_keys(array_filter($prepared['index_map'], function ($idx) use ($representatives) { return isset($representatives[$idx]); }));
+		if (!$indices) { echo json_encode(array('success' => false, 'message' => 'Selected products are no longer available.')); return; }
 		$result = competitor_remove_crawl_items($items, $status, $indices);
+		$result['status']['crawl_summary'] = competitor_prepare_crawl_items($result['items'], isset($status['url']) ? $status['url'] : '')['summary'];
 		foreach ($result['deleted_analysis_ids'] as $aid) {
 			$this->Competitor_Analysis_Model->Delete((int) $aid);
 		}
@@ -1243,7 +1264,14 @@ class Competitor_Product extends MY_Controller
 			$analysed = isset($status['analysed']) && is_array($status['analysed']) ? $status['analysed'] : array();
 		}
 		if ( ! is_array($items) || empty($items)) { show_404(); return; }
+		$prepared = competitor_prepare_crawl_items($items, $source, $analysed);
+		$items = $prepared['items'];
 		if ($selected_only) {
+			$mapped = array();
+			foreach ($selected_indices as $idx => $_) {
+				if (isset($prepared['index_map'][$idx])) { $mapped[$prepared['index_map'][$idx]] = true; }
+			}
+			$selected_indices = $mapped;
 			// Preserve the stable crawl indices, including index 0 and gaps after deletion.
 			$items = array_intersect_key($items, $selected_indices);
 			$analysed = array_intersect_key($analysed, $items);
@@ -1257,8 +1285,16 @@ class Competitor_Product extends MY_Controller
 			if (isset($analysed[$idx]['id'])) { $ids[] = (int) $analysed[$idx]['id']; }
 		}
 		$analyses = $this->Competitor_Analysis_Model->Read_By_Ids($ids);
+		foreach ($analyses as $analysis) {
+			foreach ($items as $idx => $item) {
+				if (isset($analysed[$idx]['id']) && (int) $analysed[$idx]['id'] === (int) $analysis->id) {
+					$analysis->crawl_metadata = $item['crawl_metadata'];
+					break;
+				}
+			}
+		}
 		$this->load->library('CompetitorExcelExport');
-		$book = $this->competitorexcelexport->crawl($items, $analysed, $analyses, $job, $source, $selected_only);
+		$book = $this->competitorexcelexport->crawl($items, $analysed, $analyses, $job, $source, $selected_only, $prepared['summary']);
 		unset($stored, $shaped, $items, $analysed, $analyses, $status);
 		$this->stream_excel($book, 'crawl-' . $job . ($selected_only ? '-selected' : '') . '.xlsx');
 	}

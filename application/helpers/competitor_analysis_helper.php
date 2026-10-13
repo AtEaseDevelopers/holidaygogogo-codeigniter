@@ -1,5 +1,6 @@
 <?php
 defined('BASEPATH') OR exit('No direct script access allowed');
+require_once __DIR__ . '/competitor_product_quality_helper.php';
 
 /**
  * Competitor Analysis — pure, DB-less helpers shared by the controller, the
@@ -7,10 +8,9 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  * a network call or the database lives here so it can be locked by
  * tests/helpers/CompetitorAnalysisHelperTest.php.
  *
- * The AI agent does its own scraping: we only hand OpenAI the URL and our own
- * products, and the built-in web_search tool opens and reads the page. So the
- * helpers here shape the request and normalise the reply — there is no HTML
- * fetching/stripping on our side.
+ * The service fetches page/API/PDF content and can use OpenAI browsing when
+ * needed. These helpers clean and structure that evidence, shape requests and
+ * normalise replies without making network or database calls.
  *
  *   competitor_format_our_products()  dashboard rows -> compact "our products"
  *   competitor_build_agent_input()    url + products -> {instructions, input}
@@ -205,6 +205,7 @@ if ( ! function_exists('competitor_output_contract'))
 			. "LIST FORMAT: every string[] field must be a JSON array of individual items, with ONE item per array entry. Do not pack multiple items into a paragraph, a comma/semicolon-delimited list, or a string containing several bullet points. Do not put bullet markers, numbering, or line breaks inside an entry. Keep each item's related qualifiers and conditions in the SAME entry; commas and semicolons within those conditions are allowed. The Excel export places each entry on its own line. Keep summary as prose, itinerary as one object per day, scenic_highlights as one object per place, and traveller_segments as one object per traveller type. "
 			. "Split source lines that bundle independent included/excluded items: for example, 'One lunch, one dinner and one breakfast' becomes THREE entries, 'One lunch', 'One dinner', 'One breakfast'; 'Airfare, insurance and camera fees (if any)' becomes THREE entries, preserving '(if any)' with camera fees. A qualification such as 'hotel accommodation including breakfast' stays together; a destination-coverage point may name several countries because it describes one coverage benefit. Never use a Value USP to repeat a bundle of all inclusions. "
 			. "CRITICAL: make NO assumptions. Every value must be grounded in the supplied source (the scraped/pasted/attached content and the itinerary) — treat the source as your only evidence. "
+			. "COMPLETENESS: flag missing or incomplete itinerary, price or inclusion information in special_remarks using Information gap entries. Compare the itinerary days actually supplied with the stated duration; never invent missing days, prices or inclusions. SOURCE VERSION blocks are regional evidence for one product: keep each regional price, currency, validity date and travel condition attached to its originating URL. Do not combine different regional rates into a single global headline price or treat one region's terms as applying to every region. If no single applicable price basis can be established, leave headline price fields unknown and preserve the observed regional rates and their conditions in special_remarks. "
 			. "An itinerary mentioning a rail journey, cruise, flight, meal or activity does NOT by itself confirm that its cost is included. Preserve every stated quantity, duration, price, exception and condition; do not broaden 'selected journeys' into 'all journeys' or 'as specified' into 'daily'. "
 			. "Missing prices, child policies, facilities or arrangements are information gaps, not product drawbacks. When material, record them in special_remarks as 'Information gap: <detail that needs confirmation>' instead of putting them in cons or assuming they are unavailable. Ignore navigation, related tours and recommendation cards; never use another tour's price or inclusions for this product. If conflicting details cannot be resolved, leave the affected field unknown and preserve the conflict in special_remarks. "
 			. "WRITING STYLE: every human-readable value (all descriptions, justifications, pros, cons, highlights, summary and notes) is shown to — and shared directly with — the traveller, so write it as ready-to-send customer copy. State facts directly as facts and speak to the traveller naturally. NEVER refer to the evidence or how you know it: do not write \"the source states\", \"the source mentions\", \"the itinerary states/says/lists\", \"the terms require/state\", \"according to the source/page\" or any similar meta-reference. Grounding governs WHAT you may say, not HOW you phrase it — e.g. instead of \"The source states guests can relax by the pool\" write \"Unwind by the resort swimming pool\"; instead of \"the itinerary states 566KM for Aswan-Abu Simbel\" write \"Long drives such as 566KM Aswan-Abu Simbel-Aswan can be tiring\"; instead of \"the terms require travellers to be physically and medically fit\" write \"You should be physically and medically fit\". "
@@ -391,7 +392,13 @@ if ( ! function_exists('competitor_html_to_text'))
 		}
 		// Whole blocks whose content is noise (incl. site nav/footer/sidebar chrome,
 		// search/booking widgets), plus HTML comments.
-		$html = preg_replace('#<(script|style|noscript|template|svg|head|nav|footer|aside|form)\b[^>]*>.*?</\1>#is', ' ', $html);
+		$html = preg_replace('#<(script|style|noscript|template|svg|head|nav)\b[^>]*>.*?</\1>#is', ' ', $html);
+		// Booking forms/sidebars can contain the only price or travel conditions.
+		// Keep their text when it carries product evidence; remove empty UI chrome.
+		$html = preg_replace_callback('#<(footer|aside|form)\b[^>]*>.*?</\1>#is', function ($match) {
+			$text = html_entity_decode(strip_tags($match[0]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+			return competitor_product_content_line($text) ? $match[0] : ' ';
+		}, $html);
 		$html = preg_replace('#<!--.*?-->#s', ' ', $html);
 		// Preserve structure: block/line boundaries become newlines; table cells
 		// get a " | " separator so a row's fields don't run together.
@@ -925,7 +932,7 @@ if ( ! function_exists('competitor_has_price'))
 		if ( ! is_string($text) || $text === '') {
 			return false;
 		}
-		return (bool) preg_match('/(?:rm|myr|sgd|usd|php|thb|idr|aud|eur|s\$|\$|£|€|¥|人民币)\s*[0-9][0-9,]{2,}/iu', $text)
+		return (bool) preg_match('/(?:rm|myr|sgd|usd|cad|gbp|nzd|chf|sek|nok|dkk|hkd|cny|jpy|inr|aed|zar|php|thb|idr|aud|eur|s\$|\$|£|€|¥|人民币)\s*[0-9][0-9,]{2,}/iu', $text)
 			|| (bool) preg_match('/[0-9][0-9,]{2,}\s*元/u', $text);   // 3999元
 	}
 }
@@ -2687,20 +2694,24 @@ if ( ! function_exists('competitor_strip_shared_chrome'))
 	 */
 	function competitor_strip_shared_chrome($items, $min_share = 0.6, $max_scan = 300)
 	{
-		$items = array_values(is_array($items) ? $items : array());
+		$items = is_array($items) ? $items : array();
 		$n = count($items);
 		if ($n < 3) {
 			return $items;   // too few samples to tell chrome from content
 		}
 		$lines = array();
-		foreach ($items as $it) {
+		$protected_titles = array();
+		foreach ($items as $idx => $it) {
 			$t = isset($it['text']) ? (string) $it['text'] : '';
-			$lines[] = ($t === '') ? array() : explode("\n", $t);
+			$lines[$idx] = ($t === '') ? array() : explode("\n", $t);
+			if (!empty($it['title'])) { $protected_titles[trim($it['title'])] = true; }
 		}
+		// Identical regional pages share product content as well as chrome.
+		if (count(array_unique(array_map(function ($it) { return isset($it['text']) ? $it['text'] : ''; }, $items))) < 2) { return $items; }
 		$threshold = max(2, (int) ceil($n * $min_share));
 
 		// Longest run of positions whose modal line is shared by >= threshold items.
-		$shared_run = function ($rows) use ($threshold, $max_scan) {
+		$shared_run = function ($rows) use ($threshold, $max_scan, $protected_titles) {
 			$run = array();
 			for ($i = 0; $i < $max_scan; $i++) {
 				$counts = array();
@@ -2714,6 +2725,7 @@ if ( ! function_exists('competitor_strip_shared_chrome'))
 				if ($present < $threshold || empty($counts)) { break; }
 				arsort($counts);
 				$top = array_keys($counts)[0];
+				if (isset($protected_titles[trim($top)]) || competitor_product_content_line($top)) { break; }
 				if ($counts[$top] >= $threshold) { $run[] = $top; } else { break; }
 			}
 			return $run;
@@ -2721,6 +2733,19 @@ if ( ! function_exists('competitor_strip_shared_chrome'))
 
 		$lead = $shared_run($lines);
 		$tail = array_reverse($shared_run(array_map('array_reverse', $lines)));
+		// Repetition alone does not prove that descriptions or inclusion lists are noise.
+		$has_nav_anchor = false;
+		foreach ($lead as $line) {
+			if (preg_match('/^(?:menu(?:menu)?|home|about us|contact us|my account|log ?in)$/i', trim($line))) { $has_nav_anchor = true; break; }
+		}
+		if (!$has_nav_anchor) { $lead = array(); }
+		$footer_start = null;
+		foreach ($tail as $pos => $line) {
+			if (competitor_is_boilerplate_line($line) || preg_match('/^(?:contact us|about us|privacy policy|follow us|newsletter)$/i', trim($line))) {
+				$footer_start = $pos; break;
+			}
+		}
+		$tail = $footer_start === null ? array() : array_slice($tail, $footer_start);
 		if (empty($lead) && empty($tail)) {
 			return $items;
 		}
@@ -5191,6 +5216,7 @@ if ( ! function_exists('competitor_row_to_product'))
 			'scenic_highlights' => $g('scenic_highlights', array()), 'usp' => $g('usp', array()),
 			'traveller_segments' => $g('traveller_segments', array()),
 			'pros' => $g('pros', array()), 'cons' => $g('cons', array()), 'meals' => $g('meals', array()), 'itinerary' => $g('itinerary', array()),
+			'crawl_metadata' => $g('crawl_metadata', array()),
 		);
 	}
 }
@@ -5538,6 +5564,7 @@ if ( ! function_exists('competitor_crawl_items_for_db'))
 				'url'       => $url,
 				'title'     => ($title !== '') ? $title : null,
 				'item_text' => $text,
+				'metadata_json' => isset($it['crawl_metadata']) ? json_encode($it['crawl_metadata'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
 			);
 		}
 		return $rows;
@@ -5570,6 +5597,8 @@ if ( ! function_exists('competitor_items_from_db_rows'))
 				'title' => (string) (isset($r->title) ? $r->title : ''),
 			);
 			$aid = (int) (isset($r->analysis_id) ? $r->analysis_id : 0);
+			$metadata = isset($r->metadata_json) ? json_decode((string) $r->metadata_json, true) : null;
+			if (is_array($metadata)) { $items[$idx]['crawl_metadata'] = $metadata; }
 			if ($aid > 0) {
 				$analysed[(string) $idx] = array('id' => $aid);
 			}

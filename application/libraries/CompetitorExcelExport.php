@@ -16,12 +16,12 @@ class CompetitorExcelExport
         return $this->finish();
     }
 
-    public function crawl($items, $analysed, $analyses, $job, $source, $selected_only = false)
+    public function crawl($items, $analysed, $analyses, $job, $source, $selected_only = false, $crawl_summary = null)
     {
         $this->start();
         $saved = array();
         foreach ($analyses as $a) { $saved[(int) $a->id] = $a; }
-        $rows = array();
+        $rows = array(); $sources = array();
         foreach ($items as $idx => $item) {
             $text = isset($item['text']) ? (string) $item['text'] : '';
             $url = isset($item['url']) ? (string) $item['url'] : '';
@@ -29,21 +29,39 @@ class CompetitorExcelExport
             $meta = competitor_item_meta($text, $title);
             $id = isset($analysed[$idx]['id']) ? (int) $analysed[$idx]['id'] : 0;
             $a = isset($saved[$id]) ? $saved[$id] : null;
+            $quality = isset($item['crawl_metadata']) ? $item['crawl_metadata'] : array();
+            $records = isset($quality['source_records']) ? $quality['source_records'] : array();
             $rows[] = array(count($rows) + 1, (int) $idx, $title, $url,
                 competitor_item_kind($text) === 'package' ? 'Package' : 'Itinerary', $meta['duration'],
                 $id > 0 ? $id : '', $a ? ($a->status === 'done' ? 'Analysed' : 'Analysis failed') : ($id > 0 ? 'Saved record missing' : 'Not analysed'),
-                $a ? (float) $a->cost_usd : '', $a ? (string) $a->created_at : '', mb_strlen($text, 'UTF-8'), $text);
+                $a ? (float) $a->cost_usd : '', $a ? (string) $a->created_at : '', mb_strlen($text, 'UTF-8'), $text,
+                isset($quality['original_url']) ? $quality['original_url'] : $url,
+                isset($quality['source_url']) ? $quality['source_url'] : $source,
+                isset($quality['canonical_url']) ? $quality['canonical_url'] : '',
+                implode("\n", array_column($records, 'original_url')),
+                implode("\n", isset($quality['quality_flags']) ? $quality['quality_flags'] : array()),
+                max(0, count($records) - 1));
+            foreach ($records as $record) {
+                $sources[] = array((int) $idx, $title, $record['original_url'], $record['url'], $record['source_url'], $record['canonical_url']);
+            }
         }
         $this->add_sheet('Crawl Results', array('No.', 'Item Index', 'Product Name', 'URL', 'Type', 'Duration',
-            'Analysis ID', 'Analysis Status', 'AI Cost (USD)', 'Analysed At', 'Characters', 'Crawled Text'), $rows);
+            'Analysis ID', 'Analysis Status', 'AI Cost (USD)', 'Analysed At', 'Characters', 'Crawled Text',
+            'Original URL', 'Source URL', 'Canonical URL', 'Source URLs', 'Quality Flags', 'Duplicate Records'), $rows);
+        if ($crawl_summary === null) { $crawl_summary = competitor_prepare_crawl_items($items, $source)['summary']; }
         $this->add_sheet('Crawl Info', array('Field', 'Value'), array(
             array('Crawl', $job), array('Website', $source), array('Products', count($items)),
             array('Saved analyses', count($analyses)), array('Exported at', date('Y-m-d H:i:s')),
+            array('Total crawled records', $crawl_summary['total_records']),
+            array('Duplicate records', $crawl_summary['duplicate_records']),
+            array('Unique products remaining', $crawl_summary['unique_products']),
+            array('Products needing review', $crawl_summary['needs_review']),
             array('Scope', $selected_only
                 ? 'Selected products from this crawl, including available saved analyses.'
                 : 'All products currently stored for this crawl, including available saved analyses.'),
         ));
         if ( ! empty($analyses)) { $this->add_analysis_sheets($analyses, 'en'); }
+        if ($sources) { $this->add_sheet('Crawl Sources', array('Item Index', 'Product Name', 'Original URL', 'Product URL', 'Source URL', 'Canonical URL'), $sources); }
         return $this->finish();
     }
 
@@ -74,7 +92,7 @@ class CompetitorExcelExport
         );
         $columns = array_merge(array('Product No.', 'Analysis ID', 'Competitor Name', 'Report Source',
             'Analysed At', 'AI Cost (USD)', 'Status', 'Error Message'), array_values($fields),
-            array('Breakfast', 'Lunch', 'Dinner'));
+            array('Breakfast', 'Lunch', 'Dinner', 'Original URL', 'Source URL', 'Canonical URL', 'Source URLs', 'Quality Flags'));
         if ($include_product_source) { $columns[] = 'Product Source'; }
         $products = array(); $days = array(); $scenic = array(); $segments = array();
         $labels = competitor_ui_labels($lang);
@@ -94,6 +112,12 @@ class CompetitorExcelExport
                 foreach (array('breakfast', 'lunch', 'dinner') as $meal) {
                     $row[] = $this->text(isset($p['meals'][$meal]) ? $p['meals'][$meal] : '');
                 }
+                $quality = isset($p['crawl_metadata']) && is_array($p['crawl_metadata']) ? $p['crawl_metadata'] : array();
+                $row[] = isset($quality['original_url']) ? $quality['original_url'] : $this->text(isset($p['url']) ? $p['url'] : $a->url);
+                $row[] = isset($quality['source_url']) ? $quality['source_url'] : (string) $a->url;
+                $row[] = isset($quality['canonical_url']) ? $quality['canonical_url'] : '';
+                $row[] = implode("\n", array_column(isset($quality['source_records']) ? $quality['source_records'] : array(), 'original_url'));
+                $row[] = implode("\n", isset($quality['quality_flags']) ? $quality['quality_flags'] : array());
                 if ($include_product_source) {
                     $row[] = isset($a->feature) && $a->feature === 'our_product' ? 'Our Product' : 'Competitor';
                 }

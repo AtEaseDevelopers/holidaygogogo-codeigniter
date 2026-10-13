@@ -326,6 +326,7 @@ class Competitor_Product_Job extends CI_Controller
 			// it (later analyses add on top via merge_crawl_analysed).
 			$crawl_cost = (float) $this->competitoranalysisservice->last_run_cost();
 			$n = count($items);
+			$write(array('crawl_summary' => competitor_prepare_crawl_items($items, $url)['summary']));
 			if ($this->competitoranalysisservice->crawl_has_more()) {
 				// More discovered URLs remain unread — keep the job visible as running and
 				// RE-SPAWN it to read the next chunk. The re-spawn writes the new worker's PID

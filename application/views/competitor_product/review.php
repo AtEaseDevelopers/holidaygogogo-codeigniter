@@ -22,6 +22,15 @@
                 </div>
             </div>
             <div class="card-body">
+                <?php if (isset($crawl_summary)) { ?>
+                    <div class="alert alert-light-info mb-4" style="font-size:13px;">
+                        <strong>Crawl Summary:</strong>
+                        <?php echo (int) $crawl_summary['total_records']; ?> crawled records &middot;
+                        <?php echo (int) $crawl_summary['duplicate_records']; ?> duplicate records &middot;
+                        <?php echo (int) $crawl_summary['unique_products']; ?> unique products remaining &middot;
+                        <?php echo (int) $crawl_summary['needs_review']; ?> need review
+                    </div>
+                <?php } ?>
                 <form id="crawl_export_form" method="post" action="<?php echo base_url('Competitor_Product/Download_Crawl_Excel'); ?>" style="display:none;">
                     <input type="hidden" name="job" value="<?php echo htmlspecialchars($job); ?>">
                     <input type="hidden" name="indices" id="crawl_export_indices">
@@ -65,6 +74,19 @@
                                     <td class="row-no" style="text-align:center; padding:10px 8px;"><?php echo $n; ?></td>
                                     <td>
                                         <strong style="font-size:13px;"><?php echo htmlspecialchars($p['title']); ?></strong>
+                                        <?php if (!empty($p['quality_flags'])) { ?>
+                                            <span class="label label-light-warning label-inline ml-1" style="font-size:10px;">Needs review</span>
+                                            <div class="text-warning" style="font-size:11px; margin-top:2px;"><?php echo htmlspecialchars(implode('; ', $p['quality_flags'])); ?></div>
+                                        <?php } ?>
+                                        <?php if (isset($p['source_records']) && count($p['source_records']) > 1) { ?>
+                                            <details class="text-muted" style="font-size:11px; margin-top:2px;">
+                                                <summary><?php echo count($p['source_records']); ?> source records for this product</summary>
+                                                <?php foreach ($p['source_records'] as $record) { ?>
+                                                    <div>Original: <a href="<?php echo htmlspecialchars($record['original_url']); ?>" target="_blank" rel="noopener"><?php echo htmlspecialchars($record['original_url']); ?></a></div>
+                                                    <div>Source: <?php echo htmlspecialchars($record['source_url']); ?></div>
+                                                <?php } ?>
+                                            </details>
+                                        <?php } ?>
                                         <?php if ( ! empty($p['duration'])) { ?><span class="label label-light-info label-inline ml-1" style="font-size:10px;"><?php echo htmlspecialchars($p['duration']); ?></span><?php } ?>
                                         <?php echo $p['chars'] > 0 ? '' : ' <span class="label label-light-danger label-inline" style="font-size:10px;">empty</span>'; ?>
                                         <?php if ( ! empty($p['snippet'])) { ?><div class="text-muted" style="font-size:11px; margin-top:2px;"><?php echo htmlspecialchars($p['snippet']); ?></div><?php } ?>

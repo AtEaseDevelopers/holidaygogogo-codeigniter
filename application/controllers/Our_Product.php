@@ -69,6 +69,8 @@ class Our_Product extends MY_Controller
 			return;
 		}
 		$products = array();
+		$prepared = competitor_prepare_crawl_items($items, $src_url, $analysed);
+		$items = $prepared['items'];
 		foreach ($items as $i => $it) {
 			$text = isset($it['text']) ? (string) $it['text'] : '';
 			$url  = isset($it['url']) ? (string) $it['url'] : '';
@@ -87,6 +89,7 @@ class Our_Product extends MY_Controller
 				'analysis_id' => isset($a['id']) ? (int) $a['id'] : 0,
 				'cost'        => isset($a['cost']) ? (float) $a['cost'] : 0.0,
 				'analysed_at' => isset($a['at']) ? (string) $a['at'] : '',
+				'quality_flags' => $it['crawl_metadata']['quality_flags'],
 			);
 		}
 		$titles = array(
@@ -99,6 +102,7 @@ class Our_Product extends MY_Controller
 			'src_url'  => $src_url,
 			'products' => $products,
 			'has_ai'   => (bool) get_env('OPENAI_API_KEY'),
+			'crawl_summary' => $prepared['summary'],
 		));
 		$this->load->view('layout/footer');
 	}

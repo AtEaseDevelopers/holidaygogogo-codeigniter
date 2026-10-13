@@ -75,6 +75,7 @@ class CompetitorAnalysisService
 
 	/** Set by extract_source_text(): the page's real product name (<h1>/og:title). */
 	protected $last_page_title = '';
+	protected $crawl_source_url = '';
 
 	/** Product + PDF links found on the last-read page's HTML (for listing drill-down). */
 	protected $last_page_links = array();
@@ -222,6 +223,7 @@ class CompetitorAnalysisService
 		if ($this->items_checkpoint_file === '') {
 			return;
 		}
+		$out = competitor_prepare_crawl_items($out, $this->crawl_source_url)['items'];
 		$tmp = $this->items_checkpoint_file . '.tmp';
 		if (@file_put_contents($tmp, json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) !== false) {
 			@rename($tmp, $this->items_checkpoint_file);   // atomic swap — never a half-written file
@@ -853,7 +855,7 @@ class CompetitorAnalysisService
 	public function analyze_texts($items, $our_products, $progress = null)
 	{
 		$tick  = is_callable($progress) ? $progress : function () {};
-		$items = is_array($items) ? $items : array();
+		$items = competitor_prepare_crawl_items(is_array($items) ? $items : array())['items'];
 		$total = count($items);
 
 		$products = array();
@@ -877,6 +879,7 @@ class CompetitorAnalysisService
 				continue;
 			}
 			$record['url'] = $url;
+			if (isset($it['crawl_metadata'])) { $record['crawl_metadata'] = $it['crawl_metadata']; }
 			$products[]    = $record;
 			$in   += (int) $record['input_tokens'];
 			$out  += (int) $record['output_tokens'];
@@ -1295,7 +1298,7 @@ class CompetitorAnalysisService
 				'links' => count($this->last_page_links), 'child_links' => $child_links));
 			return array();
 		}
-		if (competitor_looks_like_article($text)) {
+		if (competitor_looks_like_article($text) && !$this->last_is_product) {
 			// Rich prose with NO product signal (price/duration/itinerary) — a blog
 			// article / info page that carried a product keyword in its URL. Drop it.
 			$this->log_crawl('dropped_article', array('url' => $url, 'text_len' => strlen($text)));
@@ -1309,23 +1312,27 @@ class CompetitorAnalysisService
 			$this->log_crawl('dropped_guide', array('url' => $url, 'title' => $this->last_page_title));
 			return array();
 		}
-		// Tour-page gate (always on): a crawl keeps ONLY real bookable tour pages
-		// (competitor_is_tour_page — a day-by-day itinerary, OR a duration+price for
-		// sites that hide the itinerary behind a tab), and not thin. Landing/overview/
-		// category pages, blog posts and under-scraped shells fail this, so they're
-		// dropped here rather than analysed. Logged so the crawl log shows exactly what
-		// was skipped (no silent truncation).
-		if (competitor_scrape_is_thin($text)
-			|| ! competitor_is_tour_page($text, $this->last_is_product, competitor_is_product_url($url))) {
+		// Reject pages without product evidence. Explicit Product/Trip metadata or
+		// known product API endpoints may have partial content: retain those records
+		// so their missing itinerary, price and inclusions can be flagged for review.
+		$evidenced_product = $this->last_is_product
+			|| in_array(competitor_ice_api_kind($url), array('series', 'land_tour'), true);
+		if ((competitor_scrape_is_thin($text)
+			|| ! competitor_is_tour_page($text, $this->last_is_product, competitor_is_product_url($url)))
+			&& !($evidenced_product && trim($text) !== '')) {
 			$this->log_crawl('dropped_not_tour', array('url' => $url, 'text_len' => strlen($text),
 				'jsonld_product' => $this->last_is_product ? 1 : 0,
 				'product_url' => competitor_is_product_url($url) ? 1 : 0));
 			return array();
 		}
+		// An explicitly identified product with incomplete content stays available
+		// for review; preparation flags the missing facts instead of silently dropping it.
 		// Store the customer-facing web URL for an ICE series (set while extracting),
 		// not the raw /api/v1/series/<id> URL the crawler read.
 		$display_url = ($this->last_ice_web_url !== '') ? $this->last_ice_web_url : $url;
-		$item = array('url' => $display_url, 'text' => $text);
+		$item = array('url' => $display_url, 'text' => $text, 'original_url' => $url,
+			'source_url' => $this->crawl_source_url,
+			'canonical_url' => competitor_product_canonical_url($this->last_page_html, $url));
 		if ($this->last_page_title !== '') {
 			$item['title'] = $this->last_page_title;   // real <h1> name — see crawl_to_text
 		}
@@ -1358,6 +1365,7 @@ class CompetitorAnalysisService
 			$items[] = array(
 				'url'  => ! empty($p['file']) ? $p['file'] : ($post_url . '#' . $p['code']),
 				'text' => $text,
+				'original_url' => $post_url, 'source_url' => $this->crawl_source_url,
 			);
 		}
 		return $items;
@@ -1651,7 +1659,7 @@ class CompetitorAnalysisService
 			// vs the first body line which is usually menu/CTA/inquiry-form chrome.
 			$this->last_page_title = competitor_page_title($html);
 
-			$text = competitor_html_to_text($html, competitor_page_char_cap(get_env('COMPETITOR_MAX_PAGE_CHARS')));
+			$text = competitor_html_to_text($html, competitor_page_char_cap(get_env('COMPETITOR_MAX_PAGE_CHARS'), 0));
 			$html_thin = competitor_scrape_is_thin($text);   // blank-shell SPA?
 
 			// 1a) Lead with schema.org PRODUCT JSON-LD when present, even if the HTML
@@ -1672,7 +1680,7 @@ class CompetitorAnalysisService
 					$api_text = competitor_json_api_to_text($this->fetch_url($api));
 					if ( ! competitor_scrape_is_thin($api_text)) {
 						$this->log_crawl('spa_api_used', array('url' => $url, 'api' => $api, 'text_len' => strlen($api_text)));
-						$text = $api_text;
+						$text = competitor_merge_product_text($text, $api_text, 'PRODUCT API DATA');
 					}
 				}
 			}
@@ -1684,7 +1692,7 @@ class CompetitorAnalysisService
 				$embedded = competitor_extract_embedded_json($html);
 				if ( ! competitor_scrape_is_thin($embedded)) {
 					$this->log_crawl('embedded_json_used', array('url' => $url, 'text_len' => strlen($embedded)));
-					$text = $embedded;
+					$text = competitor_merge_product_text($text, $embedded, 'EMBEDDED PRODUCT DATA');
 				}
 			}
 
@@ -1697,7 +1705,7 @@ class CompetitorAnalysisService
 					$alt_text = competitor_json_api_to_text($this->fetch_url($alt));
 					if ( ! competitor_scrape_is_thin($alt_text)) {
 						$this->log_crawl('json_alternate_used', array('url' => $url, 'alt' => $alt, 'text_len' => strlen($alt_text)));
-						$text = $alt_text;
+						$text = competitor_merge_product_text($text, $alt_text, 'ALTERNATE PRODUCT DATA');
 					}
 				}
 			}
@@ -1716,14 +1724,14 @@ class CompetitorAnalysisService
 					&& ! competitor_is_guide_url($url, $this->last_page_title)) {
 				$refetched = $this->fetch_url($url);
 				if ($refetched !== '') {
-					$rf_text = competitor_html_to_text($refetched, competitor_page_char_cap(get_env('COMPETITOR_MAX_PAGE_CHARS')));
+					$rf_text = competitor_html_to_text($refetched, competitor_page_char_cap(get_env('COMPETITOR_MAX_PAGE_CHARS'), 0));
 					$rf_ld   = competitor_jsonld_product_text($refetched);
 					if ($rf_ld !== '') {
 						$rf_text = "STRUCTURED PRODUCT DATA (schema.org):\n" . $rf_ld . "\n\n" . $rf_text;
 					}
 					if ( ! competitor_scrape_is_thin($rf_text) && mb_strlen($rf_text, 'UTF-8') > mb_strlen($text, 'UTF-8')) {
 						$this->log_crawl('clean_refetch_used', array('url' => $url, 'text_len' => strlen($rf_text)));
-						$text = $rf_text;
+						$text = competitor_merge_product_text($text, $rf_text, 'REFETCHED PRODUCT DATA');
 						$html = $refetched;
 						$html_thin = false;
 						if ($this->last_page_title === '') {
@@ -1755,10 +1763,10 @@ class CompetitorAnalysisService
 			if ($this->reading_allow_headless && $render_worthy) {
 				$rendered = $this->fetch_rendered($url);
 				if ($rendered !== '') {
-					$rendered_text = competitor_html_to_text($rendered, competitor_page_char_cap(get_env('COMPETITOR_MAX_PAGE_CHARS')));
+					$rendered_text = competitor_html_to_text($rendered, competitor_page_char_cap(get_env('COMPETITOR_MAX_PAGE_CHARS'), 0));
 					if ( ! competitor_scrape_is_thin($rendered_text) && mb_strlen($rendered_text, 'UTF-8') > mb_strlen($text, 'UTF-8')) {
 						$this->log_crawl('headless_content_used', array('url' => $url, 'text_len' => strlen($rendered_text)));
-						$text = $rendered_text;
+						$text = competitor_merge_product_text($text, $rendered_text, 'RENDERED PRODUCT DATA');
 						$html = $rendered;
 						$html_thin = false;   // headless got the real content; not an unreadable SPA
 						if ($this->last_page_title === '') {
@@ -2206,6 +2214,7 @@ class CompetitorAnalysisService
 	 */
 	public function crawl_to_text($base_url, $limit = 0, $progress = null, $keyword = '', $ai_discover = false)
 	{
+		$this->crawl_source_url = (string) $base_url;
 		$base_url = trim((string) $base_url);
 		if ( ! preg_match('#^https?://#i', $base_url)) {
 			throw new Exception('Please enter a valid http(s) URL.');
@@ -2435,11 +2444,15 @@ class CompetitorAnalysisService
 		// visited so they're never re-read, and so checkpoints keep the full accumulated set.
 		if ( ! empty($resume_existing_items)) {
 			$have = array();
-			foreach ($out as $it) { if (isset($it['url'])) { $have[$it['url']] = true; } }
-			foreach ($resume_existing_items as $it) {
-				$u = isset($it['url']) ? $it['url'] : null;
-				if ($u !== null && ! isset($have[$u])) { $out[] = $it; $have[$u] = true; $visited[$u] = true; }
+			$adapters = $out;
+			$out = $resume_existing_items;   // retain indices shown by earlier checkpoints
+			foreach ($out as $it) {
+				if (isset($it['url'])) { $have[$it['url']] = true; $visited[$it['url']] = true; }
+				foreach (isset($it['crawl_metadata']['source_records']) ? $it['crawl_metadata']['source_records'] : array() as $record) {
+					$have[$record['url']] = true; $visited[$record['url']] = true;
+				}
 			}
+			foreach ($adapters as $it) { if (isset($it['url']) && !isset($have[$it['url']])) { $out[] = $it; $have[$it['url']] = true; } }
 		}
 		$drill_cap = (int) get_env('COMPETITOR_DRILL_MAX');
 		$drill_cap = $drill_cap > 0 ? $drill_cap : 800;   // generous — pull more products out of listing pages
@@ -2586,7 +2599,9 @@ class CompetitorAnalysisService
 			}
 		}
 		unset($it);
-		return $out;
+		$prepared = competitor_prepare_crawl_items($out, $base_url);
+		$this->log_crawl('product_quality_summary', $prepared['summary']);
+		return $prepared['items'];
 	}
 
 	/**
@@ -2602,6 +2617,7 @@ class CompetitorAnalysisService
 	public function read_single_product($url, $progress = null)
 	{
 		$url = trim((string) $url);
+		$this->crawl_source_url = $url;
 		if ( ! preg_match('#^https?://#i', $url)) {
 			throw new Exception('Please enter a valid http(s) URL.');
 		}
@@ -2625,11 +2641,12 @@ class CompetitorAnalysisService
 			$text = 'Product: ' . $title . "\n" . $text;
 		}
 
-		$item = array('url' => $display_url, 'text' => $text);
+		$item = array('url' => $display_url, 'text' => $text, 'original_url' => $url, 'source_url' => $url,
+			'canonical_url' => competitor_product_canonical_url($this->last_page_html, $url));
 		if ($title !== '') { $item['title'] = $title; }
 		$tick('reading', 1, 1, $url);
 		$this->log_crawl('single_product_read', array('url' => $url, 'text_len' => strlen($text)));
-		return array($item);
+		return competitor_prepare_crawl_items(array($item), $url)['items'];
 	}
 
 	/**
@@ -3083,7 +3100,7 @@ class CompetitorAnalysisService
 		$record['cost_usd']      = competitor_estimate_cost(
 			$this->model(), $record['input_tokens'], $record['output_tokens'], $this->price_rates()
 		);
-		return $record;
+		return competitor_flag_analysis_gaps($record);
 	}
 
 	/**

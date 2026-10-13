@@ -30,6 +30,7 @@ class Competitor_Analysis_Model extends CI_Model
 		'countries', 'cities', 'travel_months', 'themes', 'tour_styles', 'local_transport',
 		'exclusions', 'hotels', 'shopping_stops', 'optional_tours', 'special_remarks',
 		'scenic_highlights', 'usp', 'traveller_segments', 'meals', 'itinerary',
+		'crawl_metadata',
 	);
 
 	/**

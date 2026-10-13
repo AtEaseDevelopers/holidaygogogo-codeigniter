@@ -19,6 +19,15 @@
                 </div>
             </div>
             <div class="card-body">
+                <?php if (isset($crawl_summary)) { ?>
+                    <div class="alert alert-light-info mb-4" style="font-size:13px;">
+                        <strong>Crawl Summary:</strong>
+                        <?php echo (int) $crawl_summary['total_records']; ?> crawled records &middot;
+                        <?php echo (int) $crawl_summary['duplicate_records']; ?> duplicate records &middot;
+                        <?php echo (int) $crawl_summary['unique_products']; ?> unique products remaining &middot;
+                        <?php echo (int) $crawl_summary['needs_review']; ?> need review
+                    </div>
+                <?php } ?>
                 <?php if (empty($has_ai)) { ?>
                     <div class="alert alert-light-warning" style="font-size:12px;">AI analysis is currently unavailable. You can still review the crawled products below.</div>
                 <?php } ?>
@@ -56,6 +65,10 @@
                                     <td class="row-no" style="text-align:center; padding:10px 8px;"><?php echo $n; ?></td>
                                     <td>
                                         <strong style="font-size:13px;"><?php echo htmlspecialchars($p['title']); ?></strong>
+                                        <?php if (!empty($p['quality_flags'])) { ?>
+                                            <span class="label label-light-warning label-inline ml-1" style="font-size:10px;">Needs review</span>
+                                            <div class="text-warning" style="font-size:11px; margin-top:2px;"><?php echo htmlspecialchars(implode('; ', $p['quality_flags'])); ?></div>
+                                        <?php } ?>
                                         <?php if ( ! empty($p['duration'])) { ?><span class="label label-light-info label-inline ml-1" style="font-size:10px;"><?php echo htmlspecialchars($p['duration']); ?></span><?php } ?>
                                         <?php echo $p['chars'] > 0 ? '' : ' <span class="label label-light-danger label-inline" style="font-size:10px;">empty</span>'; ?>
                                         <?php if ( ! empty($p['snippet'])) { ?><div class="text-muted" style="font-size:11px; margin-top:2px;"><?php echo htmlspecialchars($p['snippet']); ?></div><?php } ?>
