@@ -133,6 +133,22 @@ class Costing extends MY_Controller
         redirect($existing_package_id > 0 ? 'Costing/Package/' . $existing_package_id . '?step=details' : 'Costing');
     }
 
+    public function Duplicate_Package()
+    {
+        $package_id = (int) $this->input->post('package_id');
+        if ($package_id > 0) {
+            $new_package_id = $this->Costing_Model->Duplicate_Package($package_id);
+            if ($new_package_id > 0) {
+                $this->session->set_flashdata('message_success', 'Package duplicated successfully.');
+                redirect('Costing/Package/' . $new_package_id . '?step=details');
+                return;
+            }
+            $this->session->set_flashdata('message_error', 'Unable to duplicate package.');
+        }
+
+        redirect('Costing');
+    }
+
     public function Delete_Package()
     {
         $package_id = (int) $this->input->post('package_id');
@@ -487,6 +503,7 @@ class Costing extends MY_Controller
                 'kind'          => costing_quotation_entry_kind($original),
                 // A note-only entry has no file to stream, so no view URL.
                 'view_url'      => $original !== '' ? base_url('Costing/Quotation_File/' . $id) : '',
+                'uploaded_label' => costing_quotation_format_upload_date(date('Y-m-d H:i:s')),
                 'can_delete'    => true,
             ),
         ));

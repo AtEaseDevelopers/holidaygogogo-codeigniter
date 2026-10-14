@@ -156,6 +156,25 @@ function costing_quotation_entry_icon($original_name)
 }
 
 /**
+ * Format a quotation's created_at timestamp into a short, human upload date for
+ * the attachment card (e.g. "14 Oct 2026"). Blank / unparseable / zero-date
+ * values return '' so the caller can omit the line entirely. Pure (no DB), so
+ * the display string is unit-tested rather than left to the template.
+ */
+function costing_quotation_format_upload_date($created_at)
+{
+    $raw = trim((string) $created_at);
+    if ($raw === '' || strpos($raw, '0000-00-00') === 0) {
+        return '';
+    }
+    $ts = strtotime($raw);
+    if ($ts === false || $ts <= 0) {
+        return '';
+    }
+    return date('j M Y', $ts);
+}
+
+/**
  * Normalised key used to match a cost item's free-text supplier against an
  * uploaded quotation's supplier (trim + lowercase). Both sides run through this
  * so "Hotel ABC", "hotel abc" and " Hotel ABC " all match. Non-strings => ''.

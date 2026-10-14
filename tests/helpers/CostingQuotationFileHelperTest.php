@@ -68,6 +68,14 @@ $assertions['entry kind xlsx']   = costing_quotation_entry_kind('a.xlsx') === 'e
 $assertions['entry icon note']   = costing_quotation_entry_icon('') === 'la la-sticky-note';
 $assertions['entry icon pdf']    = costing_quotation_entry_icon('a.pdf') === 'la la-file-pdf';
 
+// --- upload-date formatting ------------------------------------------------
+$assertions['date full']    = costing_quotation_format_upload_date('2026-10-14 13:07:00') === '14 Oct 2026';
+$assertions['date dateonly']= costing_quotation_format_upload_date('2026-01-05') === '5 Jan 2026';
+$assertions['date empty']   = costing_quotation_format_upload_date('') === '';
+$assertions['date null']    = costing_quotation_format_upload_date(null) === '';
+$assertions['date zero']    = costing_quotation_format_upload_date('0000-00-00 00:00:00') === '';
+$assertions['date garbage'] = costing_quotation_format_upload_date('not a date') === '';
+
 // --- supplier matching key -------------------------------------------------
 $assertions['key trims/lowers'] = costing_quotation_supplier_key('  Hotel ABC ') === 'hotel abc';
 $assertions['key empty']        = costing_quotation_supplier_key('') === '';

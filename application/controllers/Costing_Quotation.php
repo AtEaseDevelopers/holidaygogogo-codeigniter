@@ -9,26 +9,33 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  * itinerary, a per-item "Package Includes" list at customer selling prices, and the
  * total selling price (MYR) — raw cost/margin/profit/snapshot stay hidden.
  *
- *   /Costing_Quotation?token=XXXX
+ * Addressed by the unguessable costing_bookings.quotation_token (never the sequential
+ * package id, so links can't be enumerated); an inactive package 404s.
+ *
+ *   /Costing/Quotation/<32-hex-token>   (preferred)
+ *   /Costing_Quotation?token=XXXX       (legacy)
  */
 class Costing_Quotation extends CI_Controller
 {
-    public function index($package_id = 0)
+    public function index($token = '')
     {
         $this->load->model('Costing_Model');
+        $this->load->helper('costing_quotation_access');
 
-        // Preferred: per-package (/Costing/Quotation/<package_id>). Falls back to a
-        // scenario token (?token=) so previously shared links still resolve.
-        $package_id = (int) $package_id;
-        if ($package_id <= 0) {
-            $package_id = (int) $this->input->get('package', true);
+        // Addressed by the unguessable quotation_token, NOT the sequential package
+        // id — so links can't be enumerated. Accept the token from the path segment
+        // (/Costing/Quotation/<token>) or the legacy ?token= query string.
+        $token = trim((string) $token);
+        if ($token === '') {
+            $token = trim((string) $this->input->get('token', true));
         }
 
-        if ($package_id > 0) {
-            $data = $this->Costing_Model->Read_Quotation_By_Package($package_id);
-        } else {
-            $data = $this->Costing_Model->Read_Quotation_By_Token(trim((string) $this->input->get('token', true)));
+        if (!costing_quotation_token_is_valid($token)) {
+            show_error('Quotation not found.', 404);
+            return;
         }
+
+        $data = $this->Costing_Model->Read_Quotation_By_Token($token);
 
         if (empty($data)) {
             show_error('Quotation not found.', 404);

@@ -73,12 +73,13 @@ $filter_open = !empty($category_filters['name']);
                                 <th style="text-align:center;">Category Name</th>
                                 <th style="text-align:center; width:220px;">Code</th>
                                 <th style="text-align:center; width:160px;">Headcount No.</th>
+                                <th style="text-align:center; width:140px;">No Multiply</th>
                                 <th class="action" style="text-align:center; width:200px;">Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (empty($categories)) { ?>
-                                <tr><td colspan="5" style="text-align:center; padding:16px;">Categories Not Found</td></tr>
+                                <tr><td colspan="6" style="text-align:center; padding:16px;">Categories Not Found</td></tr>
                             <?php } else { $count = 1; ?>
                                 <?php foreach ($categories as $category) { $is_fallback = ((string) $category['code'] === $fallback_code); ?>
                                     <tr>
@@ -90,6 +91,13 @@ $filter_open = !empty($category_filters['name']);
                                         <td style="text-align:center;">
                                             <?php if (!empty($category['has_headcount_multiplier'])) { ?>
                                                 <span class="label label-lg label-light-success label-inline" title="This category shows a 'No. of …' count per combination that scales its cost">On</span>
+                                            <?php } else { ?>
+                                                <span class="text-muted">—</span>
+                                            <?php } ?>
+                                        </td>
+                                        <td style="text-align:center;">
+                                            <?php if (!empty($category['no_multiplier'])) { ?>
+                                                <span class="label label-lg label-light-info label-inline" title="Rows in this category are not multiplied by day/pax — Total = Cost; carried flat (marked up) in the quotation">On</span>
                                             <?php } else { ?>
                                                 <span class="text-muted">—</span>
                                             <?php } ?>
@@ -133,7 +141,7 @@ $filter_open = !empty($category_filters['name']);
                         <input type="text" name="name" id="modal_category_name" class="form-control" required>
                         <span class="form-text text-muted">A short code is generated automatically on create and stays fixed after.</span>
                     </div>
-                    <div class="form-group mb-0">
+                    <div class="form-group">
                         <label>Headcount Multiplier</label>
                         <div class="checkbox-inline" style="margin-top:8px;">
                             <label class="checkbox checkbox-lg">
@@ -141,6 +149,15 @@ $filter_open = !empty($category_filters['name']);
                             </label>
                         </div>
                         <span class="form-text text-muted">When on, each combination shows a count next to this category's section that multiplies its cost in the summary &amp; quotation PDF (the cost rows stay unchanged).</span>
+                    </div>
+                    <div class="form-group mb-0">
+                        <label>No Multiply (Total = Cost)</label>
+                        <div class="checkbox-inline" style="margin-top:8px;">
+                            <label class="checkbox checkbox-lg">
+                                <input type="checkbox" name="no_multiplier" id="modal_category_no_multiply" value="1"><span></span> Don't multiply by day/pax — <strong>Total = Cost</strong>
+                            </label>
+                        </div>
+                        <span class="form-text text-muted">When on, cost rows in this category are NOT multiplied by the day/pax count — each row's Total equals its MYR-converted cost, and the amount is carried as a flat charge (marked up by the margin) in the quotation rather than divided per pax.</span>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -158,12 +175,14 @@ $filter_open = !empty($category_filters['name']);
         var idInput = document.getElementById('modal_category_id');
         var nameInput = document.getElementById('modal_category_name');
         var headcountInput = document.getElementById('modal_category_headcount');
+        var noMultiplyInput = document.getElementById('modal_category_no_multiply');
 
         function resetModal() {
             title.textContent = 'Add Category';
             idInput.value = '';
             nameInput.value = '';
             headcountInput.checked = false;
+            noMultiplyInput.checked = false;
         }
 
         document.getElementById('add_category_button').addEventListener('click', resetModal);
@@ -176,6 +195,7 @@ $filter_open = !empty($category_filters['name']);
                 idInput.value = category.id || '';
                 nameInput.value = category.name || '';
                 headcountInput.checked = (String(category.has_headcount_multiplier) === '1');
+                noMultiplyInput.checked = (String(category.no_multiplier) === '1');
                 $('#category_modal').modal('show');
             } catch (e) { console.error('Unable to read category data.', e); }
         });

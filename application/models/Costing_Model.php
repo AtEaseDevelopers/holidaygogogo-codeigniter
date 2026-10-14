@@ -2,6 +2,25 @@
 
 class Costing_Model extends CI_Model
 {
+    /** Cached "no multiply" category codes (Total = Cost); null until first read. */
+    private $no_multiply_codes = null;
+
+    /**
+     * Active "no multiply" category codes (Total = Cost, flat in quotation), read
+     * once per request from the category master and cached. Rows in these categories
+     * are not multiplied by the day/pax count and are carried flat on the quotation.
+     *
+     * @return string[] lowercased category codes
+     */
+    private function No_Multiply_Codes()
+    {
+        if ($this->no_multiply_codes === null) {
+            $this->load->model('Costing_Category_Model');
+            $this->no_multiply_codes = $this->Costing_Category_Model->Read_No_Multiply_Codes();
+        }
+        return $this->no_multiply_codes;
+    }
+
     public function Read_Packages_Dashboard($filters = array())
     {
         $where = array();
@@ -418,6 +437,132 @@ class Costing_Model extends CI_Model
         $this->db->trans_complete();
 
         return (bool) $this->db->trans_status();
+    }
+
+    /**
+     * Deep-copy a costing package and every record hanging off it into a brand-new
+     * package, returning the new package id (0 on failure). The clone gets a fresh
+     * auto tour code and a new name ("<name> (Copy)"); its snapshot gets no
+     * quotation token (a fresh one is minted on demand), so the original's public
+     * quotation link is never shared. Supplier quotation attachments
+     * (costing_quotation_files) are deliberately NOT copied — the uploaded files
+     * are physical, uploader-owned references to the original package.
+     */
+    public function Duplicate_Package($package_id)
+    {
+        $package_id = (int) $package_id;
+        $source = $package_id > 0 ? $this->Read_Package($package_id) : null;
+        if (empty($source)) {
+            return 0;
+        }
+
+        $this->db->trans_start();
+
+        // 1) The package row itself. Drop the identity/timestamp columns, give it a
+        //    copy name and a fresh auto tour code; everything else (customer, sales
+        //    person, itinerary notes, quote-level fields) carries over verbatim.
+        $package_data = $source;
+        unset($package_data['id'], $package_data['created_at'], $package_data['updated_at']);
+        $package_data['name'] = trim((string) $source['name']) . ' (Copy)';
+        $package_data['tour_code'] = $this->Next_Tour_Code();
+        $this->db->insert('costing_packages', $package_data);
+        $new_package_id = (int) $this->db->insert_id();
+
+        if ($new_package_id <= 0) {
+            $this->db->trans_complete();
+            return 0;
+        }
+
+        // 2) Item master for the package.
+        $this->Clone_Rows('costing_package_items', array('package_id' => $package_id), array('package_id' => $new_package_id));
+
+        // 3) Itinerary days + quote hotels (both keyed directly by package_id).
+        $this->Clone_Rows('costing_itinerary_days', array('package_id' => $package_id), array('package_id' => $new_package_id));
+        $this->Clone_Rows('costing_quote_hotels', array('package_id' => $package_id), array('package_id' => $new_package_id));
+
+        // 4) Flight options first (flights reference them) — keep an old→new map so
+        //    each flight row can be re-pointed at its cloned option.
+        $flight_options = $this->db->where('package_id', $package_id)->get('costing_quote_flight_options')->result_array();
+        $option_map = array();
+        foreach ($flight_options as $option) {
+            $old_option_id = (int) $option['id'];
+            unset($option['id'], $option['created_at'], $option['updated_at']);
+            $option['package_id'] = $new_package_id;
+            $this->db->insert('costing_quote_flight_options', $option);
+            $option_map[$old_option_id] = (int) $this->db->insert_id();
+        }
+
+        $flights = $this->db->where('package_id', $package_id)->get('costing_quote_flights')->result_array();
+        foreach ($flights as $flight) {
+            unset($flight['id'], $flight['created_at'], $flight['updated_at']);
+            $flight['package_id'] = $new_package_id;
+            $old_option_id = (int) $flight['option_id'];
+            $flight['option_id'] = ($old_option_id > 0 && isset($option_map[$old_option_id])) ? $option_map[$old_option_id] : null;
+            $this->db->insert('costing_quote_flights', $flight);
+        }
+
+        // 5) The snapshot(s). One package normally holds a single snapshot, but loop
+        //    defensively. Each snapshot drags its combinations, items, financials and
+        //    frozen rates — combination ids are remapped so cloned items stay linked.
+        $bookings = $this->db->where('package_id', $package_id)->get('costing_bookings')->result_array();
+        foreach ($bookings as $booking) {
+            $old_booking_id = (int) $booking['id'];
+            unset($booking['id'], $booking['created_at'], $booking['updated_at']);
+            $booking['package_id'] = $new_package_id;
+            // Never share the original's public quotation link — mint on demand.
+            $booking['quotation_token'] = null;
+            $this->db->insert('costing_bookings', $booking);
+            $new_booking_id = (int) $this->db->insert_id();
+
+            $combinations = $this->db->where('costing_booking_id', $old_booking_id)->get('costing_combinations')->result_array();
+            $combination_map = array();
+            foreach ($combinations as $combination) {
+                $old_combination_id = (int) $combination['id'];
+                unset($combination['id'], $combination['created_at'], $combination['updated_at']);
+                $combination['costing_booking_id'] = $new_booking_id;
+                $this->db->insert('costing_combinations', $combination);
+                $combination_map[$old_combination_id] = (int) $this->db->insert_id();
+            }
+
+            $items = $this->db->where('booking_id', $old_booking_id)->get('costing_booking_items')->result_array();
+            foreach ($items as $item) {
+                unset($item['id'], $item['created_at'], $item['updated_at']);
+                $item['booking_id'] = $new_booking_id;
+                $old_combination_id = (int) $item['combination_id'];
+                $item['combination_id'] = ($old_combination_id > 0 && isset($combination_map[$old_combination_id]))
+                    ? $combination_map[$old_combination_id]
+                    : null;
+                // package_item_id points at the cloned item master only loosely; the
+                // snapshot item already carries its own frozen name/price, so a stale
+                // reference is harmless. Null it to avoid pointing at the original.
+                $item['package_item_id'] = null;
+                $this->db->insert('costing_booking_items', $item);
+            }
+
+            $this->Clone_Rows('costing_booking_financials', array('booking_id' => $old_booking_id), array('booking_id' => $new_booking_id));
+            $this->Clone_Rows('costing_snapshot_rates', array('costing_booking_id' => $old_booking_id), array('costing_booking_id' => $new_booking_id));
+        }
+
+        $this->db->trans_complete();
+
+        return $this->db->trans_status() ? $new_package_id : 0;
+    }
+
+    /**
+     * Copy every row matching $where from $table into the same table, stripping the
+     * identity/timestamp columns and applying $overrides (the remapped foreign
+     * keys). Used by Duplicate_Package for the straight parent→child copies.
+     */
+    private function Clone_Rows($table, $where, $overrides)
+    {
+        $rows = $this->db->where($where)->get($table)->result_array();
+        foreach ($rows as $row) {
+            unset($row['id'], $row['created_at'], $row['updated_at']);
+            foreach ($overrides as $column => $value) {
+                $row[$column] = $value;
+            }
+            $this->db->insert($table, $row);
+        }
     }
 
     public function Save_Package_Item($item)
@@ -1202,15 +1347,23 @@ class Costing_Model extends CI_Model
         }
 
         $booking = $this->db
-            ->select('cb.*, cp.name AS package_name, cp.tour_code, cp.customer_name, cp.sales_admin_id, sales_admin.Name AS sales_admin_name, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns, cp.quote_hotel_title_label, cp.quote_show_single_supp')
+            ->select('cb.*, cp.name AS package_name, cp.status AS package_status, cp.tour_code, cp.customer_name, cp.sales_admin_id, sales_admin.Name AS sales_admin_name, sales_admin.Mobile AS sales_admin_mobile, sales_cc.CountryCode AS sales_admin_country_code, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns, cp.quote_hotel_title_label, cp.quote_show_single_supp')
             ->from('costing_bookings cb')
             ->join('costing_packages cp', 'cp.id = cb.package_id')
             ->join('admin sales_admin', 'sales_admin.AdminID = cp.sales_admin_id', 'left')
+            ->join('country_code sales_cc', 'sales_cc.CountryCodeID = sales_admin.CountryCodeID', 'left')
             ->where('cb.quotation_token', $token)
             ->get()
             ->row_array();
 
         if (!$booking) {
+            return null;
+        }
+
+        // Access gate: an inactive package's quotation is no longer served (the
+        // public URL 404s). Covers both the token path and the legacy ?token= path.
+        $this->load->helper('costing_quotation_access');
+        if (!costing_quotation_status_accessible(isset($booking['package_status']) ? $booking['package_status'] : '')) {
             return null;
         }
 
@@ -1240,7 +1393,8 @@ class Costing_Model extends CI_Model
         // Fold the General Combination's cost into every combination (item 6) — its
         // common items apply to all and it is never shown as its own option.
         $folded_combos = costing_fold_general_combination(
-            $this->Read_Combinations((int) $booking['id'], $base_currency_id, $booking['travel_date'])
+            $this->Read_Combinations((int) $booking['id'], $base_currency_id, $booking['travel_date']),
+            $this->No_Multiply_Codes()
         );
         $combo_input = array();
         foreach ($folded_combos as $combo) {
@@ -1252,6 +1406,7 @@ class Costing_Model extends CI_Model
                 'name'                  => $combo['name'],
                 'item_names'            => $names,
                 'cost_myr'              => $combo['cost_myr'],
+                'flat_cost_myr'         => isset($combo['flat_cost_myr']) ? $combo['flat_cost_myr'] : 0,
                 'selling_price_per_pax' => isset($combo['selling_price_per_pax']) ? $combo['selling_price_per_pax'] : null,
             );
         }
@@ -1265,6 +1420,12 @@ class Costing_Model extends CI_Model
                 'tour_code'       => isset($booking['tour_code']) ? $booking['tour_code'] : '',
                 'customer_name'   => isset($booking['customer_name']) ? (string) $booking['customer_name'] : '',
                 'sales_person'    => isset($booking['sales_admin_name']) ? (string) $booking['sales_admin_name'] : '',
+                // Sales person's contact (country code + mobile), shown beside the
+                // name on the quotation so the customer can reach them directly.
+                'sales_person_contact' => trim(
+                    (isset($booking['sales_admin_country_code']) ? (string) $booking['sales_admin_country_code'] : '')
+                    . (isset($booking['sales_admin_mobile']) ? (string) $booking['sales_admin_mobile'] : '')
+                ),
                 'duration_days'   => (int) $booking['duration_days'],
                 'duration_nights' => (int) $booking['duration_nights'],
             ),
@@ -1672,7 +1833,8 @@ class Costing_Model extends CI_Model
         // Fold the General Combination cost into every combination first (item 6);
         // each combination scales its own tour-leader cost by its No. of Tour Leaders.
         $folded = costing_fold_general_combination(
-            $this->Read_Combinations((int) $booking_id, (int) $base_currency_id, $travel_date)
+            $this->Read_Combinations((int) $booking_id, (int) $base_currency_id, $travel_date),
+            $this->No_Multiply_Codes()
         );
         $combo_input = array();
         foreach ($folded as $combo) {
@@ -1680,6 +1842,7 @@ class Costing_Model extends CI_Model
                 'name'                  => $combo['name'],
                 'item_names'            => array(),
                 'cost_myr'              => $combo['cost_myr'],
+                'flat_cost_myr'         => isset($combo['flat_cost_myr']) ? $combo['flat_cost_myr'] : 0,
                 'selling_price_per_pax' => isset($combo['selling_price_per_pax']) ? $combo['selling_price_per_pax'] : null,
             );
         }
@@ -2060,6 +2223,13 @@ class Costing_Model extends CI_Model
 
             if ((float) $normalized_row['unit_count'] <= 0) {
                 $normalized_row['unit_count'] = 1.0;
+            }
+
+            // "No multiply" categories (Total = Cost): the day/pax count never scales
+            // the row, so force quantity to 1 regardless of what the UI posted. The
+            // read path then yields base_total = the MYR-converted cost (per unit).
+            if (in_array(strtolower(trim($category)), $this->No_Multiply_Codes(), true)) {
+                $normalized_row['quantity'] = 1.0;
             }
 
             if (array_key_exists('bank_charges_myr', $row)) {

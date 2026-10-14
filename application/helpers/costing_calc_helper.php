@@ -202,12 +202,18 @@ if (!function_exists('costing_combination_summary')) {
      *
      *   cost after markup / pax = costing_cost_after_markup(cost/pax, margin)
      *   selling price / pax     = manual override, else the cost-after-markup
-     *   combination total       = selling price / pax × pax
+     *   combination total       = selling price / pax × pax  + flat selling
+     *
+     * A combination may carry a FLAT cost (flat_cost_myr) from "no multiply"
+     * categories: that lump is NOT divided per pax. It is marked up by the same gross
+     * margin (costing_cost_after_markup) and added once on top of the per-pax total
+     * (flat_selling), so it still earns profit without inflating the per-pax price.
      *
      * Combinations are ALTERNATIVES the customer picks one of; total_selling is the
      * sum only for the legacy additive footer.
      *
      * @param array $combinations each: ['name','item_names','cost_myr',
+     *                                    'flat_cost_myr'(optional flat lump),
      *                                    'selling_price_per_pax'(optional manual)]
      * @param float $margin_percent gross-margin percentage (never negative)
      * @param int   $total_pax      pax the price/pax is computed against (0 = none)
@@ -233,6 +239,8 @@ if (!function_exists('costing_combination_summary')) {
 
         foreach ((array) $combinations as $combo) {
             $cost = round((float) (isset($combo['cost_myr']) ? $combo['cost_myr'] : 0), 2);
+            // Flat (no-multiply) cost lump: marked up but NOT divided per pax.
+            $flat = round(max(0.0, (float) (isset($combo['flat_cost_myr']) ? $combo['flat_cost_myr'] : 0)), 2);
 
             $has_manual = isset($combo['selling_price_per_pax'])
                 && $combo['selling_price_per_pax'] !== null
@@ -246,7 +254,9 @@ if (!function_exists('costing_combination_summary')) {
             }
             $suggest_pax = costing_cost_after_markup($cost_per_pax, $margin);
             $price_pax   = $has_manual ? $manual_pax : $suggest_pax;
-            $selling     = $pax > 0 ? round($price_pax * $pax, 2) : round($price_pax, 2);
+            // Flat lump earns the same gross-margin markup, added once (not per pax).
+            $flat_selling = $flat > 0 ? costing_cost_after_markup($flat, $margin) : 0.0;
+            $selling     = ($pax > 0 ? round($price_pax * $pax, 2) : round($price_pax, 2)) + $flat_selling;
 
             $names = [];
             foreach ((array) (isset($combo['item_names']) ? $combo['item_names'] : []) as $name) {
@@ -260,15 +270,17 @@ if (!function_exists('costing_combination_summary')) {
                 'name'                      => trim((string) (isset($combo['name']) ? $combo['name'] : '')),
                 'item_names'                => $names,
                 'cost_myr'                  => $cost,
+                'flat_cost_myr'             => $flat,
                 'cost_per_pax'              => $cost_per_pax,
                 'cost_after_markup_per_pax' => $suggest_pax,
                 'selling_price_per_pax'     => round($price_pax, 2),
+                'flat_selling'              => round($flat_selling, 2),
                 'profit_per_pax'            => round($price_pax - $cost_per_pax, 2),
-                'selling'                   => $selling,
-                'total_profit'              => round($selling - $cost, 2),
+                'selling'                   => round($selling, 2),
+                'total_profit'              => round($selling - ($cost + $flat), 2),
             ];
 
-            $total_cost += $cost;
+            $total_cost += $cost + $flat;
             $total_selling += $selling;
         }
 
@@ -374,20 +386,42 @@ if (!function_exists('costing_fold_general_combination')) {
      * is treated as 1 (no change). Bank charges are a per-currency transaction fee
      * and are NOT scaled.
      *
-     * @param array $combinations each: ['cost_myr', 'items'(rows), 'is_general'(opt), 'headcount'(opt map), ...]
-     * @return array regular combinations with cost_myr including the general cost + bank
+     * "No multiply" categories ($no_multiply_codes, from the category master) are
+     * split OUT of the per-pax cost into a separate FLAT bucket per combination
+     * (flat_cost_myr), carried untouched to the quotation where it is marked up as a
+     * flat lump instead of divided per pax. A no-multiply category takes precedence
+     * over a headcount flag (its rows are never headcount-scaled). The bank charge
+     * still lands once per distinct currency across the combination's whole row union
+     * (flat rows included) — a wire fee is per currency regardless of flat/per-pax.
+     *
+     * @param array    $combinations      each: ['cost_myr', 'items'(rows), 'is_general'(opt), 'headcount'(opt map), ...]
+     * @param string[] $no_multiply_codes category codes whose cost is carried flat
+     * @return array regular combinations with per-pax cost_myr + flat_cost_myr
      */
-    function costing_fold_general_combination($combinations)
+    function costing_fold_general_combination($combinations, $no_multiply_codes = array())
     {
+        $flat_set = array();
+        foreach ((array) $no_multiply_codes as $code) {
+            $flat_set[strtolower(trim((string) $code))] = true;
+        }
+        $is_flat = function ($item) use ($flat_set) {
+            $cat = strtolower(trim((string) (isset($item['category']) ? $item['category'] : '')));
+            return $cat !== '' && isset($flat_set[$cat]);
+        };
+
         // A combination's extra cost for additional headcount, from its OWN rows in
-        // flagged categories scaled by that category's OWN count.
-        $hc_extra = function ($combo) {
+        // flagged categories scaled by that category's OWN count. No-multiply rows are
+        // never headcount-scaled (no-multiply takes precedence).
+        $hc_extra = function ($combo) use ($is_flat) {
             $counts = (isset($combo['headcount']) && is_array($combo['headcount'])) ? $combo['headcount'] : array();
             if (empty($counts)) {
                 return 0.0;
             }
             $extra = 0.0;
             foreach ((array) (isset($combo['items']) ? $combo['items'] : array()) as $item) {
+                if ($is_flat($item)) {
+                    continue;
+                }
                 $cat = strtolower(trim((string) (isset($item['category']) ? $item['category'] : '')));
                 if ($cat === '' || !isset($counts[$cat])) {
                     continue;
@@ -402,13 +436,19 @@ if (!function_exists('costing_fold_general_combination')) {
 
         $general_items = array();
         $general_sum   = 0.0;
+        $general_flat  = 0.0;
         foreach ((array) $combinations as $combo) {
             if (!empty($combo['is_general'])) {
                 foreach ((array) (isset($combo['items']) ? $combo['items'] : array()) as $item) {
                     $general_items[] = $item;
-                    $general_sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
+                    $base = (float) (isset($item['base_total']) ? $item['base_total'] : 0);
+                    if ($is_flat($item)) {
+                        $general_flat += $base;
+                    } else {
+                        $general_sum += $base;
+                    }
                 }
-                // General's own headcount counts scale its folded cost.
+                // General's own headcount counts scale its folded (per-pax) cost.
                 $general_sum += $hc_extra($combo);
             }
         }
@@ -420,13 +460,20 @@ if (!function_exists('costing_fold_general_combination')) {
             }
             $own_items = (array) (isset($combo['items']) ? $combo['items'] : array());
             $own_sum = 0.0;
+            $own_flat = 0.0;
             foreach ($own_items as $item) {
-                $own_sum += (float) (isset($item['base_total']) ? $item['base_total'] : 0);
+                $base = (float) (isset($item['base_total']) ? $item['base_total'] : 0);
+                if ($is_flat($item)) {
+                    $own_flat += $base;
+                } else {
+                    $own_sum += $base;
+                }
             }
-            // This combination's own headcount counts scale its own rows.
+            // This combination's own headcount counts scale its own (per-pax) rows.
             $own_sum += $hc_extra($combo);
             $union = array_merge($own_items, $general_items);
             $combo['cost_myr'] = round($own_sum + $general_sum + costing_bank_total($union), 2);
+            $combo['flat_cost_myr'] = round($own_flat + $general_flat, 2);
             $out[] = $combo;
         }
         return $out;

@@ -48,6 +48,7 @@ class Costing_Category extends MY_Controller
             'id'   => $category_id,
             'name' => $this->input->post('name'),
             'has_headcount_multiplier' => $this->input->post('has_headcount_multiplier') ? 1 : 0,
+            'no_multiplier' => $this->input->post('no_multiplier') ? 1 : 0,
         ));
 
         if ($success) {

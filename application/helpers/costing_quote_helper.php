@@ -44,6 +44,33 @@ if (!function_exists('costing_quote_price_normalize')) {
     }
 }
 
+if (!function_exists('costing_quote_hotel_names_split')) {
+    /**
+     * Split a hotel-name cell into its individual hotel names (14 Oct 2026: a
+     * single price row can list MULTIPLE interchangeable hotels, one per line,
+     * all sharing that row's prices). Splits on CRLF / CR / LF, trims each line
+     * and drops blanks. Single render/normalise source of truth for both the
+     * editor round-trip and the stacked PDF cell.
+     *
+     * @param mixed $value
+     * @return string[]
+     */
+    function costing_quote_hotel_names_split($value)
+    {
+        if (is_array($value)) {
+            $value = implode("\n", $value);
+        }
+        $out = array();
+        foreach (preg_split('/\r\n|\r|\n/', (string) $value) as $line) {
+            $line = trim($line);
+            if ($line !== '') {
+                $out[] = $line;
+            }
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('costing_quote_hotel_prepare_row')) {
     /**
      * Normalise one posted hotel row into an insert-ready shape. 'is_empty' is
@@ -57,7 +84,9 @@ if (!function_exists('costing_quote_hotel_prepare_row')) {
     {
         $row = (array) $row;
 
-        $name  = trim((string) (isset($row['hotel_name']) ? $row['hotel_name'] : ''));
+        // A hotel cell may list multiple hotels (one per line); store a clean
+        // newline-joined list so blank interior lines never reach the PDF.
+        $name  = implode("\n", costing_quote_hotel_names_split(isset($row['hotel_name']) ? $row['hotel_name'] : ''));
         $single = costing_quote_price_normalize(isset($row['single_supp_price']) ? $row['single_supp_price'] : null);
 
         // Feedback 18 Sep 2026 (4.2): a hotel row can carry a price per configurable

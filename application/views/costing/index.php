@@ -148,11 +148,17 @@ $has_filter = ($filter_search !== '' || $filter_status !== '' || $filter_custome
                                             <a href="<?php echo base_url('Costing/Package/' . (int) $package['id']); ?>" class="btn btn-icon btn-light-primary btn-sm mr-2" title="View Package">
                                                 <i class="la la-eye"></i>
                                             </a>
-                                            <?php if (!empty($package['booking_count'])) { ?>
-                                                <a href="<?php echo base_url('Costing/Quotation/' . (int) $package['id']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-sm mr-2" title="Open Quotation PDF">
+                                            <?php if (!empty($package['latest_quotation_token']) && strtolower((string) $package['status']) !== 'inactive') { ?>
+                                                <a href="<?php echo base_url('Costing/Quotation/' . $package['latest_quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-sm mr-2" title="Open Quotation PDF">
                                                     <i class="la la-file-pdf"></i>
                                                 </a>
                                             <?php } ?>
+                                            <form method="post" action="<?php echo base_url('Costing/Duplicate_Package'); ?>" class="d-inline duplicate-package-form">
+                                                <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
+                                                <button type="button" class="btn btn-icon btn-light-info btn-sm mr-2 duplicate-package-button" data-name="<?php echo html_escape($package['name']); ?>" title="Duplicate Package">
+                                                    <i class="la la-copy"></i>
+                                                </button>
+                                            </form>
                                             <form method="post" action="<?php echo base_url('Costing/Delete_Package'); ?>" class="d-inline delete-package-form">
                                                 <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
                                                 <button type="button" class="btn btn-icon btn-light-danger btn-sm delete-package-button" data-name="<?php echo html_escape($package['name']); ?>" title="Delete Package">
@@ -200,6 +206,42 @@ $has_filter = ($filter_search !== '' || $filter_status !== '' || $filter_custome
                     icon: 'warning',
                     showCancelButton: true,
                     confirmButtonText: 'Yes, Delete',
+                    cancelButtonText: 'Cancel',
+                    reverseButtons: true
+                }).then(function (result) {
+                    if (result.isConfirmed) {
+                        form.submit();
+                    }
+                });
+            });
+        });
+
+        document.querySelectorAll('.duplicate-package-button').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var form = button.closest('form');
+                var packageName = button.getAttribute('data-name') || 'this package';
+
+                if (typeof Swal === 'undefined') {
+                    if (confirm('Duplicate package: ' + packageName + '?')) {
+                        form.submit();
+                    }
+                    return;
+                }
+
+                var swalWithBootstrapButtons = Swal.mixin({
+                    customClass: {
+                        confirmButton: 'btn btn-primary',
+                        cancelButton: 'btn btn-light-primary'
+                    },
+                    buttonsStyling: false
+                });
+
+                swalWithBootstrapButtons.fire({
+                    title: 'Duplicate Package: ' + packageName + '?',
+                    text: 'This creates a new package copying the costing, itinerary, hotel and flight details.',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: 'Yes, Duplicate',
                     cancelButtonText: 'Cancel',
                     reverseButtons: true
                 }).then(function (result) {

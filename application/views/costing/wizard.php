@@ -57,6 +57,9 @@ $cat_labels = $CI->Costing_Category_Model->Read_Category_Map();
 // section header in each combination shows a "No. of …" count that scales that
 // section's cost in the summary + quotation PDF.
 $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
+// Category codes flagged "no multiply" (Total = Cost). Rows in these categories are
+// not scaled by the day/pax count and their cost is carried flat on the quotation.
+$no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Codes();
 ?>
 
 <style>
@@ -84,6 +87,8 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
     }
     .cw-panel-title { font-size: 19px; font-weight: 700; color: #3f4254; margin-bottom: 4px; }
     .cw-panel-sub { color: #6d7288; margin-bottom: 22px; }
+    /* Hotel-name cell lists several hotels (one per line) sharing one price. */
+    textarea.cw-hotel-name { min-height: 40px; resize: vertical; white-space: pre; }
     .cw-cost-table th { background: #f3f6fb; color: #3f4254; font-size: 12.5px; text-align: center; white-space: nowrap; }
     .cw-cost-table td { vertical-align: middle; }
     .cw-cost-table tr.cw-cat-row td,
@@ -155,6 +160,7 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
     .cw-quote-fname:hover { color: #6082B6; }
     .cw-quote-sub { font-size: 12px; color: #9aa0b3; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cw-quote-sub .sep { margin: 0 7px; opacity: .45; }
+    .cw-quote-date { font-size: 11px; color: #b5bac7; margin-top: 2px; }
     .cw-quote-note-wrap { margin-top: 4px; }
     .cw-quote-note { font-size: 12px; color: #6b6f80; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
     .cw-quote-note.is-clamped { max-height: 4.2em; overflow: hidden; } /* ~3 lines */
@@ -447,6 +453,10 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
                                 <a href="<?php echo base_url('Costing/Quotation_File/' . (int) $qf['id']); ?>" target="_blank" rel="noopener" class="cw-quote-fname" title="<?php echo html_escape($qf['original_name']); ?>"><?php echo html_escape($qf['original_name']); ?></a>
                                 <?php } ?>
                                 <div class="cw-quote-sub"><?php echo $sub_parts ? implode('<span class="sep">&middot;</span>', $sub_parts) : 'No supplier tagged'; ?></div>
+                                <?php $qf_uploaded = costing_quotation_format_upload_date(isset($qf['created_at']) ? $qf['created_at'] : ''); ?>
+                                <?php if ($qf_uploaded !== '') { ?>
+                                <div class="cw-quote-date">Uploaded <?php echo html_escape($qf_uploaded); ?></div>
+                                <?php } ?>
                                 <?php if (isset($qf['note']) && $qf['note'] !== null && $qf['note'] !== '') { ?>
                                 <div class="cw-quote-note-wrap">
                                     <div class="cw-quote-note is-clamped"><?php echo str_replace(array("\r\n", "\r", "\n"), '<br>', html_escape($qf['note'])); ?></div>
@@ -653,7 +663,7 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
             <!-- Hotel pricing -->
             <div class="cw-panel">
                 <div class="cw-panel-title">Hotel Pricing (per person)</div>
-                <div class="cw-panel-sub">The pricing table shown on the customer Quotation PDF. Prices are per person in RM. Add columns for different room types / pax bands, and pull hotel names &amp; selling rates straight from the Costing Template.</div>
+                <div class="cw-panel-sub">The pricing table shown on the customer Quotation PDF. Prices are per person in RM. Add columns for different room types / pax bands, and pull hotel names &amp; selling rates straight from the Costing Template. Tip: list several hotels on separate lines in one row to quote them all at the same price.</div>
                 <div class="row">
                     <div class="col-md-6 mb-4">
                         <label class="font-weight-bold mb-1">Pricing basis</label>
@@ -752,19 +762,19 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
         <?php } else { ?>
         <!-- STEP 5: DONE + QUOTATION PDF -->
         <div class="cw-panel">
-            <?php if ($has_snapshot) { ?>
+            <?php if ($has_snapshot && !empty($quotation_token)) { ?>
                 <div class="d-flex align-items-center justify-content-between flex-wrap mb-4" style="gap:10px;">
                     <div>
                         <div class="cw-panel-title"><i class="la la-check-circle text-success"></i> Costing Saved</div>
                         <div class="cw-panel-sub mb-0">Your customer quotation is ready below.</div>
                     </div>
                     <div class="d-flex flex-wrap" style="gap:8px;">
-                        <a href="<?php echo base_url('Costing/Quotation/' . $package_id); ?>" target="_blank" class="btn btn-light-success font-weight-bold"><i class="la la-external-link-alt"></i>Open in New Tab</a>
+                        <a href="<?php echo base_url('Costing/Quotation/' . $quotation_token); ?>" target="_blank" class="btn btn-light-success font-weight-bold"><i class="la la-external-link-alt"></i>Open in New Tab</a>
                         <a href="<?php echo base_url('Costing/Package/' . $package_id . '?step=cost'); ?>" class="btn btn-light-primary font-weight-bold"><i class="la la-edit"></i>Edit Costing</a>
                         <a href="<?php echo base_url('Costing'); ?>" class="btn btn-primary font-weight-bold">Done</a>
                     </div>
                 </div>
-                <iframe src="<?php echo base_url('Costing/Quotation/' . $package_id); ?>" title="Quotation PDF" style="width:100%; height:820px; border:1px solid #e4e6ef; border-radius:8px;"></iframe>
+                <iframe src="<?php echo base_url('Costing/Quotation/' . $quotation_token); ?>" title="Quotation PDF" style="width:100%; height:820px; border:1px solid #e4e6ef; border-radius:8px;"></iframe>
             <?php } else { ?>
                 <div class="cw-panel-title">Almost There</div>
                 <div class="cw-panel-sub">Add the cost template first — the quotation is generated from your saved costing.</div>
@@ -784,6 +794,10 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
     // Category codes that carry a headcount multiplier (e.g. tour_leader). Their
     // section header shows a per-combination "No. of …" count.
     var HEADCOUNT_CATS = <?php echo json_encode(array_values($headcount_category_codes)); ?> || [];
+    // Category codes that skip the day/pax multiplier: Total = Cost, and their cost
+    // is carried as a flat (marked-up) lump in the quotation (not divided per pax).
+    var NO_MULTIPLY_CATS = <?php echo json_encode(array_values($no_multiply_category_codes)); ?> || [];
+    function isNoMultiply(row) { return NO_MULTIPLY_CATS.indexOf(row.getAttribute('data-cat')) !== -1; }
     var DURATION_DAYS = <?php echo (int) $duration_days; ?>;
     // Wire transfers per supplier line (deposit + balance) — the bank charge is
     // levied this many times per currency. Mirrors costing_supplier_payment_count().
@@ -917,6 +931,8 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
     // charge is added once per distinct currency in bankTotalForRows(), not here.
     function rowTotalMyr(row) {
         var perUnit = rowMyrPerUnit(row);
+        // "No multiply" categories: Total = Cost — the day/pax count never scales it.
+        if (isNoMultiply(row)) { return perUnit; }
         var count = parseFloat(row.querySelector('.cw-count').value) || 0;
         return Math.round(perUnit * count * 100) / 100;
     }
@@ -940,6 +956,8 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
     }
 
     function autoCount(row) {
+        // No-multiply rows: never auto-fill the count (it has no effect on the total).
+        if (isNoMultiply(row)) { return null; }
         var type = row.querySelector('.cw-mult-type').value;
         if (type === 'per_day') { return DURATION_DAYS; }
         if (type === 'per_pax') { return totalPax(); }
@@ -997,6 +1015,13 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
         rows.forEach(function (row) { cost += processRow(row).total; });
         return Math.round(cost * 100) / 100;
     }
+    // Sum ONLY the "no multiply" rows' totals — carried flat (not divided per pax) in
+    // the quotation. Mirrors the flat_cost_myr bucket in costing_fold_general_combination.
+    function flatRowsCost(rows) {
+        var flat = 0;
+        rows.forEach(function (row) { if (isNoMultiply(row)) { flat += rowTotalMyr(row); } });
+        return Math.round(flat * 100) / 100;
+    }
 
     // A card's headcount count for one flagged category section (never below 1).
     function cardHeadcount(card, cat) {
@@ -1009,6 +1034,7 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
     function headcountExtra(rows, card) {
         var extra = 0;
         rows.forEach(function (row) {
+            if (isNoMultiply(row)) { return; } // no-multiply wins over headcount scaling
             var cat = row.getAttribute('data-cat');
             if (HEADCOUNT_CATS.indexOf(cat) === -1) { return; }
             var n = cardHeadcount(card, cat);
@@ -1043,9 +1069,14 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
             // folded general carries the General's scaled cost.
             var ownHcExtra = headcountExtra(ownRows, card);
             var cost = Math.round((pureRowsCost(ownRows) + ownHcExtra + generalPure + generalHcExtra + bankTotalForRows(union)) * 100) / 100;
-            var costPax = Math.round((cost / pax) * 100) / 100;
+            // Flat (no-multiply) lump across own + general rows: carried flat, excluded
+            // from the per-pax division, marked up once (mirrors costing_combination_summary).
+            var flat = Math.round((flatRowsCost(ownRows) + flatRowsCost(generalRows)) * 100) / 100;
+            var perPaxCost = Math.round((cost - flat) * 100) / 100;
+            var costPax = Math.round((perPaxCost / pax) * 100) / 100;
             var divisor = 1 - (margin / 100);
             var markupPax = divisor > 0 ? Math.round((costPax / divisor) * 100) / 100 : costPax;
+            var flatSelling = flat > 0 ? (divisor > 0 ? Math.round((flat / divisor) * 100) / 100 : flat) : 0;
 
             // Manual Selling Price wins once the user edits it; otherwise it tracks
             // the suggested Cost after Markup.
@@ -1055,13 +1086,14 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
             var sellPax = sellInput ? (parseFloat(sellInput.value) || 0) : markupPax;
             if (sellPax < 0) { sellPax = 0; }
 
-            var revenue = Math.round(sellPax * pax * 100) / 100;
+            var revenue = Math.round((sellPax * pax + flatSelling) * 100) / 100;
             var profitPax = Math.round((sellPax - costPax) * 100) / 100;
             var totalProfit = Math.round((revenue - cost) * 100) / 100;
 
             set(card, '.cw-combo-cost', cost);
             set(card, '.cw-combo-costpax', costPax);
             set(card, '.cw-combo-markuppax', markupPax);
+            set(card, '.cw-combo-flat', flatSelling);
             set(card, '.cw-combo-revenue', revenue);
             set(card, '.cw-combo-profitpax', profitPax);
             var tp = card.querySelector('.cw-combo-profit-total');
@@ -1364,6 +1396,7 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
                   '<div class="cw-summary-box"><div class="lbl">Total Cost <span style="font-weight:400; font-size:10px; color:#8a8f9c;">(incl. general)</span></div><div class="val cw-combo-cost">RM 0.00</div></div>' +
                   '<div class="cw-summary-box"><div class="lbl">Cost / Pax</div><div class="val cw-combo-costpax">RM 0.00</div></div>' +
                   '<div class="cw-summary-box"><div class="lbl">Cost after Markup</div><div class="val cw-combo-markuppax" style="color:#187DE4;">RM 0.00</div></div>' +
+                  (NO_MULTIPLY_CATS.length ? '<div class="cw-summary-box"><div class="lbl">Flat Charges <span style="font-weight:400; font-size:10px; color:#8a8f9c;">(per booking, not /pax)</span></div><div class="val cw-combo-flat" style="color:#F64E60;">RM 0.00</div></div>' : '') +
                   '<div class="cw-summary-box"><div class="lbl">Selling Price / Pax</div><input type="number" step="0.01" min="0" class="form-control cw-combo-sell-input mt-1" name="combinations[' + c + '][selling_price_per_pax]" placeholder="0.00"></div>' +
                   '<div class="cw-summary-box"><div class="lbl">Total Revenue</div><div class="val cw-combo-revenue">RM 0.00</div></div>' +
                   '<div class="cw-summary-box"><div class="lbl">Profit / Pax</div><div class="val cw-combo-profitpax" style="color:#1BC5BD;">RM 0.00</div><div class="cw-combo-profit-total" style="font-size:11px; font-weight:600; color:#6d7288; margin-top:3px;">Total Profit: RM 0.00</div></div>' +
@@ -1640,6 +1673,7 @@ $headcount_category_codes = $CI->Costing_Category_Model->Read_Headcount_Codes();
                 '<div class="cw-quote-info">' +
                     head +
                     '<div class="cw-quote-sub">' + metaLine(f.supplier, f.title) + '</div>' +
+                    (f.uploaded_label ? '<div class="cw-quote-date">Uploaded ' + escHtml(f.uploaded_label) + '</div>' : '') +
                     noteHtml(f.note) +
                 '</div>' +
                 '<div class="cw-quote-del-wrap">' + (f.can_delete ? '<button type="button" class="btn btn-icon btn-light-danger btn-sm cw-quote-del" title="Delete attachment"><i class="la la-trash"></i></button>' : '') + '</div>';
@@ -1979,7 +2013,7 @@ jQuery(function () {
                 return '<td><input type="text" class="form-control text-right cw-hotel-price" name="hotels[' + i + '][prices][' + c + ']" value="' + esc(v) + '" placeholder="0.00"></td>';
             }).join('');
             return '<tr class="cw-hotel-row">' +
-                '<td><input type="text" class="form-control cw-hotel-name" name="hotels[' + i + '][hotel_name]" value="' + esc(h.hotel_name || '') + '" placeholder="e.g. 4* Hotel or similar"></td>' +
+                '<td><textarea rows="2" class="form-control cw-hotel-name" name="hotels[' + i + '][hotel_name]" placeholder="One hotel per line, e.g.\n4* Hotel A\n4* Hotel B">' + esc(h.hotel_name || '') + '</textarea></td>' +
                 priceCells +
                 '<td class="cw-single-col" style="' + singleStyle + '"><input type="text" class="form-control text-right cw-hotel-single" name="hotels[' + i + '][single_supp_price]" value="' + esc(h.single_supp_price || '') + '" placeholder="0.00"></td>' +
                 '<td class="text-center"><button type="button" class="btn btn-icon btn-light-danger btn-sm cw-hotel-remove" data-i="' + i + '" data-toggle="tooltip" title="Remove hotel"><i class="la la-trash"></i></button></td>' +

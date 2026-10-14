@@ -76,6 +76,30 @@ class Costing_Category_Model extends CI_Model
     }
 
     /**
+     * Active category codes flagged "no multiply" (Total = Cost). Cost-template rows
+     * in these categories are NOT multiplied by the day/pax count — their Total is
+     * the MYR-converted Cost — and in the quotation their cost is carried as a flat
+     * (marked-up) lump instead of being divided per pax.
+     *
+     * @return string[] lowercased category codes
+     */
+    public function Read_No_Multiply_Codes()
+    {
+        $rows = $this->db
+            ->select('code')
+            ->where('Status', 'Y')
+            ->where('no_multiplier', 1)
+            ->get('costing_categories')
+            ->result_array();
+
+        $codes = array();
+        foreach ($rows as $row) {
+            $codes[] = strtolower(trim((string) $row['code']));
+        }
+        return $codes;
+    }
+
+    /**
      * One active category by id, or null.
      */
     public function Read_Category($id)
@@ -104,12 +128,15 @@ class Costing_Category_Model extends CI_Model
 
         // Does this category carry a headcount multiplier (e.g. No. of Tour Leaders)?
         $has_headcount = !empty($data['has_headcount_multiplier']) ? 1 : 0;
+        // Does this category skip the day/pax multiplier (Total = Cost, flat in quote)?
+        $no_multiply = !empty($data['no_multiplier']) ? 1 : 0;
 
         if ($id > 0) {
             $this->db->where('id', $id);
             $this->db->update('costing_categories', array(
                 'name' => $name,
                 'has_headcount_multiplier' => $has_headcount,
+                'no_multiplier' => $no_multiply,
             ));
             return true;
         }
@@ -124,6 +151,7 @@ class Costing_Category_Model extends CI_Model
             'name'       => $name,
             'sort_order' => $next_sort,
             'has_headcount_multiplier' => $has_headcount,
+            'no_multiplier' => $no_multiply,
         ));
         return $this->db->insert_id() > 0;
     }

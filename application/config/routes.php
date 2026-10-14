@@ -84,8 +84,10 @@ $route['message-log-csv'] = 'Message_Log/csv';
 // Public, token-gated customer Quotation PDF under the /Costing namespace. Maps to
 // the standalone Costing_Quotation controller (no staff login) — the real Costing
 // controller is auth-gated, so a customer link must resolve here instead.
-$route['Costing/Quotation/(:num)'] = 'Costing_Quotation/index/$1';
-$route['costing/quotation/(:num)'] = 'Costing_Quotation/index/$1';
+// Addressed by the unguessable 32-hex quotation_token (never the sequential package
+// id) so links can't be enumerated — numeric ids fall through and 404.
+$route['Costing/Quotation/([a-f0-9]{32})'] = 'Costing_Quotation/index/$1';
+$route['costing/quotation/([a-f0-9]{32})'] = 'Costing_Quotation/index/$1';
 $route['Costing/Quotation'] = 'Costing_Quotation';
 $route['costing/quotation'] = 'Costing_Quotation';
 

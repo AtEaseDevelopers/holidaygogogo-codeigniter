@@ -470,6 +470,74 @@ $assertions['hc-dec: null -> empty']           = (costing_decode_headcount(null)
 $assertions['hc-dec: garbage -> empty']        = (costing_decode_headcount('not json') === []);
 
 /* ------------------------------------------------------------------ *
+ * 6f) NO-MULTIPLY (Total = Cost) -> flat bucket + flat-in-quotation    *
+ * ------------------------------------------------------------------ *
+ * A "no multiply" category's rows are split out of the per-pax cost    *
+ * (cost_myr) into a separate flat lump (flat_cost_myr). In the         *
+ * summary that lump is NOT divided per pax; it is marked up once and    *
+ * added on top of (price/pax × pax). No-multiply beats headcount.      */
+
+// Own flat row ('bus') is pulled out of cost_myr into flat_cost_myr.
+$nm_own = costing_fold_general_combination([
+    ['name' => 'A', 'items' => [
+        ['base_total' => 1000.0, 'category' => 'accommodation', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+        ['base_total' => 300.0,  'category' => 'bus',           'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+], ['bus']);
+$assertions['nm: own flat excluded from cost_myr'] = $approx($nm_own[0]['cost_myr'], 1000.0);
+$assertions['nm: own flat lands in flat_cost_myr'] = $approx($nm_own[0]['flat_cost_myr'], 300.0);
+
+// General flat rows fold flat into every regular combo's flat_cost_myr; general
+// per-pax rows still fold into cost_myr.
+$nm_gen = costing_fold_general_combination([
+    ['name' => 'G', 'is_general' => 1, 'items' => [
+        ['base_total' => 200.0, 'category' => 'bus',    'currency_id' => 1, 'bank_charges_myr' => 0.0],
+        ['base_total' => 100.0, 'category' => 'flight', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+    ['name' => 'A', 'items' => [
+        ['base_total' => 1000.0, 'category' => 'accommodation', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+        ['base_total' => 50.0,   'category' => 'bus',           'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+], ['bus']);
+$assertions['nm: general per-pax folds into cost_myr'] = $approx($nm_gen[0]['cost_myr'], 1100.0); // 1000 + 100
+$assertions['nm: general+own flat fold into flat']     = $approx($nm_gen[0]['flat_cost_myr'], 250.0); // 200 + 50
+
+// No no_multiply arg -> every combo's flat_cost_myr is 0 and cost_myr is unchanged
+// (regression: 'bus' priced per-pax like any category).
+$nm_reg = costing_fold_general_combination([
+    ['name' => 'A', 'items' => [['base_total' => 100.0, 'category' => 'bus', 'currency_id' => 1, 'bank_charges_myr' => 0.0]]],
+]);
+$assertions['nm: no codes -> flat 0']        = $approx($nm_reg[0]['flat_cost_myr'], 0.0);
+$assertions['nm: no codes -> cost unchanged'] = $approx($nm_reg[0]['cost_myr'], 100.0);
+
+// No-multiply beats headcount: a category flagged both is carried flat, never scaled.
+$nm_hc = costing_fold_general_combination([
+    ['name' => 'A', 'headcount' => ['bus' => 3], 'items' => [
+        ['base_total' => 100.0, 'category' => 'bus', 'currency_id' => 1, 'bank_charges_myr' => 0.0],
+    ]],
+], ['bus']);
+$assertions['nm: precedence over headcount (cost)'] = $approx($nm_hc[0]['cost_myr'], 0.0);
+$assertions['nm: precedence over headcount (flat)'] = $approx($nm_hc[0]['flat_cost_myr'], 100.0);
+
+// Summary: flat marked up (20%: 500 -> 625), added on top of per-pax, not /pax.
+$nm_sum = costing_combination_summary([
+    ['name' => 'A', 'item_names' => [], 'cost_myr' => 4000.0, 'flat_cost_myr' => 500.0],
+], 20, 4);
+$assertions['nm: flat carried on summary']     = $approx($nm_sum['combinations'][0]['flat_cost_myr'], 500.0);
+$assertions['nm: cost/pax excludes flat']      = $approx($nm_sum['combinations'][0]['cost_per_pax'], 1000.0);
+$assertions['nm: flat selling marked up']      = $approx($nm_sum['combinations'][0]['flat_selling'], 625.0); // 500/0.8
+$assertions['nm: selling = pax total + flat']  = $approx($nm_sum['combinations'][0]['selling'], 5625.0); // 1250×4 + 625
+$assertions['nm: total_profit nets full cost'] = $approx($nm_sum['combinations'][0]['total_profit'], 1125.0); // 5625 - 4500
+$assertions['nm: total_cost incl flat']        = $approx($nm_sum['total_cost'], 4500.0);
+
+// flat_cost_myr absent -> flat_selling 0 and selling unchanged (backward compat).
+$nm_abs = costing_combination_summary([
+    ['name' => 'A', 'item_names' => [], 'cost_myr' => 4000.0],
+], 20, 4);
+$assertions['nm: absent flat -> 0 selling']   = $approx($nm_abs['combinations'][0]['flat_selling'], 0.0);
+$assertions['nm: absent flat -> selling same'] = $approx($nm_abs['combinations'][0]['selling'], 5000.0);
+
+/* ------------------------------------------------------------------ *
  * 7) SOURCE CONTRACT                                                  *
  * ------------------------------------------------------------------ */
 

@@ -157,6 +157,38 @@ $assertions['hotel multi: not empty'] = $hotelMulti['is_empty'] === false;
 $hotelMultiBlank = costing_quote_hotel_prepare_row(array('prices' => array('', '')), 2);
 $assertions['hotel multi blank: empty'] = $hotelMultiBlank['is_empty'] === true;
 
+// --- multiple hotels per price row (14 Oct 2026) ---------------------------
+// costing_quote_hotel_names_split: one-per-line, trimmed, blanks dropped.
+$assertions['names: single'] = costing_quote_hotel_names_split('Hotel A') === array('Hotel A');
+$assertions['names: lf split'] = costing_quote_hotel_names_split("Hotel A\nHotel B\nHotel C") === array('Hotel A', 'Hotel B', 'Hotel C');
+$assertions['names: crlf + cr'] = costing_quote_hotel_names_split("Hotel A\r\nHotel B\rHotel C") === array('Hotel A', 'Hotel B', 'Hotel C');
+$assertions['names: trims + drops blank lines'] = costing_quote_hotel_names_split("  Hotel A \n\n   \n Hotel B ") === array('Hotel A', 'Hotel B');
+$assertions['names: empty -> []'] = costing_quote_hotel_names_split('') === array();
+$assertions['names: whitespace-only -> []'] = costing_quote_hotel_names_split("  \n \r\n ") === array();
+$assertions['names: null -> []'] = costing_quote_hotel_names_split(null) === array();
+$assertions['names: array joined'] = costing_quote_hotel_names_split(array('Hotel A', ' ', 'Hotel B')) === array('Hotel A', 'Hotel B');
+
+// prepare_row keeps the multi-line list (clean \n-joined), blank interior lines removed.
+$hotelNames = costing_quote_hotel_prepare_row(array(
+    'hotel_name' => " 4* Hotel A \n\n 4* Hotel B \n4* Hotel C ",
+    'prices'     => array('2680'),
+    'single_supp_price' => '1100',
+), 1);
+$assertions['hotel names: joined \n'] = $hotelNames['hotel_name'] === "4* Hotel A\n4* Hotel B\n4* Hotel C";
+$assertions['hotel names: shared price'] = $hotelNames['twin_triple_price'] === 2680.0;
+$assertions['hotel names: single shared'] = $hotelNames['single_supp_price'] === 1100.0;
+$assertions['hotel names: not empty'] = $hotelNames['is_empty'] === false;
+// Only newlines/whitespace in the name, no prices -> empty (skipped).
+$hotelNamesBlank = costing_quote_hotel_prepare_row(array('hotel_name' => "\n  \r\n ", 'prices' => array('')), 1);
+$assertions['hotel names: whitespace-only empty'] = $hotelNamesBlank['is_empty'] === true;
+$assertions['hotel names: whitespace-only null name'] = $hotelNamesBlank['hotel_name'] === null;
+// A long list (would overflow the old VARCHAR(255)) survives normalisation intact.
+$longList = array();
+for ($i = 1; $i <= 20; $i++) { $longList[] = 'A Fairly Long Resort Name Number ' . $i; }
+$hotelLong = costing_quote_hotel_prepare_row(array('hotel_name' => implode("\n", $longList), 'prices' => array('1')), 1);
+$assertions['hotel names: long list intact'] = costing_quote_hotel_names_split($hotelLong['hotel_name']) === $longList;
+$assertions['hotel names: long list > 255 chars'] = strlen($hotelLong['hotel_name']) > 255;
+
 // --- flight options (4.4) --------------------------------------------------
 $opt = costing_quote_flight_option_prepare(array(
     'title' => ' Option 1 ', 'airline' => 'AK', 'price' => 'RM 1,000',

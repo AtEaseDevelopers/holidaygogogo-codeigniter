@@ -38,6 +38,8 @@ $CompanyWebsite = isset($company['Website']) ? $company['Website'] : '';
 $PackageName   = isset($package['name']) ? $package['name'] : '-';
 // #9 Sales Person replaces the internal Tour Code on the customer quotation.
 $SalesPerson   = isset($package['sales_person']) && $package['sales_person'] !== '' ? $package['sales_person'] : '-';
+// Sales person's contact number, shown beside their name on the quotation.
+$SalesPersonContact = isset($package['sales_person_contact']) ? trim((string) $package['sales_person_contact']) : '';
 $DurationDays  = (int) (isset($package['duration_days']) ? $package['duration_days'] : 0);
 $DurationNights = (int) (isset($package['duration_nights']) ? $package['duration_nights'] : 0);
 $TotalPax      = (int) (isset($booking['total_pax']) ? $booking['total_pax'] : 0);
@@ -240,7 +242,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
 
     <table style="width:100%;">
         <tr>
-            <th style="width:65%;"><h3 class="text-right">Custom Quotation</h3></th>
+            <th style="width:65%;"><h3 class="text-right">Tour Quotation</h3></th>
             <th style="width:35%; font-weight:700; text-align:right;">No : <?php echo html_escape($public_ref); ?></th>
         </tr>
     </table>
@@ -272,14 +274,19 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
         <table class="kv">
             <tr>
                 <td class="k">SALES PERSON</td>
-                <td><?php echo html_escape($SalesPerson); ?></td>
+                <td><?php
+                    echo html_escape($SalesPerson);
+                    if ($SalesPersonContact !== '') {
+                        echo ' (' . html_escape($SalesPersonContact) . ')';
+                    }
+                ?></td>
             </tr>
             <tr>
                 <td class="k">TOUR PACKAGE</td>
                 <td><?php echo html_escape($PackageName); ?></td>
             </tr>
             <tr>
-                <td class="k">NAME</td>
+                <td class="k">CUSTOMER NAME</td>
                 <td><?php echo html_escape($CustomerName); ?></td>
             </tr>
             <tr>
@@ -317,7 +324,11 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
                     <tr><td colspan="<?php echo $hotel_colspan; ?>" class="text-center">Hotel pricing to be confirmed.</td></tr>
                 <?php } else { foreach ($HotelRows as $h) { ?>
                     <tr>
-                        <td><?php echo html_escape($h['name'] !== '' ? $h['name'] : '-'); ?></td>
+                        <td><?php
+                            // A row may list several hotels (one per line) sharing one price — stack them.
+                            $hotel_names = costing_quote_hotel_names_split($h['name']);
+                            echo $hotel_names ? implode('<br>', array_map('html_escape', $hotel_names)) : '-';
+                        ?></td>
                         <?php foreach ($h['prices'] as $price) { ?>
                             <td class="text-center"><?php echo $price !== null ? $money2($price) : '-'; ?></td>
                         <?php } ?>

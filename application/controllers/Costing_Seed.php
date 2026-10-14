@@ -125,7 +125,7 @@ class Costing_Seed extends CI_Controller
         echo "Total selling (MYR): " . ($fin ? $fin['total_revenue'] : '?') . "\n";
         echo "Total profit (MYR) : " . ($fin ? $fin['total_profit'] : '?') . "\n";
         echo "Workspace : " . base_url('Costing/Package/' . $package_id . '?tab=bookings') . "\n";
-        echo "Quotation : " . base_url('Costing/Quotation/' . $package_id) . "\n";
+        echo "Quotation : " . base_url('Costing/Quotation/' . $this->Costing_Model->Ensure_Quotation_Token($booking_id)) . "\n";
     }
 
     /**
@@ -187,13 +187,85 @@ class Costing_Seed extends CI_Controller
         echo "     extra leader; the Tour Leader ROW total stays MYR 500 (summary/PDF only).\n";
         echo "  3. Save & reopen -> each value persists; the Quotation PDF reflects it.\n";
         echo "Cost step : " . base_url('Costing/Package/' . $package_id . '?step=cost') . "\n";
-        echo "Quotation : " . base_url('Costing/Quotation/' . $package_id) . "\n";
+        echo "Quotation : " . base_url('Costing/Quotation/' . $this->Costing_Model->Ensure_Quotation_Token($booking_id)) . "\n";
+        echo "Cleanup   : php index.php Costing_Seed/cleanup\n";
+    }
+
+    /**
+     * Dummy for the category "No multiply" (Total = Cost) flag. Creates a no-multiply
+     * category "Handling Fee (DUMMY)" and a package with one combination holding a
+     * normal per-pax Flight line + a flat Handling Fee line. The Handling Fee row is
+     * seeded with a deliberately silly count (5) to prove it is IGNORED: its Total
+     * stays = Cost (RM 300, count forced to 1 on save) and in the quotation it is
+     * carried flat (marked up) instead of divided per pax.
+     *   php index.php Costing_Seed/nomultiply
+     */
+    public function nomultiply()
+    {
+        $this->load->model('Costing_Category_Model');
+        $myr = $this->currency_id('MYR', 'Malaysian Ringgit');
+
+        // Create the no-multiply category (idempotent) and resolve its code slug.
+        $existing = $this->db->select('id, code')->where('name', 'Handling Fee (DUMMY)')->get('costing_categories')->row_array();
+        if ($existing) {
+            $this->Costing_Category_Model->Save_Category(array('id' => (int) $existing['id'], 'name' => 'Handling Fee (DUMMY)', 'no_multiplier' => 1));
+            $code = (string) $existing['code'];
+        } else {
+            $this->Costing_Category_Model->Save_Category(array('id' => 0, 'name' => 'Handling Fee (DUMMY)', 'no_multiplier' => 1));
+            $code = (string) $this->db->select('code')->where('name', 'Handling Fee (DUMMY)')->order_by('id', 'DESC')->get('costing_categories')->row('code');
+        }
+
+        $package_id = $this->Costing_Model->Save_Package(array(
+            'id' => 0, 'name' => 'No Multiply Flat Charge (DUMMY)',
+            'customer_name' => 'Dummy Customer', 'customer_contact' => '', 'customer_email' => '',
+            'duration_days' => 4, 'duration_nights' => 3,
+            'description' => 'Seeded dummy for the category No-Multiply (Total = Cost) flag.', 'status' => 'active',
+        ));
+
+        $combinations = array(
+            array('name' => 'Standard', 'rows' => array(
+                // Normal per-pax line: scales with pax (2 pax -> RM 1,000).
+                array('include' => 1, 'name' => 'Return Flights', 'category' => 'flight', 'multiplier_type' => 'per_pax', 'quantity' => 2, 'unit_count' => 1, 'unit_price' => 500, 'currency_id' => $myr, 'remark' => ''),
+                // No-multiply line: count 5 is deliberate noise -> Total must stay = Cost
+                // (RM 300). Server forces quantity to 1; carried flat in the quotation.
+                array('include' => 1, 'name' => 'Handling Fee', 'category' => $code, 'multiplier_type' => 'per_pax', 'quantity' => 5, 'unit_count' => 1, 'unit_price' => 300, 'currency_id' => $myr, 'remark' => 'No multiply: Total = Cost, flat in quote'),
+            )),
+        );
+
+        $booking_id = $this->Costing_Model->Generate_Booking_Snapshot($package_id, array(
+            'booking_id' => 0, 'travel_date' => date('Y-m-d', strtotime('+30 days')),
+            'adult_count' => 2, 'child_count' => 0, 'status' => 'active',
+            'combinations' => $combinations,
+            'margin_percentage' => 20, 'commissionable_per_pax' => 0, 'ad_hoc_per_pax' => 0,
+        ));
+
+        if ($booking_id <= 0) { echo "FAILED to generate snapshot.\n"; return; }
+
+        // Read back the stored Handling Fee row to prove quantity was forced to 1.
+        $hf = $this->db->select('quantity, unit_price')->where('booking_id', $booking_id)->where('category', $code)->get('costing_booking_items')->row_array();
+
+        echo "=== No-Multiply (Total = Cost) dummy seeded ===\n";
+        echo "Category  : Handling Fee (DUMMY) [code: {$code}] flagged no_multiplier=1\n";
+        echo "Package {$package_id} / Snapshot {$booking_id} (2 pax, 20% margin)\n";
+        echo "Handling Fee row stored quantity = " . ($hf ? $hf['quantity'] : '?') . " (seeded 5 -> forced to 1), unit_price = " . ($hf ? $hf['unit_price'] : '?') . "\n";
+        echo "Expected on the Cost step (Standard):\n";
+        echo "  - Return Flights (per pax) : RM 500 x 2 = RM 1,000\n";
+        echo "  - Handling Fee (no multiply): Total = Cost = RM 300 (count has no effect)\n";
+        echo "  - Total Cost = RM 1,300 ; Cost/Pax = RM 500 (flat excluded) ; Cost after Markup = RM 625\n";
+        echo "  - Flat Charges box = RM 375 (300 marked up 20%) ; Total Revenue = RM 1,625 ; Total Profit = RM 325\n";
+        echo "Manual test:\n";
+        echo "  1. Open the Cost step; the Handling Fee row Total = RM 300 regardless of its count box.\n";
+        echo "  2. Type any number in the Handling Fee 'No of Day / Pax' box -> its Total stays RM 300.\n";
+        echo "  3. See the red 'Flat Charges' summary box = RM 375, and Cost/Pax = RM 500 (flat excluded).\n";
+        echo "  4. Save & reopen -> count shows 1; numbers persist.\n";
+        echo "Cost step : " . base_url('Costing/Package/' . $package_id . '?step=cost') . "\n";
+        echo "Category  : " . base_url('Costing_Category') . "\n";
         echo "Cleanup   : php index.php Costing_Seed/cleanup\n";
     }
 
     public function cleanup()
     {
-        $pkg = $this->db->select('id')->where_in('name', array('Bali 4D3N Getaway (DUMMY)', 'Single-Snapshot Test', 'Tour Leader Multiplier (DUMMY)'))->get('costing_packages')->result_array();
+        $pkg = $this->db->select('id')->where_in('name', array('Bali 4D3N Getaway (DUMMY)', 'Single-Snapshot Test', 'Tour Leader Multiplier (DUMMY)', 'No Multiply Flat Charge (DUMMY)'))->get('costing_packages')->result_array();
         $pkg_removed = 0;
         foreach ($pkg as $p) { if ($this->Costing_Model->Delete_Package((int) $p['id'])) { $pkg_removed++; } }
 
@@ -208,9 +280,14 @@ class Costing_Seed extends CI_Controller
         $this->db->where('to_currency_id', $myr)->where_in('from_currency_id', array($usd, $sgd))->delete('costing_exchange_rates');
         $rates_removed = $this->db->affected_rows();
 
+        // Soft-delete the no-multiply dummy category (Status='N').
+        $this->db->where('name', 'Handling Fee (DUMMY)')->update('costing_categories', array('Status' => 'N'));
+        $cats_removed = $this->db->affected_rows();
+
         echo "Removed packages: {$pkg_removed}\n";
         echo "Removed items   : {$items_removed}\n";
         echo "Removed rates   : {$rates_removed}\n";
+        echo "Removed cats    : {$cats_removed}\n";
         echo "Currencies kept (shared master data).\n";
     }
 }
