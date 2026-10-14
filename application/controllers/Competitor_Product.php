@@ -370,7 +370,7 @@ class Competitor_Product extends MY_Controller
 		// can run for a minute; doing it inline hit the web server's read timeout and
 		// showed a false "Analysis Failed" even though the row saved. We stage the
 		// uploaded file, queue the job, and free the browser immediately; the row
-		// appears in Analysis Results when done (the worker deletes the staged file).
+		// appears in Analysis Results when done; retain its original for download.
 		try {
 			$upload = $this->receive_upload();      // throws on invalid file
 		} catch (Exception $e) {
@@ -412,14 +412,14 @@ class Competitor_Product extends MY_Controller
 			echo json_encode(array('success' => false, 'message' => $e->getMessage()));
 			return;
 		}
-		@unlink($upload['full_path']);
-
 		$record['url']             = $source_label;
 		$record['source']          = 'upload';
+		$record['source_file']     = $upload['file_name'];
 		$record['status']          = 'done';
 		$record['competitor_name'] = $name;
 		$record['created_by']      = $this->session->admin_id;
 		$id = $this->Competitor_Analysis_Model->Create($record);
+		if ((int) $id <= 0) { @unlink($upload['full_path']); }
 
 		echo json_encode(array('success' => true, 'id' => $id));
 	}
@@ -989,9 +989,9 @@ class Competitor_Product extends MY_Controller
 	}
 
 	/**
-	 * Move the posted `file` into a temp upload dir and return its CI upload
+	 * Move the posted `file` into the upload dir and return its CI upload
 	 * data (full_path, orig_name, file_ext). Throws Exception on any failure so
-	 * Analyze() can report it. Caller must unlink full_path when done.
+	 * Analyze() can report it. Keep full_path after a successful analysis.
 	 */
 	private function receive_upload()
 	{
@@ -1033,11 +1033,33 @@ class Competitor_Product extends MY_Controller
 		$this->load->view('layout/header', $titles);
 		$this->load->view('competitor_product/view', array(
 			'a'      => $analysis,
+			'has_source_file' => $this->Competitor_Analysis_Model->Source_File_Path($analysis) !== '',
 			'lang'   => $lang,
 			'labels' => competitor_ui_labels($lang),
 			'has_cn' => $has_cn,
 		));
 		$this->load->view('layout/footer');
+	}
+
+	/** Download the original PDF/image, using the same Owner-only access gate. */
+	function Download_Source()
+	{
+		$analysis = $this->Competitor_Analysis_Model->Read_One((int) $this->input->get('id'));
+		$path = $this->Competitor_Analysis_Model->Source_File_Path($analysis);
+		if ($path === '') {
+			show_error('File not available to download', 404);
+			return;
+		}
+		$data = @file_get_contents($path);
+		if ($data === false || $data === '') {
+			show_error('File not available to download', 404);
+			return;
+		}
+		$name = basename(str_replace('\\', '/', (string) $analysis->url));
+		$name = str_replace(array("\r", "\n", '"'), '_', $name);
+		if (pathinfo($name, PATHINFO_EXTENSION) === '') { $name = basename($path); }
+		$this->load->helper('download');
+		force_download($name, $data, true);
 	}
 
 	/**

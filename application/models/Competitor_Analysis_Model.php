@@ -30,7 +30,7 @@ class Competitor_Analysis_Model extends CI_Model
 		'countries', 'cities', 'travel_months', 'themes', 'tour_styles', 'local_transport',
 		'exclusions', 'hotels', 'shopping_stops', 'optional_tours', 'special_remarks',
 		'scenic_highlights', 'usp', 'traveller_segments', 'meals', 'itinerary',
-		'crawl_metadata',
+		'crawl_metadata', 'source_file',
 	);
 
 	/**
@@ -182,7 +182,7 @@ class Competitor_Analysis_Model extends CI_Model
 		}
 		$scalar_keys = array('price_from', 'price_to', 'departure_city', 'flight_departure',
 			'flight_return', 'difficulty', 'target_traveller', 'suitable_age',
-			'child_friendly', 'senior_friendly', 'matched_product');
+			'child_friendly', 'senior_friendly', 'matched_product', 'source_file');
 		foreach ($this->detail_keys as $k) {
 			if ($k === 'meals') {
 				$m = isset($details['meals']) && is_array($details['meals']) ? $details['meals'] : array();
@@ -198,6 +198,18 @@ class Competitor_Analysis_Model extends CI_Model
 			}
 		}
 		return $row;
+	}
+
+	/** Resolve only retained uploads, never a path supplied by the browser. */
+	function Source_File_Path($analysis)
+	{
+		if ( ! $analysis || $analysis->source !== 'upload') { return ''; }
+		$name = isset($analysis->source_file) ? (string) $analysis->source_file : '';
+		if ( ! preg_match('/^[a-zA-Z0-9_-]+\.(pdf|jpg|jpeg|png|gif|webp)$/iD', $name)) { return ''; }
+		$dir = realpath(FCPATH . 'assets/upload/competitor/');
+		if ($dir === false) { return ''; }
+		$path = realpath($dir . DIRECTORY_SEPARATOR . $name);
+		return $path !== false && dirname($path) === $dir && is_file($path) && is_readable($path) ? $path : '';
 	}
 
 	/**

@@ -69,8 +69,18 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
                     <span class="text-muted font-weight-bold mr-2"><?php echo htmlspecialchars($is_crawl ? $L('site', 'Site:') : $L('source', 'Source:')); ?></span>
                     <?php if(preg_match('#^https?://#i', (string) $a->url)) { ?>
                         <a href="<?php echo htmlspecialchars($a->url); ?>" target="_blank" rel="noopener"><?php echo htmlspecialchars($a->url); ?></a>
+                    <?php } elseif(!empty($has_source_file)) { ?>
+                        <a href="<?php echo base_url('Competitor_Product/Download_Source?id=' . (int) $a->id); ?>" title="<?php echo $lang === 'cn' ? '下载原始文件' : 'Download original file'; ?>">
+                            <i class="la la-file"></i> <?php echo htmlspecialchars($a->url); ?> <i class="la la-download ml-1"></i>
+                        </a>
+                        <span class="text-muted">(<?php echo htmlspecialchars($L('uploaded_file', 'uploaded file')); ?>)</span>
                     <?php } else { ?>
                         <span><i class="la la-file"></i> <?php echo htmlspecialchars($a->url); ?> <span class="text-muted">(<?php echo htmlspecialchars($L('uploaded_file', 'uploaded file')); ?>)</span></span>
+                        <?php if($a->source === 'upload' || empty($a->source)) { ?>
+                            <div class="text-muted mt-2" style="font-size:12px;">
+                                <?php echo $lang === 'cn' ? '文件不可用，无法下载。' : 'File not available to download'; ?>
+                            </div>
+                        <?php } ?>
                     <?php } ?>
                 </div>
 

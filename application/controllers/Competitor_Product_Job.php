@@ -145,7 +145,7 @@ class Competitor_Product_Job extends CI_Controller
 	 * synchronous path did, moved here so a slow OpenAI vision call can't hit the
 	 * web server's read timeout and show a false "Analysis Failed" while the
 	 * analysis actually completes. Reads the file the controller staged (file_path),
-	 * saves one history row, then deletes the staged file. On error the job file
+	 * saves one history row and retains the original for download. On error the job file
 	 * carries the message (shown as an error row); a finished row is folded in from
 	 * the DB by Jobs_List.
 	 */
@@ -167,12 +167,12 @@ class Competitor_Product_Job extends CI_Controller
 			$record = $this->competitoranalysisservice->analyze_file($file, $ext, $our);
 			$record['url']             = $label;
 			$record['source']          = 'upload';
+			$record['source_file']     = basename($file);
 			$record['status']          = 'done';
 			$record['competitor_name'] = isset($job['competitor_name']) ? $job['competitor_name'] : null;
 			$record['created_by']      = isset($job['created_by']) ? $job['created_by'] : null;
 			$id = (int) $this->Competitor_Analysis_Model->Create($record);
 			if ($id <= 0) { throw new Exception('Could not save the analysis to the database.'); }
-			@unlink($file);
 			$write(array('state' => 'done', 'phase' => 'analysing', 'done' => 1, 'total' => 1,
 				'count' => 1, 'analysis_id' => $id, 'cost_total' => (float) $record['cost_usd']));
 		} catch (Exception $e) {
