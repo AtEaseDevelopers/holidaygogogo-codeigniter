@@ -1232,7 +1232,7 @@ class Competitor_Product extends MY_Controller
 		// die()s on "headers already sent".
 		$name = competitor_pdf_filename($analysis->product_name ?: $analysis->page_title, $analysis->id);
 		header('Content-Type: application/pdf');
-		header('Content-Disposition: attachment; filename="' . $name . '"');
+		header('Content-Disposition: ' . competitor_download_content_disposition($name));
 		header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 		header('Pragma: no-cache');
 		header('Expires: 0');
@@ -1324,7 +1324,7 @@ class Competitor_Product extends MY_Controller
 	private function stream_excel($book, $filename)
 	{
 		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-		header('Content-Disposition: attachment; filename="' . $filename . '"');
+		header('Content-Disposition: ' . competitor_download_content_disposition($filename));
 		header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 		header('Pragma: no-cache');
 		header('Expires: 0');

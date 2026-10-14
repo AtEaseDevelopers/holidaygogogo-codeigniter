@@ -4813,18 +4813,35 @@ if ( ! function_exists('competitor_pdf_filename'))
 {
 	/**
 	 * A safe download filename for a saved analysis PDF: the product/page name
-	 * slugified (spaces->_, punctuation dropped), suffixed with the row id, and
+	 * slugified (separators become dashes, Unicode letters/numbers are retained),
+	 * suffixed with the row id, and
 	 * ending in .pdf. Falls back to "competitor-analysis" when the name is blank.
 	 * Pure — no DB/filesystem.
 	 */
 	function competitor_pdf_filename($name, $id)
 	{
-		$slug = strtolower(trim((string) $name));
-		$slug = preg_replace('/[^a-z0-9]+/', '-', $slug);   // non-alnum -> single dash
+		$slug = mb_strtolower(trim((string) $name), 'UTF-8');
+		$slug = preg_replace('/[^\p{L}\p{N}\p{M}]+/u', '-', $slug);
 		$slug = trim((string) $slug, '-');
 		if ($slug === '') { $slug = 'competitor-analysis'; }
-		$slug = substr($slug, 0, 60);                       // keep filenames sane
+		$slug = mb_substr($slug, 0, 60, 'UTF-8');           // never split a UTF-8 character
 		return $slug . '-' . (int) $id . '.pdf';
+	}
+}
+
+if ( ! function_exists('competitor_download_content_disposition'))
+{
+	/** Preserve Unicode download names via filename*, with a safe ASCII fallback. */
+	function competitor_download_content_disposition($filename)
+	{
+		$filename = (string) $filename;
+		$fallback = preg_replace('/[^A-Za-z0-9._-]+/', '-', $filename);
+		$fallback = trim(preg_replace('/-+/', '-', $fallback), '-');
+		$header = 'attachment; filename="' . $fallback . '"';
+		if ($fallback !== $filename) {
+			$header .= "; filename*=UTF-8''" . rawurlencode($filename);
+		}
+		return $header;
 	}
 }
 

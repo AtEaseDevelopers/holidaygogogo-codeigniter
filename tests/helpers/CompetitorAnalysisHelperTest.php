@@ -2010,6 +2010,26 @@ check('pdf_filename falls back when name blank', 'competitor-analysis-7.pdf',
     competitor_pdf_filename('   ', 7));
 check('pdf_filename casts id to int', 'x-3.pdf',
     competitor_pdf_filename('X', '3abc'));
+check('pdf_filename preserves the Chinese product title', '8d7n-马六甲-金马仑-怡保-槟城旅游-16.pdf',
+    competitor_pdf_filename('8D7N 马六甲 金马仑 怡保 槟城旅游', 16));
+check('pdf_filename supports titles containing only Chinese', '马六甲旅游-16.pdf',
+    competitor_pdf_filename('马六甲旅游', 16));
+check('pdf_filename truncates long Chinese titles without splitting characters',
+    str_repeat('马六甲', 20) . '-16.pdf', competitor_pdf_filename(str_repeat('马六甲', 30), 16));
+
+// ---- competitor_download_content_disposition -------------------------------
+check('download header keeps the English filename',
+    'attachment; filename="8d7n-melaka-cameron-ipoh-penang-tour-16.pdf"',
+    competitor_download_content_disposition('8d7n-melaka-cameron-ipoh-penang-tour-16.pdf'));
+$cnFilename = competitor_pdf_filename('8D7N 马六甲 金马仑 怡保 槟城旅游', 16);
+$cnHeader = competitor_download_content_disposition($cnFilename);
+check_true('download header is ASCII for HTTP transport', ! preg_match('/[^\x20-\x7e]/', $cnHeader));
+check_true('download header includes an ASCII fallback', strpos($cnHeader, 'filename="8d7n-16.pdf"') !== false);
+check('download header restores the full Chinese filename', $cnFilename,
+    rawurldecode(explode("filename*=UTF-8''", $cnHeader, 2)[1]));
+$cnExcelFilename = substr($cnFilename, 0, -4) . '.xlsx';
+check('download header restores the full Chinese Excel filename', $cnExcelFilename,
+    rawurldecode(explode("filename*=UTF-8''", competitor_download_content_disposition($cnExcelFilename), 2)[1]));
 
 // ---- competitor_split_point_justification -----------------------------------
 $pj = competitor_split_point_justification('Direct flights — less travel fatigue and an extra day there');
