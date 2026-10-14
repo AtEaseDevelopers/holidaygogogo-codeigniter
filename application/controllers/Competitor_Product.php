@@ -1145,19 +1145,24 @@ class Competitor_Product extends MY_Controller
 
 	/**
 	 * Absolute path to a CJK-capable font for the Chinese PDF, from
-	 * COMPETITOR_PDF_CJK_FONT in .env. MUST be a TrueType .ttf: the bundled DomPDF
+	 * COMPETITOR_PDF_CJK_FONT in .env, or the bundled Droid Sans Fallback font.
+	 * MUST be a TrueType .ttf: the bundled DomPDF
 	 * font lib mis-renders .otf/.cff (glyphs shift) and can't read .ttc
-	 * collections, so those are rejected here (the PDF then renders with a Latin
-	 * fallback rather than garbage). Returns '' when unset, missing or unsupported.
+	 * collections, so unsupported overrides fall back to the bundled font.
+	 * Returns '' only when neither font is available.
 	 */
 	private function pdf_cjk_font_path()
 	{
-		$path = trim((string) get_env('COMPETITOR_PDF_CJK_FONT'));
-		if ($path === '' || ! is_file($path)) {
-			return '';
+		$paths = array(
+			trim((string) get_env('COMPETITOR_PDF_CJK_FONT')),
+			FCPATH . 'assets/fonts/pdf/DroidSansFallback.ttf',
+		);
+		foreach ($paths as $path) {
+			if ($path !== '' && is_file($path) && is_readable($path) && strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'ttf') {
+				return $path;
+			}
 		}
-		$ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-		return in_array($ext, array('ttf'), true) ? $path : '';
+		return '';
 	}
 
 	/**
@@ -1182,8 +1187,8 @@ class Competitor_Product extends MY_Controller
 		}
 
 		// DejaVu Sans (DomPDF's default) has no CJK glyphs, so a Chinese PDF would
-		// render as empty boxes. When a CJK TrueType font is configured
-		// (COMPETITOR_PDF_CJK_FONT in .env), register it and use it as the body font;
+		// render as empty boxes. Use the configured or bundled CJK TrueType font
+		// and register it as the body font;
 		// subsetting keeps the embedded output small. Latin falls back to DejaVu.
 		$cjk_font = $this->pdf_cjk_font_path();
 		$use_cjk  = ($lang !== 'en' && $cjk_font !== '');

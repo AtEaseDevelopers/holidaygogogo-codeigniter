@@ -1,5 +1,6 @@
 .env
 application/cache/sessions/*
+application/cache/dompdf_fonts/
 assets/upload/*
 !assets/upload/faq_knowledge_sources/
 assets/upload/faq_knowledge_sources/*

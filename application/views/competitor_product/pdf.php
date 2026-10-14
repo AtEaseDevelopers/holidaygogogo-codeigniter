@@ -34,6 +34,9 @@ $logo_src = is_file($logo_path) ? 'data:image/jpeg;base64,' . base64_encode(file
     * { box-sizing: border-box; }
     @page { margin: 165px 40px 35px 40px; }
     body { margin: 0; font-family: <?php echo $pdf_font; ?>; color: #2B2B3F; font-size: 12px; line-height: 1.45; }
+    <?php if (isset($lang) && $lang === 'cn') { ?>
+    body { word-wrap: break-word; }
+    <?php } ?>
     .company-header { position: fixed; top: -145px; left: 0; right: 0; height: 135px; font-family: Helvetica, sans-serif; color: #000; line-height: 1.25; }
     .company-header table { width: 100%; border-collapse: collapse; }
     .company-header td { vertical-align: middle; }
