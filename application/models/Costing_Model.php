@@ -1720,6 +1720,7 @@ class Costing_Model extends CI_Model
             ->join('costing_currencies', 'costing_currencies.id = costing_booking_items.currency_id')
             ->where('costing_booking_items.booking_id', (int) $booking_id)
             ->where('costing_booking_items.combination_id IS NULL', null, false)
+            ->order_by('costing_booking_items.sort_order', 'ASC')
             ->order_by('costing_booking_items.id', 'ASC')
             ->get('costing_booking_items')
             ->result_array();
@@ -1879,6 +1880,7 @@ class Costing_Model extends CI_Model
             ->join('costing_currencies', 'costing_currencies.id = costing_booking_items.currency_id')
             ->where('costing_booking_items.booking_id', $booking_id)
             ->where('costing_booking_items.combination_id IS NOT NULL', null, false)
+            ->order_by('costing_booking_items.sort_order', 'ASC')
             ->order_by('costing_booking_items.id', 'ASC')
             ->get('costing_booking_items')
             ->result_array();
@@ -2246,7 +2248,10 @@ class Costing_Model extends CI_Model
             $normalized[] = $normalized_row;
         }
 
-        return $normalized;
+        // Stamp the display order (0,1,2…) from the surviving rows' order — which
+        // mirrors the on-screen / posted DOM order, so a drag rearrange persists.
+        $this->load->helper('costing_calc');
+        return costing_stamp_sort_order($normalized);
     }
 
     private function Resolve_Bank_Charges_Myr($currency_id, $travel_date = null)

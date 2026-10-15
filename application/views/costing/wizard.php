@@ -1296,7 +1296,13 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
         tr.className = 'cw-row cw-crow';
         tr.setAttribute('data-cat', cat);
         tr.innerHTML =
-            '<td><input type="text" class="form-control" name="' + base + '[name]" value="" readonly>' +
+            '<td><div style="display:flex; align-items:center; gap:6px;">' +
+                '<span class="cw-row-move" style="display:flex; flex-direction:column; gap:2px;">' +
+                    '<button type="button" class="btn btn-icon btn-light-primary cw-row-up" title="Move up within this section" style="width:22px; height:18px; padding:0; line-height:1;"><i class="la la-angle-up" style="font-size:12px;"></i></button>' +
+                    '<button type="button" class="btn btn-icon btn-light-primary cw-row-down" title="Move down within this section" style="width:22px; height:18px; padding:0; line-height:1;"><i class="la la-angle-down" style="font-size:12px;"></i></button>' +
+                '</span>' +
+                '<input type="text" class="form-control" name="' + base + '[name]" value="" readonly style="flex:1; min-width:0;">' +
+            '</div>' +
             '<select class="form-control form-control-sm cw-mult-type mt-2" name="' + base + '[multiplier_type]" title="How this cost scales">' + multiplierOptions(item.multiplier_type) + '</select>' +
             '<input type="text" class="form-control form-control-sm cw-supplier mt-2" name="' + base + '[supplier]" list="cw-supplier-list" placeholder="Supplier (optional)" title="Pick an existing supplier or type a new name (not saved to the supplier master)" value="">' +
             '<div class="cw-supplier-quote mt-1" style="font-size:11px;"></div>' +
@@ -1471,7 +1477,43 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
             if (row) { updateRowQuoteLink(row); }
         }
     });
+    // --- Row reorder via Up/Down buttons (precise, within the same combination
+    // AND the same category section). A row is two <tr>s — the cost row (.cw-crow)
+    // and its paired remark row (.cw-crmk) directly beneath — moved together. The
+    // new DOM order is what the save path stamps as sort_order, so it persists.
+    function cwSiblingCrows(row) {
+        // Cost rows of the same category within this combination, in display order.
+        var cat = row.getAttribute('data-cat'), out = [];
+        row.parentNode.querySelectorAll('.cw-crow').forEach(function (r) {
+            if (r.getAttribute('data-cat') === cat) { out.push(r); }
+        });
+        return out;
+    }
+    function cwMoveRow(row, dir) {
+        var sibs = cwSiblingCrows(row);
+        var i = sibs.indexOf(row), j = i + dir;
+        if (i < 0 || j < 0 || j >= sibs.length) { return; } // already at the edge
+        var tbody = row.parentNode, target = sibs[j];
+        var remark = row.nextElementSibling;
+        if (!(remark && remark.classList.contains('cw-crmk'))) { remark = null; }
+        if (dir < 0) {
+            tbody.insertBefore(row, target);                 // before the row above
+        } else {
+            var tRemark = target.nextElementSibling;         // after the row below (+ its remark)
+            var ref = (tRemark && tRemark.classList.contains('cw-crmk')) ? tRemark.nextSibling : target.nextSibling;
+            tbody.insertBefore(row, ref);
+        }
+        if (remark) { tbody.insertBefore(remark, row.nextSibling); }
+        recalc();
+    }
     combosWrap.addEventListener('click', function (e) {
+        var up = e.target.closest ? e.target.closest('.cw-row-up') : null;
+        var down = up ? null : (e.target.closest ? e.target.closest('.cw-row-down') : null);
+        if (up || down) {
+            var row = (up || down).closest('.cw-crow');
+            if (row) { cwMoveRow(row, up ? -1 : 1); }
+            return;
+        }
         var addItem = e.target.closest('.cw-combo-add-item');
         if (addItem) {
             var card = addItem.closest('.cw-combo-card');

@@ -40,4 +40,18 @@ class Profile extends MY_Controller
 			}
 		}
 	}
+
+	// Self-service 2FA reset: clears ONLY the logged-in admin's own enrolment
+	// (the posted/session admin id is never trusted from the client — we use the
+	// session), so the next login forces a fresh Google Authenticator setup.
+	function Reset_Two_Factor()
+	{
+		if(!$this->input->is_ajax_request() || empty($this->session->admin_id)) {
+			$this->load->view('errors/access_denied');
+			return;
+		}
+		$this->load->model('Login_Model');
+		$this->Login_Model->Reset_Two_Factor((int) $this->session->admin_id);
+		echo json_encode(true);
+	}
 }

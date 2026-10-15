@@ -80,6 +80,14 @@ class Costing extends MY_Controller
         $array['has_snapshot'] = $existing_booking_id > 0;
         $array['wizard_steps'] = $this->Wizard_Steps();
 
+        // A saved snapshot's quotation link is minted on demand (e.g. a duplicated
+        // package carries no token). The wizard's final step needs it to show the
+        // quotation, so ensure it here — otherwise a package WITH a cost template
+        // wrongly shows the "add the cost template first" prompt.
+        if ($existing_booking_id > 0 && empty($array['quotation_token'])) {
+            $array['quotation_token'] = $this->Costing_Model->Ensure_Quotation_Token($existing_booking_id);
+        }
+
         // Supplier names for the combination item "pick existing OR type new"
         // datalist. Optional free text — a typed-in name is never saved back here.
         $this->load->model('Supplier_Model');

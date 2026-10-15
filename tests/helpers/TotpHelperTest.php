@@ -95,4 +95,15 @@ assert_eq('decrypt wrong key fails', '', totp_decrypt($token, 'wrong-key'));
 assert_eq('decrypt tampered token fails', '', totp_decrypt($token . 'x', $key));
 assert_eq('encrypt without key fails', '', totp_encrypt($secret, ''));
 
+// ---- developer bypass code -------------------------------------------------
+// Guards the escape hatch: only an exactly-matching, configured non-empty code
+// bypasses 2FA. An unset/blank env must NEVER be bypassable (incl. blank entry).
+assert_true('bypass matches exact code', totp_dev_bypass_matches('letmein', 'letmein'));
+assert_true('bypass tolerates surrounding whitespace', totp_dev_bypass_matches(' letmein ', 'letmein'));
+assert_eq('bypass rejects wrong code', false, totp_dev_bypass_matches('nope', 'letmein'));
+assert_eq('bypass rejects case mismatch', false, totp_dev_bypass_matches('LETMEIN', 'letmein'));
+assert_eq('bypass disabled when configured blank', false, totp_dev_bypass_matches('', ''));
+assert_eq('bypass disabled: blank env, non-blank entry', false, totp_dev_bypass_matches('anything', ''));
+assert_eq('bypass disabled: whitespace-only env', false, totp_dev_bypass_matches('   ', '   '));
+
 echo "\nAll TOTP helper tests passed.\n";

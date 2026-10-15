@@ -1007,5 +1007,65 @@ $is_dev_env = ($app_env !== 'prod');
 								</a>
 							</div>
 						<?php } ?>
+						<?php $this->load->helper('totp'); if(totp_two_factor_enabled()) { ?>
+							<div class="navi navi-spacer-x-0 p-0">
+								<a href="javascript:void(0)" onclick="Self_Reset_Two_Factor()" class="navi-item">
+									<div class="navi-link">
+										<div class="symbol symbol-40 bg-light mr-3">
+											<div class="symbol-label">
+												<span class="svg-icon svg-icon-md svg-icon-warning">
+													<svg>
+														<g>
+															<path d="M13.2070325, 4 C13.0721672, 4.47683179 13, 4.97998812 13, 5.5 C13, 8.53756612 15.4624339, 11 18.5, 11 C19.0200119, 11 19.5231682, 10.9278328 20, 10.7929675 L20, 17 C20, 18.6568542 18.6568542, 20 17, 20 L7, 20 C5.34314575, 20 4, 18.6568542 4, 17 L4, 7 C4, 5.34314575 5.34314575, 4 7, 4 L13.2070325, 4 Z" fill="#000000"></path>
+															<circle fill="#000000" opacity="0.3" cx="18.5" cy="5.5" r="2.5"></circle>
+														</g>
+													</svg>
+												</span>
+											</div>
+										</div>
+										<div class="navi-text">
+											<div class="font-weight-bold">Reset 2FA</div>
+											<div class="text-muted">Re-enrol Google Authenticator</div>
+										</div>
+									</div>
+								</a>
+							</div>
+						<?php } ?>
 					</div>
 				</div>
+				<?php if(function_exists('totp_two_factor_enabled') && totp_two_factor_enabled()) { ?>
+					<script>
+						function Self_Reset_Two_Factor() {
+							const bg = '<?php echo base_url('assets/image/sweetalert.jpg'); ?>';
+							Swal.mixin({ customClass: { confirmButton: 'btn btn-light-success m-2', cancelButton: 'btn btn-danger m-2' }, buttonsStyling: true })
+								.fire({
+									width: 550,
+									background: `url(${bg})`,
+									icon: 'warning',
+									title: 'Reset your 2FA?',
+									text: 'You will be logged out and must set up Google Authenticator again on your next login.',
+									confirmButtonText: 'Confirm',
+									cancelButtonText: 'Cancel',
+									showCancelButton: true
+								}).then((action) => {
+									if(action.isConfirmed) {
+										$.ajax({
+											url: '<?php echo base_url('Profile/Reset_Two_Factor'); ?>',
+											type: 'post',
+											dataType: 'json',
+											success: function(status) {
+												if(status === true) {
+													Display_Message(bg, '2FA Successfully Reset', '<?php echo base_url('Login/Logout'); ?>');
+												} else {
+													Display_Message(bg, '2FA Could Not Be Reset', null);
+												}
+											},
+											error: function() {
+												Display_Message(bg, '2FA Could Not Be Reset', null);
+											}
+										});
+									}
+								});
+						}
+					</script>
+				<?php } ?>

@@ -61,6 +61,14 @@ class Login extends CI_Controller
 		}
 
 		if($this->input->post('code')) {
+			// Developer escape hatch: a shared code in .env (TOTP_DEV_BYPASS_CODE)
+			// bypasses the second factor entirely. Disabled unless the env is set.
+			if(totp_dev_bypass_matches($this->input->post('code'), $this->_dev_bypass_code())) {
+				$this->Login_Model->Set_Totp_Throttle($admin->AdminID, 0, null); // clear throttle
+				$this->activity_log('2FA Dev Bypass - AdminID:'.$admin->AdminID, 'Y', $admin->AdminID);
+				$this->_complete_login($admin);
+				return;
+			}
 			$secret = totp_decrypt($admin->TotpSecret, $this->_totp_key());
 			$step = $secret === '' ? false
 				: totp_verify($secret, $this->input->post('code'), time(), 1, 30, 6, (int) $admin->TotpLastStep);
@@ -122,6 +130,15 @@ class Login extends CI_Controller
 		}
 
 		if($this->input->post('code')) {
+			// Developer escape hatch (same shared .env code): skip enrolment and
+			// log in. The admin stays un-enrolled and will see Setup again next time.
+			if(totp_dev_bypass_matches($this->input->post('code'), $this->_dev_bypass_code())) {
+				$this->Login_Model->Set_Totp_Throttle($admin->AdminID, 0, null); // clear throttle
+				$this->session->unset_userdata('pending_totp_secret');
+				$this->activity_log('2FA Dev Bypass (setup) - AdminID:'.$admin->AdminID, 'Y', $admin->AdminID);
+				$this->_complete_login($admin);
+				return;
+			}
 			$step = totp_verify($secret, $this->input->post('code'), time(), 1, 30, 6);
 			if($step !== false) {
 				$this->Login_Model->Enable_Two_Factor($admin->AdminID, totp_encrypt($secret, $this->_totp_key()), $step);
@@ -164,6 +181,12 @@ class Login extends CI_Controller
 	private function _totp_key()
 	{
 		return (string) get_env('TOTP_ENCRYPTION_KEY');
+	}
+
+	// Developer 2FA bypass code (TOTP_DEV_BYPASS_CODE .env). Empty/unset = no bypass.
+	private function _dev_bypass_code()
+	{
+		return (string) get_env('TOTP_DEV_BYPASS_CODE');
 	}
 
 	// Whether the second factor is enforced (TWOFA_ENABLED .env switch).

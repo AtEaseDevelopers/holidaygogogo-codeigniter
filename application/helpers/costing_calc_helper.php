@@ -292,6 +292,30 @@ if (!function_exists('costing_combination_summary')) {
     }
 }
 
+if (!function_exists('costing_stamp_sort_order')) {
+    /**
+     * Stamp a sequential display order onto an ordered list of cost rows. The input
+     * order IS the intended display order (it mirrors the on-screen / posted row
+     * order after a drag-and-drop rearrange), so each row gets sort_order 0,1,2…
+     * matching its position. Pure so it stays testable; re-ordered input yields the
+     * new order — the contract that makes a drag rearrange persist.
+     *
+     * @param array $rows ordered list of row arrays
+     * @return array same rows with an added integer 'sort_order' key
+     */
+    function costing_stamp_sort_order($rows)
+    {
+        $out = array();
+        $i = 0;
+        foreach ((array) $rows as $row) {
+            $row = (array) $row;
+            $row['sort_order'] = $i++;
+            $out[] = $row;
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('costing_normalize_headcount')) {
     /**
      * Normalise a posted per-category headcount map (category code => count) for a

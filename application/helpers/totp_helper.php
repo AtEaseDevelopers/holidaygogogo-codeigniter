@@ -40,6 +40,31 @@ if (!function_exists('totp_two_factor_enabled')) {
     }
 }
 
+if (!function_exists('totp_dev_bypass_matches')) {
+    /**
+     * Developer escape hatch for the second factor. If a non-empty bypass code
+     * is configured (TOTP_DEV_BYPASS_CODE .env) and the submitted code matches
+     * it exactly, the login flow treats 2FA as passed. PURE: both the submitted
+     * and configured codes are passed in — no env read here, so it is testable.
+     *
+     * An empty/unset configured code DISABLES the bypass (never matches), so a
+     * blank .env can never be bypassed with a blank entry. Comparison is
+     * constant-time to avoid leaking the code via timing.
+     *
+     * @param string $submitted The code the user typed.
+     * @param string $configured The TOTP_DEV_BYPASS_CODE value.
+     * @return bool
+     */
+    function totp_dev_bypass_matches($submitted, $configured)
+    {
+        $configured = trim((string) $configured);
+        if ($configured === '') {
+            return false;
+        }
+        return hash_equals($configured, trim((string) $submitted));
+    }
+}
+
 if (!function_exists('totp_base32_encode')) {
     /**
      * RFC 4648 Base32 encode (no padding), the alphabet Google Authenticator
