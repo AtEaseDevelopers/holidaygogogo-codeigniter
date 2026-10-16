@@ -2,13 +2,14 @@
 $packages = isset($packages) ? $packages : array();
 $filters = isset($filters) ? $filters : array('search' => '', 'status' => '');
 $filter_search = isset($filters['search']) ? $filters['search'] : '';
+$filter_tour_code = isset($filters['tour_code']) ? $filters['tour_code'] : '';
 $filter_status = isset($filters['status']) ? $filters['status'] : '';
 $filter_customer_name = isset($filters['customer_name']) ? $filters['customer_name'] : '';
 $filter_customer_contact = isset($filters['customer_contact']) ? $filters['customer_contact'] : '';
 $filter_customer_email = isset($filters['customer_email']) ? $filters['customer_email'] : '';
 $filter_sales_admin_id = isset($filters['sales_admin_id']) ? (int) $filters['sales_admin_id'] : 0;
 $sales_agents = isset($sales_agents) ? $sales_agents : array();
-$has_filter = ($filter_search !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0);
+$has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0);
 ?>
 
 <div class="d-flex flex-column-fluid">
@@ -51,9 +52,13 @@ $has_filter = ($filter_search !== '' || $filter_status !== '' || $filter_custome
                             <div class="card-body">
                                 <form method="get" action="<?php echo base_url('Costing'); ?>">
                                     <div class="form-group row mb-4">
-                                        <div class="col-md-5">
+                                        <div class="col-md-4">
                                             <label class="font-weight-bold">Search</label>
                                             <input type="text" name="search" value="<?php echo html_escape($filter_search); ?>" class="form-control" placeholder="Package name, tour code or description">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="font-weight-bold">Tour Code</label>
+                                            <input type="text" name="tour_code" value="<?php echo html_escape($filter_tour_code); ?>" class="form-control" placeholder="Tour code">
                                         </div>
                                         <div class="col-md-3">
                                             <label class="font-weight-bold">Status</label>
@@ -63,7 +68,7 @@ $has_filter = ($filter_search !== '' || $filter_status !== '' || $filter_custome
                                                 <option value="inactive" <?php echo ($filter_status === 'inactive') ? 'selected' : ''; ?>>Inactive</option>
                                             </select>
                                         </div>
-                                        <div class="col-md-4">
+                                        <div class="col-md-3">
                                             <label class="font-weight-bold">Sales Person</label>
                                             <select name="sales_admin_id" class="form-control">
                                                 <option value="">All</option>

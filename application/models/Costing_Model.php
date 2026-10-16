@@ -31,6 +31,11 @@ class Costing_Model extends CI_Model
             $where[] = "(cp.name LIKE '%" . $like . "%' OR cp.tour_code LIKE '%" . $like . "%' OR cp.description LIKE '%" . $like . "%')";
         }
 
+        $tour_code = isset($filters['tour_code']) ? trim((string) $filters['tour_code']) : '';
+        if ($tour_code !== '') {
+            $where[] = "cp.tour_code LIKE '%" . $this->db->escape_like_str($tour_code) . "%'";
+        }
+
         $status = isset($filters['status']) ? trim((string) $filters['status']) : '';
         if ($status !== '') {
             $where[] = "cp.status = " . $this->db->escape($status);

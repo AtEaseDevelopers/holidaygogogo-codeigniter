@@ -76,7 +76,10 @@ $qm = $quote_meta;
 $qv = function ($key) use ($qm) {
     return isset($qm[$key]) && $qm[$key] !== null ? trim((string) $qm[$key]) : '';
 };
-$TourCode       = isset($package['tour_code']) && $package['tour_code'] !== '' ? $package['tour_code'] : '-';
+// #9 (16 Oct 2026): the customer quotation "No :" shows the internal tour code
+// (qu-YYMM-XXXX). Legacy packages with no tour code fall back to the booking-based
+// public ref so the field is never blank.
+$TourCode       = isset($package['tour_code']) && $package['tour_code'] !== '' ? $package['tour_code'] : $public_ref;
 $CustomerName   = isset($package['customer_name']) && $package['customer_name'] !== '' ? $package['customer_name'] : '-';
 $PricingBasis   = $qv('quote_pricing_basis');
 $TravelDateNote = $qv('quote_travel_date_note');
@@ -243,7 +246,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
     <table style="width:100%;">
         <tr>
             <th style="width:65%;"><h3 class="text-right">Tour Quotation</h3></th>
-            <th style="width:35%; font-weight:700; text-align:right;">No : <?php echo html_escape($public_ref); ?></th>
+            <th style="width:35%; font-weight:700; text-align:right;">No : <?php echo html_escape($TourCode); ?></th>
         </tr>
     </table>
 

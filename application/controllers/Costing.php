@@ -17,6 +17,7 @@ class Costing extends MY_Controller
 
         $filters = array(
             'search' => trim((string) $this->input->get('search')),
+            'tour_code' => trim((string) $this->input->get('tour_code')),
             'status' => trim((string) $this->input->get('status')),
             'customer_name' => trim((string) $this->input->get('customer_name')),
             'customer_contact' => trim((string) $this->input->get('customer_contact')),

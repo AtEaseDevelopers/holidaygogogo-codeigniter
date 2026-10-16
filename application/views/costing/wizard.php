@@ -502,15 +502,49 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
         // Itinerary-wide rich-text blocks (one set for the whole itinerary).
         $itin_meta = isset($itinerary_meta) ? $itinerary_meta : array();
         // #7 One merged Notes field. A blank field opens with the four sections
-        // (Include / Exclude / Important Notes / Terms & Conditions) each with an
-        // empty bullet, ready to fill in.
+        // (Include / Exclude / Important Notes / Terms & Conditions). Exclude,
+        // Important Notes and Terms & Conditions are pre-filled with the agency's
+        // standard boilerplate; Include stays an empty bullet (inclusions differ
+        // per package).
         $itin_level_fields = array(
             'itinerary_notes' => array('Notes', 'notes'),
         );
-        $itin_notes_default = '<p><strong>Include</strong></p><ul><li></li></ul>'
-            . '<p><strong>Exclude</strong></p><ul><li></li></ul>'
-            . '<p><strong>Important Notes</strong></p><ul><li></li></ul>'
-            . '<p><strong>Terms &amp; Conditions</strong></p><ul><li></li></ul>';
+        $itin_notes_default =
+            '<p><strong>Include</strong></p><ul><li></li></ul>'
+            . '<p><strong>Exclude</strong></p><ul>'
+            . '<li>Personal expenses: telephone, fax, mini bar, laundry, etc</li>'
+            . '<li>Additional Tour</li>'
+            . '<li>Meals other than stated</li>'
+            . '<li>Tourism tax</li>'
+            . '<li>Activities &amp; Entrance fee other than stated (if applicable)</li>'
+            . '<li>Services/ Item not mentioned in the program</li>'
+            . '<li>Travel insurance (strongly recommended to purchase)</li>'
+            . '<li>Other expenses not stated in the "Includes" section</li>'
+            . '<li>Super peak and Peak Season Surcharges (if applicable)</li></ul>'
+            . '<p><strong>Important Notes</strong></p><ul>'
+            . '<li>Rate maybe change with or without prior notice depend on Vietnam new regulations such as petrol fee, entrance fee etc</li></ul>'
+            . '<p><strong>Terms &amp; Conditions</strong></p><ul>'
+            . '<li>Price quoted per person in Malaysian Ringgit (MYR) based on Twin sharing (rate subject to change due to fluctuation of currency).</li>'
+            . '<li>The above quotation is an estimation only, a revised quotation will be given upon confirmation.</li>'
+            . '<li>Maximum 10-hour transport usage per day, exceeding the 10 hours usage, an additional charge will be incurred.</li>'
+            . '<li>Any applicable tax not included in the quotation is to be paid upon arrival at the hotel.</li>'
+            . '<li>Payment must be received in net as stated in the quotation.</li>'
+            . '<li>Restaurant locations will be determined once confirmed.</li>'
+            . '<li>Quoted rates may vary depending on the availability of the restaurant.</li>'
+            . '<li>Any transaction fee charges for the foreign transfer must be borne by the buyer.</li>'
+            . '<li>If the rates quoted are other than MYR, the quoted rates may vary from time to time due to currency fluctuations. An updated rate at the time of booking based on the current exchange rates will be provided.</li>'
+            . '<li>Due to the floating diesel price, the rate is quoted based on current pricing and subject to fluctuation from time to time. We will re quote if the price fluctuated during booking made.</li>'
+            . '<li>The rate quoted is subject to change if there are any revisions on the diesel prices.</li>'
+            . '<li>Itinerary and package content is subject to last-minute changes due to weather or operational issues.</li>'
+            . '<li>Hotel surcharge may apply on weekends, school holidays, and Malaysia public holidays. (Rate based on booking)</li>'
+            . '<li>Activity stated (if included) is provided on a complimentary basis, no refund will be made for cancellation of activities due to weather or operational issues.</li>'
+            . '<li>Holidaygogogo reserves the right to change to other accommodation in the same class if the accommodation stated above is not available during the travel date.</li>'
+            . '<li>No changes in room arrangement are allowed after full payment has been made.</li>'
+            . '<li>Other terms and conditions for booking.</li>'
+            . '<li>All pricing is inclusive of related taxes unless stated otherwise.</li>'
+            . '<li>Single Supplement will be charged for any Single Room Occupancy.</li>'
+            . '<li>Service will start when traveller has arrived at the airport to pick up and ends once traveller has been transferred to the airport for flight departure.</li>'
+            . '<li>Service based on a private tour.</li></ul>';
         // Renders one day card. $tpl=true emits the blank JS template with an
         // "__I__" index placeholder (values blank); otherwise a saved/seed row.
         $render_itin_card = function ($i, $day, $tpl = false) use ($itin_fields, $meal_options) {
@@ -570,12 +604,17 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
             <div class="cw-panel" id="cw-itin-meta">
                 <div class="cw-panel-title">Notes &amp; Terms</div>
                 <div class="cw-panel-sub">Shown once at the bottom of the Quotation PDF — applies to the whole itinerary, not a single day.</div>
-                <?php foreach ($itin_level_fields as $key => $meta) {
+                <?php
+                // Prefill the boilerplate ONLY for a brand-new package (one that has
+                // never saved its itinerary — no day rows yet). When editing an
+                // existing package we always keep the saved value, even if blank.
+                $is_new_itinerary = empty($itinerary_days);
+                foreach ($itin_level_fields as $key => $meta) {
                     list($label, $post_key) = $meta;
                     // #7 A blank Notes field opens with the four-section template so
                     // the user fills each bullet in one editor.
                     $meta_val = isset($itin_meta[$post_key]) ? (string) $itin_meta[$post_key] : '';
-                    if (trim(strip_tags($meta_val)) === '' && stripos($meta_val, '<img') === false) {
+                    if ($is_new_itinerary && trim(strip_tags($meta_val)) === '' && stripos($meta_val, '<img') === false) {
                         $meta_val = $itin_notes_default;
                     } ?>
                     <div class="cw-itin-field mb-4">
