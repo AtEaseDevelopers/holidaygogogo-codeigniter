@@ -50,6 +50,7 @@ class Manual_Leads extends MY_Controller
 		$data['page_title']     = 'Manual Leads Records';
 		$data['admins']         = $this->Booking_Model->Read_Admins();
 		$data['sources']        = $this->Booking_Model->Read_Sources();
+		$data['manual_sources'] = $this->Guests_Model->Read_Distinct_Ghl_Sources();
 		$data['destinations']   = $this->Booking_Model->Read_Categories();
 		$data['customer_types'] = $this->Customer_Type_Model->Read_Customer_Types();
 		$data['lead_statuses']  = $this->Lead_Status_Model->Read_Lead_Statuses();

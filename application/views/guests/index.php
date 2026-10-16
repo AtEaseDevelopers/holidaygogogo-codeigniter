@@ -691,6 +691,17 @@ div.kt-datatable__pager-container {
 														</select>
 													</div>
 												</div>
+												<div class="col-md-3">
+													<div class="form-group">
+														<label>Source</label>
+														<?php $sel_manual_source = guest_list_multi_values($this->input->get('manual_source')); ?>
+														<select name="manual_source[]" class="form-control selectpicker" data-live-search="true" multiple data-actions-box="true" title="--SELECT SOURCE--">
+															<?php if(!empty($manual_sources)) { foreach($manual_sources as $ms) { ?>
+																<option data-icon="la la-stream font-size-lg bs-icon" value="<?php echo htmlspecialchars($ms->value, ENT_QUOTES); ?>" <?php if(in_array((string)$ms->value, $sel_manual_source, true)) echo 'selected'; ?>><?php echo htmlspecialchars($ms->value); ?></option>
+															<?php } } ?>
+														</select>
+													</div>
+												</div>
 											</div>
 										<?php } ?>
 										<?php } ?>

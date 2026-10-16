@@ -432,6 +432,11 @@ class Guests_Model extends CI_Model
 			$this->Append_In_Clause($ghl_where, $g_params, 'gc.number_of_pax', $this->input->get('number_of_pax'));
 			$this->Append_In_Clause($ghl_where, $g_params, 'gc.client_type',   $this->input->get('client_type'));
 			$this->Append_In_Clause($ghl_where, $g_params, 'gc.state',         $this->input->get('state'));
+			// Source (Manual Leads): free-text source label (gc.source, e.g. "Facebook").
+			// Uses its own param name (manual_source) — NOT the booking-branch 'source'
+			// (numeric SourceID), which is in the GHL-branch suppression list and would
+			// otherwise empty this page when set.
+			$this->Append_In_Clause($ghl_where, $g_params, 'gc.source',        $this->input->get('manual_source'));
 			// Created By (Manual Leads): filter on the creator admin (gc.created_by = admin.AdminID).
 			$this->Append_In_Clause($ghl_where, $g_params, 'gc.created_by',    $this->input->get('created_by'));
 
@@ -1971,6 +1976,24 @@ GROUP BY mm.merge_key";
 			SELECT DISTINCT TRIM(gc.race) AS value
 			FROM ghl_contacts gc
 			WHERE gc.race IS NOT NULL AND TRIM(gc.race) != ''
+			ORDER BY value ASC
+		";
+		return $this->db->query($sql)->result();
+	}
+
+	/**
+	 * Distinct Source values for the Manual Leads page's Source filter. Source is
+	 * free-text on hand-entered leads (ghl_contacts.source, e.g. "Facebook"), so
+	 * the dropdown is built from the values actually stored on manual leads rather
+	 * than a master table. Returns rows with a `value` column (matches Read_Distinct).
+	 */
+	function Read_Distinct_Ghl_Sources()
+	{
+		$sql = "
+			SELECT DISTINCT TRIM(gc.source) AS value
+			FROM ghl_contacts gc
+			WHERE gc.lead_source = 'manual'
+				AND gc.source IS NOT NULL AND TRIM(gc.source) != ''
 			ORDER BY value ASC
 		";
 		return $this->db->query($sql)->result();
