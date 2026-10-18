@@ -699,6 +699,29 @@ check('ice_series_web_url unwraps data', 'https://x.com/web/itinerary/AB-1?type=
 check('ice_series_web_url empty when no code', '', competitor_ice_series_web_url(json_encode(array('caption' => 'x')), 'https://www.gd.my'));
 check('ice_series_web_url empty on junk', '', competitor_ice_series_web_url('nope', 'https://www.gd.my'));
 
+// ---- ICE land-tour display links --------------------------------------------
+check('ice_land_tour_web_url uses the ground-tour route', 'https://www.gd.my/web/ground-tour/LPK-MVASH',
+    competitor_ice_land_tour_web_url(json_encode(array('code' => 'LPK-MVASH')), 'https://www.gd.my/'));
+check('ice_land_tour_web_url encodes the code', 'https://www.gd.my/web/ground-tour/LPK%2FAB%20C',
+    competitor_ice_land_tour_web_url(array('code' => ' LPK/AB C '), 'https://www.gd.my'));
+check('ice_land_tour_web_url empty when no code', '',
+    competitor_ice_land_tour_web_url(array('error' => 'Tour not found.'), 'https://www.gd.my'));
+check('ice_land_tour_web_url empty on junk', '', competitor_ice_land_tour_web_url('nope', 'https://www.gd.my'));
+$legacyLandUrl = 'https://www.gd.my/web/land-tour/LPK-MVASH';
+$legacyLandItems = array(1 => array('url' => $legacyLandUrl, 'text' => 'Product: 4D3N Maldives Adaaran Select Hudhuran Fushi'));
+$fixedLandItems = competitor_prepare_crawl_items($legacyLandItems, 'https://www.gd.my/');
+check('legacy land-tour review link repaired', 'https://www.gd.my/web/ground-tour/LPK-MVASH', $fixedLandItems['items'][1]['url']);
+check('legacy land-tour index preserved', array(1), array_keys($fixedLandItems['items']));
+check('legacy land-tour original evidence preserved', $legacyLandUrl,
+    $fixedLandItems['items'][1]['crawl_metadata']['source_records'][0]['original_url']);
+check('legacy land-tour source preserved', 'https://www.gd.my/',
+    $fixedLandItems['items'][1]['crawl_metadata']['source_records'][0]['source_url']);
+check('legacy land-tour repair is idempotent', $fixedLandItems,
+    competitor_prepare_crawl_items($fixedLandItems['items'], 'https://www.gd.my/'));
+$otherLandItems = array(array('url' => 'https://example.com/web/land-tour/ABC', 'text' => 'Product: Other tour'));
+check('legacy land-tour repair leaves other websites alone', 'https://example.com/web/land-tour/ABC',
+    competitor_prepare_crawl_items($otherLandItems)['items'][0]['url']);
+
 // ---- competitor_ice_series_to_text ------------------------------------------
 $seriesDetail = json_encode(array(
     'id' => 6618, 'code' => 'FS-P4HAK-1', 'country' => 'CHINA', 'price_currency' => 'MYR',
@@ -719,7 +742,7 @@ check_true('ice_series_to_text renders description', strpos($stext, 'Direct flig
 check_true('ice_series_to_text has inclusions', strpos($stext, 'hotel: 4 star') !== false && preg_match('/Inclusions:.*wifi/s', $stext) === 1);
 check_true('ice_series_to_text lists not-included', strpos($stext, 'Not included:') !== false && strpos($stext, 'meal onboard') !== false);
 check_true('ice_series_to_text nested including', strpos($stext, 'accommodation:') !== false);
-check_true('ice_series_to_text has departures', strpos($stext, '2026-06-01 from Penang: 1388') !== false);
+check_true('ice_series_to_text has departures with currency', strpos($stext, '2026-06-01 from Penang: MYR 1388') !== false);
 check_true('ice_series_to_text has guide langs', strpos($stext, 'guide: EN/CN') !== false);
 check_true('ice_series_to_text has highlights', strpos($stext, 'Great Wall of Hainan') !== false);
 check_true('ice_series_to_text has file url', strpos($stext, 'https://www.gd.my/i/FS-P4HAK-1') !== false);

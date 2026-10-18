@@ -76,6 +76,15 @@ class CompetitorAnalysisService
 	/** Set by extract_source_text(): the page's real product name (<h1>/og:title). */
 	protected $last_page_title = '';
 	protected $crawl_source_url = '';
+	/** Successful content-response times, retained across prefetch and extraction. */
+	protected $source_retrieved_at = array();
+	protected $last_content_retrieved_at = '';
+
+	protected function remember_content_retrieved($url, $retrieved_at)
+	{
+		$this->source_retrieved_at[$url] = competitor_latest_retrieved_at(array($retrieved_at));
+		$this->last_content_retrieved_at = competitor_latest_retrieved_at(array($this->last_content_retrieved_at, $retrieved_at));
+	}
 
 	/** Product + PDF links found on the last-read page's HTML (for listing drill-down). */
 	protected $last_page_links = array();
@@ -1332,6 +1341,7 @@ class CompetitorAnalysisService
 		$display_url = ($this->last_ice_web_url !== '') ? $this->last_ice_web_url : $url;
 		$item = array('url' => $display_url, 'text' => $text, 'original_url' => $url,
 			'source_url' => $this->crawl_source_url,
+			'crawl_metadata' => array('retrieved_at' => $this->last_content_retrieved_at),
 			'canonical_url' => competitor_product_canonical_url($this->last_page_html, $url));
 		if ($this->last_page_title !== '') {
 			$item['title'] = $this->last_page_title;   // real <h1> name — see crawl_to_text
@@ -1362,10 +1372,14 @@ class CompetitorAnalysisService
 					$text .= "\n" . $doc;
 				}
 			}
+			$retrieved_at = competitor_latest_retrieved_at(array(
+				isset($this->source_retrieved_at[$post_url]) ? $this->source_retrieved_at[$post_url] : '',
+				!empty($p['file']) && isset($this->source_retrieved_at[$p['file']]) ? $this->source_retrieved_at[$p['file']] : ''));
 			$items[] = array(
 				'url'  => ! empty($p['file']) ? $p['file'] : ($post_url . '#' . $p['code']),
 				'text' => $text,
 				'original_url' => $post_url, 'source_url' => $this->crawl_source_url,
+				'crawl_metadata' => array('retrieved_at' => $retrieved_at),
 			);
 		}
 		return $items;
@@ -1465,6 +1479,9 @@ class CompetitorAnalysisService
 		curl_setopt_array($ch, $opts);
 		$body = curl_exec($ch);
 		$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		if (!curl_errno($ch) && $code >= 200 && $code < 400 && is_string($body) && $body !== '') {
+			$this->remember_content_retrieved($url, gmdate('c'));
+		}
 		curl_close($ch);
 		return ($code >= 400 || ! is_string($body)) ? '' : $body;
 	}
@@ -1485,8 +1502,13 @@ class CompetitorAnalysisService
 
 		if ($host === 'tripfez.com') {
 			// tripfez React SPA: its cruise catalogue is one public JSON call (~44 items).
-			$body  = $this->fetch_api('https://api.cruisemalaysia.com.my/api/v1/cruises?limit=1000', $base_url);
+			$api = 'https://api.cruisemalaysia.com.my/api/v1/cruises?limit=1000';
+			$body  = $this->fetch_api($api, $base_url);
 			$items = competitor_tripfez_cruise_items($body, $origin);
+			foreach ($items as &$item) {
+				$item['crawl_metadata']['retrieved_at'] = isset($this->source_retrieved_at[$api]) ? $this->source_retrieved_at[$api] : '';
+			}
+			unset($item);
 			$this->log_crawl('site_adapter', array('host' => $host, 'source' => 'cruise_api', 'items' => count($items)));
 			return $items;
 		}
@@ -1594,6 +1616,7 @@ class CompetitorAnalysisService
 
 	protected function extract_source_text($url, $prefetched = null)
 	{
+		$this->last_content_retrieved_at = isset($this->source_retrieved_at[$url]) ? $this->source_retrieved_at[$url] : '';
 		$this->last_spa_partial = false;
 		$this->last_is_listing  = false;
 		$this->last_is_product  = false;
@@ -1625,13 +1648,11 @@ class CompetitorAnalysisService
 		} elseif ($kind === 'land_tour') {
 			$body = $fetch_self();
 			$text = competitor_ice_land_tour_to_text($body);
-			// Show the customer-facing /web/land-tour/<code> page, not the /b2c2b API URL.
-			$d = json_decode($body, true);
-			$code = (is_array($d) && isset($d['code'])) ? trim((string) $d['code']) : '';
+			// The land-tour API's customer-facing route is /web/ground-tour/<code>.
 			$parts = parse_url($url);
-			if ($code !== '' && ! empty($parts['scheme']) && ! empty($parts['host'])) {
+			if ( ! empty($parts['scheme']) && ! empty($parts['host'])) {
 				$origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
-				$this->last_ice_web_url = $origin . '/web/land-tour/' . rawurlencode($code);
+				$this->last_ice_web_url = competitor_ice_land_tour_web_url($body, $origin);
 			}
 		} elseif ($kind === 'posts') {
 			$text = competitor_json_api_to_text($fetch_self());
@@ -1909,14 +1930,14 @@ class CompetitorAnalysisService
 	/**
 	 * Resolve a CLI tool to an ABSOLUTE path. php-fpm runs with a minimal PATH that
 	 * usually excludes Homebrew (/opt/homebrew/bin), so a bare "pdftotext" shells out
-	 * to nothing. An explicit env value wins; otherwise probe the common bin dirs;
+	 * to nothing. An executable env path wins; stale paths fall back to common dirs;
 	 * last resort return the bare name (hope it's on PATH). Cached per process.
 	 */
 	protected function resolve_bin($configured, $name)
 	{
 		static $cache = array();
 		$configured = trim((string) $configured);
-		if ($configured !== '') {
+		if ($configured !== '' && is_executable($configured)) {
 			return $configured;
 		}
 		if (isset($cache[$name])) {
@@ -2043,6 +2064,7 @@ class CompetitorAnalysisService
 		if ($svc !== null) {
 			$this->last_render_apis = isset($svc['apis']) ? $svc['apis'] : array();
 			if ($svc['html'] !== '') {
+				$this->remember_content_retrieved($url, gmdate('c'));
 				$this->headless_count++;
 				$this->log_crawl('playwright_render', array('url' => $url,
 					'bytes' => strlen($svc['html']), 'apis' => count($this->last_render_apis), 'n' => $this->headless_count));
@@ -2077,6 +2099,7 @@ class CompetitorAnalysisService
 		$secs = $secs > 0 ? $secs : 35;   // heavy JS sites (chanbrothers) render in ~20-30s
 		$html = $this->run_with_timeout($cmd, $secs, $profile);
 		if ($html !== '') {
+			$this->remember_content_retrieved($url, gmdate('c'));
 			$this->headless_count++;
 			$this->log_crawl('headless_render', array('url' => $url, 'bytes' => strlen($html), 'n' => $this->headless_count));
 		}
@@ -2642,6 +2665,7 @@ class CompetitorAnalysisService
 		}
 
 		$item = array('url' => $display_url, 'text' => $text, 'original_url' => $url, 'source_url' => $url,
+			'crawl_metadata' => array('retrieved_at' => $this->last_content_retrieved_at),
 			'canonical_url' => competitor_product_canonical_url($this->last_page_html, $url));
 		if ($title !== '') { $item['title'] = $title; }
 		$tick('reading', 1, 1, $url);
@@ -2693,6 +2717,8 @@ class CompetitorAnalysisService
 		// Override with COMPETITOR_FETCH_TIMEOUT (seconds).
 		$timeout = (int) get_env('COMPETITOR_FETCH_TIMEOUT');
 		$timeout = $timeout > 0 ? $timeout : 15;
+		$max_file_bytes = (int) get_env('COMPETITOR_MAX_FILE_BYTES');
+		$max_file_bytes = $max_file_bytes > 0 ? $max_file_bytes : 33554432;
 		$opts = array(
 			CURLOPT_URL            => $url,
 			CURLOPT_RETURNTRANSFER => true,
@@ -2701,10 +2727,9 @@ class CompetitorAnalysisService
 			CURLOPT_CONNECTTIMEOUT => 8,
 			CURLOPT_TIMEOUT        => $timeout,
 			CURLOPT_ENCODING       => '',   // accept gzip/deflate, curl inflates it
-			// Cap the download size (bytes) so a giant multi-tour brochure PDF (sedunia
-			// ships 16 MB ones) can't be pulled into memory and OOM the crawl — a page
-			// that big isn't a single product anyway. Aborts via Content-Length.
-			CURLOPT_MAXFILESIZE    => (int) (get_env('COMPETITOR_MAX_FILE_BYTES') ?: 12582912),  // 12 MB
+			// Single-product itinerary PDFs can exceed 16 MB (e.g. GD's 8SKCJY).
+			// Keep a bounded 32 MiB default, with an explicit deployment override.
+			CURLOPT_MAXFILESIZE    => $max_file_bytes,
 			// Reuse DNS + TLS session + connection pool across the whole crawl.
 			CURLOPT_SHARE          => $this->curl_share(),
 			// Prefer HTTP/2 (falls back to 1.1 if unsupported) so many same-host
@@ -2741,6 +2766,7 @@ class CompetitorAnalysisService
 		// rate-limit — the host. A stale entry revalidates conditionally (304 = cheap).
 		$cache = $this->http_cache_read($url);
 		if ($cache !== null && competitor_http_cache_is_fresh($cache['meta'], time(), $this->http_cache_ttl())) {
+			$this->remember_content_retrieved($url, isset($cache['meta']['retrieved_at']) ? $cache['meta']['retrieved_at'] : '');
 			return $cache['body'];
 		}
 		$this->await_host_cooldown($host);
@@ -2788,10 +2814,12 @@ class CompetitorAnalysisService
 
 			// 304 Not Modified → our cached copy is still valid; refresh its fresh-window.
 			if ( ! $errno && $code === 304 && $cache !== null) {
+				$this->remember_content_retrieved($url, isset($cache['meta']['retrieved_at']) ? $cache['meta']['retrieved_at'] : '');
 				$this->http_cache_touch($url);
 				return $cache['body'];
 			}
 			if ( ! $errno && $code >= 200 && $code < 400 && is_string($body) && $body !== '') {
+				$this->remember_content_retrieved($url, gmdate('c'));
 				$this->http_cache_write($url, $body, $etag, $last_mod);
 				return $body;   // real, non-empty success
 			}
@@ -2903,7 +2931,8 @@ class CompetitorAnalysisService
 		$dir = $this->http_cache_dir();
 		@file_put_contents($dir . $key . '.body', $body);
 		@file_put_contents($dir . $key . '.json', json_encode(
-			array('url' => $url, 'ts' => time(), 'etag' => (string) $etag, 'last_modified' => (string) $last_modified),
+			array('url' => $url, 'ts' => time(), 'etag' => (string) $etag, 'last_modified' => (string) $last_modified,
+				'retrieved_at' => isset($this->source_retrieved_at[$url]) ? $this->source_retrieved_at[$url] : ''),
 			JSON_UNESCAPED_SLASHES));
 	}
 
@@ -2943,6 +2972,7 @@ class CompetitorAnalysisService
 		foreach ($urls as $u) {
 			$c = $this->http_cache_read($u);
 			if ($c !== null && competitor_http_cache_is_fresh($c['meta'], time(), $this->http_cache_ttl())) {
+				$this->remember_content_retrieved($u, isset($c['meta']['retrieved_at']) ? $c['meta']['retrieved_at'] : '');
 				$out[$u] = $c['body'];
 				continue;
 			}
@@ -2984,8 +3014,14 @@ class CompetitorAnalysisService
 			curl_multi_add_handle($mh, $ch);
 			$handles[$u] = $ch;
 		}
+		$completed_at = array();
 		do {
 			$status = curl_multi_exec($mh, $running);
+			while ($completed = curl_multi_info_read($mh)) {
+				foreach ($handles as $u => $handle) {
+					if ($handle === $completed['handle']) { $completed_at[$u] = gmdate('c'); break; }
+				}
+			}
 			if ($running) {
 				curl_multi_select($mh, 1.0);
 			}
@@ -2994,20 +3030,25 @@ class CompetitorAnalysisService
 		foreach ($handles as $u => $ch) {
 			$body = curl_multi_getcontent($ch);
 			$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$errno = curl_errno($ch);
 			// A throttled response in the burst → put that host on cooldown so the NEXT
 			// batch backs off (curl_multi can't read Retry-After cheaply here, so use a
 			// fixed exponential-ish backoff).
 			if ($code === 429 || $code === 503) {
 				$this->note_host_cooldown((string) parse_url($u, PHP_URL_HOST), competitor_backoff_seconds(1));
 			}
-			if ($code === 304 && isset($cached[$u])) {
+			if (!$errno && $code === 304 && isset($cached[$u])) {
+				$this->remember_content_retrieved($u, isset($cached[$u]['meta']['retrieved_at']) ? $cached[$u]['meta']['retrieved_at'] : '');
 				$out[$u] = $cached[$u]['body'];   // unchanged — reuse cached copy
 				$this->http_cache_touch($u);
-			} elseif ($code >= 200 && $code < 400 && is_string($body) && $body !== '') {
+			} elseif (!$errno && $code >= 200 && $code < 400 && is_string($body) && $body !== '') {
 				$out[$u] = $body;
+				$this->remember_content_retrieved($u, isset($completed_at[$u]) ? $completed_at[$u] : gmdate('c'));
 				$this->http_cache_write($u, $body, $hdr[$u]['etag'], $hdr[$u]['lm']);
 			} else {
 				$out[$u] = '';
+				$this->log_crawl('fetch_failed', array('url' => $u, 'code' => $code, 'errno' => $errno,
+					'error' => curl_error($ch)));
 			}
 			curl_multi_remove_handle($mh, $ch);
 			curl_close($ch);

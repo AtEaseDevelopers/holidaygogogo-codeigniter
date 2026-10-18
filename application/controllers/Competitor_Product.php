@@ -238,6 +238,43 @@ class Competitor_Product extends MY_Controller
 		echo json_encode(array('success' => true));
 	}
 
+	/** AJAX: show the complete saved crawl text without fetching the competitor again. */
+	function Crawled_Text()
+	{
+		$this->output->set_content_type('application/json');
+		$job_id = (string) $this->input->get('job');
+		$idx = (string) $this->input->get('index');
+		if (!$this->input->is_ajax_request() || $this->input->method() !== 'get'
+			|| !preg_match('/^[A-Za-z0-9_]+$/D', $job_id) || !ctype_digit($idx)) {
+			$this->output->set_status_header(400);
+			echo json_encode(array('success' => false, 'message' => 'Invalid product.')); return;
+		}
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$row = $this->Competitor_Crawl_Items_Model->Read_Item('competitor', $job_id, (int) $idx);
+		$item = null;
+		if ($row) {
+			$item = array('url' => $row->url, 'title' => $row->title, 'text' => $row->item_text);
+			$metadata = isset($row->metadata_json) ? json_decode((string) $row->metadata_json, true) : null;
+			if (is_array($metadata)) { $item['crawl_metadata'] = $metadata; }
+		} elseif (!$this->Competitor_Crawl_Items_Model->Has_Job('competitor', $job_id)) {
+			// Only legacy jobs absent from the DB may fall back to the checkpoint file.
+			$items = json_decode((string) @file_get_contents(APPPATH . 'logs/competitor_crawl/jobs/' . $job_id . '.items.json'), true);
+			if (isset($items[(int) $idx]) && is_array($items[(int) $idx])) { $item = $items[(int) $idx]; }
+		}
+		if ($item === null) {
+			$this->output->set_status_header(404);
+			echo json_encode(array('success' => false, 'message' => 'No saved crawl was found for this product.')); return;
+		}
+		$text = isset($item['text']) ? (string) $item['text'] : '';
+		$title = isset($item['title']) ? trim((string) $item['title']) : '';
+		if ($title === '') { $title = competitor_item_title($text, isset($item['url']) ? $item['url'] : ''); }
+		$retrieved_at = competitor_item_retrieved_at($item);
+		$retrieved_at_label = $retrieved_at === '' ? 'Not recorded'
+			: (new DateTimeImmutable($retrieved_at))->setTimezone(new DateTimeZone('Asia/Kuala_Lumpur'))->format('d M Y, g:i:s A') . ' MYT';
+		echo json_encode(array('success' => true, 'title' => $title, 'text' => $text,
+			'retrieved_at' => $retrieved_at, 'retrieved_at_label' => $retrieved_at_label), JSON_INVALID_UTF8_SUBSTITUTE);
+	}
+
 	/** AJAX: minimal state of a job (for the Review page to poll an analyse run). */
 	function Job_State()
 	{
