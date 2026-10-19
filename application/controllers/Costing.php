@@ -158,6 +158,22 @@ class Costing extends MY_Controller
         redirect('Costing');
     }
 
+    public function Create_Revision()
+    {
+        $package_id = (int) $this->input->post('package_id');
+        if ($package_id > 0) {
+            $new_package_id = $this->Costing_Model->Create_Revision($package_id);
+            if ($new_package_id > 0) {
+                $this->session->set_flashdata('message_success', 'Revision created successfully.');
+                redirect('Costing/Package/' . $new_package_id . '?step=details');
+                return;
+            }
+            $this->session->set_flashdata('message_error', 'Unable to create revision.');
+        }
+
+        redirect('Costing');
+    }
+
     public function Delete_Package()
     {
         $package_id = (int) $this->input->post('package_id');
@@ -329,10 +345,11 @@ class Costing extends MY_Controller
         $unit_amount = (float) $this->input->post('unit_amount');
         $converted_amount = (float) $this->input->post('converted_amount');
         $bank_charges_myr = (float) $this->input->post('bank_charges_myr');
+        $buffer = (float) $this->input->post('buffer');
         $valid_from = trim((string) $this->input->post('valid_from'));
 
-        if ($from_currency_id <= 0 || $to_currency_id <= 0 || $unit_amount <= 0 || $converted_amount <= 0 || $bank_charges_myr < 0) {
-            $this->session->set_flashdata('message_error', 'From currency, to currency, unit amount, converted amount, and valid bank charges are required.');
+        if ($from_currency_id <= 0 || $to_currency_id <= 0 || $unit_amount <= 0 || $converted_amount <= 0 || $bank_charges_myr < 0 || $buffer < 0) {
+            $this->session->set_flashdata('message_error', 'From currency, to currency, unit amount, converted amount, and valid bank charges/buffer are required.');
             redirect('Costing/Currency?active_tab=' . $active_tab);
             return;
         }
@@ -356,6 +373,7 @@ class Costing extends MY_Controller
             'unit_amount' => $unit_amount,
             'converted_amount' => $converted_amount,
             'bank_charges_myr' => $bank_charges_myr,
+            'buffer' => $buffer,
             'updated_by_admin_id' => (int) $this->session->userdata('admin_id'),
             'valid_from' => $valid_from,
         ));

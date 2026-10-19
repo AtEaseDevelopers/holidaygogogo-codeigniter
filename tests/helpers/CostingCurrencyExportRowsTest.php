@@ -33,7 +33,7 @@ function check($label, $expected, $actual) {
 $histories = array(
     array(
         'from_currency_code' => 'USD', 'to_currency_code' => 'MYR',
-        'unit_amount' => '1.00000000', 'rate' => '4.35000000',
+        'unit_amount' => '1.00000000', 'rate' => '4.35000000', 'buffer' => '0.10000000',
         'converted_amount' => '4.35000000', 'bank_charges_myr' => '5.00',
         'valid_from' => '2026-08-14 10:30:00', 'updated_by_name' => 'Alice',
     ),
@@ -52,6 +52,8 @@ check('row count', 2, count($rows));
 check('numbered from 1', '1', $rows[0]['no']);
 check('second numbered 2', '2', $rows[1]['no']);
 check('rate string 6dp + code', '1 USD = 4.350000 MYR', $rows[0]['rate']);
+check('buffer string 6dp', '0.100000 MYR', $rows[0]['buffer']);
+check('missing buffer -> 0.000000', '0.000000 MYR', $rows[1]['buffer']);
 check('bank charges MYR 2dp', 'MYR 5.00', $rows[0]['bank_charges']);
 check('valid_from table format', '14 AUG 2026 10:30', $rows[0]['valid_from']);
 check('updated by name', 'Alice', $rows[0]['updated_by_name']);

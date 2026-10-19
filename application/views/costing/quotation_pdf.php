@@ -187,7 +187,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
 ?>
 <html><head>
     <meta charset="utf-8">
-    <title>Quotation <?php echo html_escape($public_ref); ?></title>
+    <title>Quotation <?php echo html_escape($TourCode); ?></title>
 </head><style type="text/css">
     body {
         font-family: "Segoe UI", Arial, sans-serif !important;
@@ -417,7 +417,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
             $this->load->helper('costing_itinerary');
             foreach ($itinerary as $day) {
                 $meals = costing_meal_plan_labels(isset($day['meal_plan']) ? $day['meal_plan'] : ''); ?>
-                <table style="width:100%; font-size:11px; border-spacing:5px;">
+                <table style="width:100%; font-size:11px; border-spacing:5px; page-break-inside:avoid;">
                     <tr style="vertical-align:baseline;">
                         <td style="width:8%;">Day <?php echo (int) $day['day_number']; ?></td>
                         <td style="width:32%;"><strong><?php echo html_escape(isset($day['title']) ? $day['title'] : ''); ?></strong></td>

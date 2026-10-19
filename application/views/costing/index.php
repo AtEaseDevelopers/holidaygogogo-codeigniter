@@ -143,25 +143,64 @@ $has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_stat
                                         <td style="text-align:center;"><?php echo !empty($package['customer_contact']) ? html_escape($package['customer_contact']) : '-'; ?></td>
                                         <td><?php echo !empty($package['customer_email']) ? html_escape($package['customer_email']) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['sales_admin_name']) ? html_escape($package['sales_admin_name']) : '-'; ?></td>
-                                        <td style="text-align:center;"><?php echo !empty($package['tour_code']) ? html_escape($package['tour_code']) : '-'; ?></td>
+                                        <td style="text-align:center;">
+                                            <?php echo !empty($package['tour_code']) ? html_escape($package['tour_code']) : '-'; ?>
+                                            <?php if (!empty($package['revision_number'])) { ?>
+                                                <span class="label label-sm label-light-warning label-inline ml-1">REV<?php echo str_pad((string) (int) $package['revision_number'], 2, '0', STR_PAD_LEFT); ?></span>
+                                            <?php } ?>
+                                            <?php if (!empty($package['revisions']) && count($package['revisions']) > 1) { ?>
+                                                <div class="mt-2">
+                                                    <a href="#" class="text-muted font-size-sm revision-history-toggle" data-target="revisions-<?php echo (int) $package['id']; ?>">
+                                                        <i class="la la-history"></i> <?php echo count($package['revisions']); ?> versions
+                                                    </a>
+                                                    <div id="revisions-<?php echo (int) $package['id']; ?>" class="revision-history-list text-left mt-2" style="display:none;">
+                                                        <?php foreach ($package['revisions'] as $rev) { ?>
+                                                            <div class="d-flex align-items-center justify-content-between py-1" style="border-top:1px solid #ebedf3;">
+                                                                <span class="font-size-sm">
+                                                                    <?php echo html_escape($rev['tour_code']); ?>
+                                                                    <span class="text-muted">(<?php echo html_escape(ucfirst((string) $rev['status'])); ?>)</span>
+                                                                </span>
+                                                                <span class="text-nowrap">
+                                                                    <a href="<?php echo base_url('Costing/Package/' . (int) $rev['id']); ?>" class="btn btn-icon btn-light-primary btn-xs mr-1" title="View this version">
+                                                                        <i class="la la-eye"></i>
+                                                                    </a>
+                                                                    <?php if (!empty($rev['quotation_token']) && strtolower((string) $rev['status']) !== 'inactive') { ?>
+                                                                        <a href="<?php echo base_url('Costing/Quotation/' . $rev['quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-xs" title="Open Quotation PDF">
+                                                                            <i class="la la-file-pdf"></i>
+                                                                        </a>
+                                                                    <?php } ?>
+                                                                </span>
+                                                            </div>
+                                                        <?php } ?>
+                                                    </div>
+                                                </div>
+                                            <?php } ?>
+                                        </td>
                                         <td style="text-align:center;"><?php echo (int) $package['duration_days']; ?>D / <?php echo (int) $package['duration_nights']; ?>N</td>
                                         <td style="text-align:center;">
                                             <span class="label label-lg label-light-primary label-inline"><?php echo html_escape($package['status_label']); ?></span>
                                         </td>
                                         <td style="text-align:center;"><?php echo !empty($package['updated_at']) ? date('d/m/Y H:i', strtotime($package['updated_at'])) : 'N/A'; ?></td>
-                                        <td style="text-align:center;">
-                                            <a href="<?php echo base_url('Costing/Package/' . (int) $package['id']); ?>" class="btn btn-icon btn-light-primary btn-sm mr-2" title="View Package">
+                                        <td>
+                                            <div class="d-flex align-items-center justify-content-start" style="gap:6px;">
+                                            <a href="<?php echo base_url('Costing/Package/' . (int) $package['id']); ?>" class="btn btn-icon btn-light-primary btn-sm" title="View Package">
                                                 <i class="la la-eye"></i>
                                             </a>
                                             <?php if (!empty($package['latest_quotation_token']) && strtolower((string) $package['status']) !== 'inactive') { ?>
-                                                <a href="<?php echo base_url('Costing/Quotation/' . $package['latest_quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-sm mr-2" title="Open Quotation PDF">
+                                                <a href="<?php echo base_url('Costing/Quotation/' . $package['latest_quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-sm" title="Open Quotation PDF">
                                                     <i class="la la-file-pdf"></i>
                                                 </a>
                                             <?php } ?>
                                             <form method="post" action="<?php echo base_url('Costing/Duplicate_Package'); ?>" class="d-inline duplicate-package-form">
                                                 <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
-                                                <button type="button" class="btn btn-icon btn-light-info btn-sm mr-2 duplicate-package-button" data-name="<?php echo html_escape($package['name']); ?>" title="Duplicate Package">
+                                                <button type="button" class="btn btn-icon btn-light-info btn-sm duplicate-package-button" data-name="<?php echo html_escape($package['name']); ?>" title="Duplicate Package">
                                                     <i class="la la-copy"></i>
+                                                </button>
+                                            </form>
+                                            <form method="post" action="<?php echo base_url('Costing/Create_Revision'); ?>" class="d-inline revision-package-form">
+                                                <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
+                                                <button type="button" class="btn btn-icon btn-light-warning btn-sm revision-package-button" data-name="<?php echo html_escape($package['tour_code'] !== '' ? $package['tour_code'] : $package['name']); ?>" title="Create Revision">
+                                                    <i class="la la-code-branch"></i>
                                                 </button>
                                             </form>
                                             <form method="post" action="<?php echo base_url('Costing/Delete_Package'); ?>" class="d-inline delete-package-form">
@@ -170,6 +209,7 @@ $has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_stat
                                                     <i class="la la-trash"></i>
                                                 </button>
                                             </form>
+                                            </div>
                                         </td>
                                     </tr>
                                     <?php $count++; ?>
@@ -254,6 +294,52 @@ $has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_stat
                         form.submit();
                     }
                 });
+            });
+        });
+
+        document.querySelectorAll('.revision-package-button').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var form = button.closest('form');
+                var packageName = button.getAttribute('data-name') || 'this package';
+
+                if (typeof Swal === 'undefined') {
+                    if (confirm('Create a new revision of: ' + packageName + '?')) {
+                        form.submit();
+                    }
+                    return;
+                }
+
+                var swalWithBootstrapButtons = Swal.mixin({
+                    customClass: {
+                        confirmButton: 'btn btn-warning',
+                        cancelButton: 'btn btn-light-primary'
+                    },
+                    buttonsStyling: false
+                });
+
+                swalWithBootstrapButtons.fire({
+                    title: 'Create Revision of: ' + packageName + '?',
+                    text: 'This creates a new editable version (REVnn) that keeps the base quotation number, copied from the latest version.',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: 'Yes, Create Revision',
+                    cancelButtonText: 'Cancel',
+                    reverseButtons: true
+                }).then(function (result) {
+                    if (result.isConfirmed) {
+                        form.submit();
+                    }
+                });
+            });
+        });
+
+        document.querySelectorAll('.revision-history-toggle').forEach(function (toggle) {
+            toggle.addEventListener('click', function (e) {
+                e.preventDefault();
+                var target = document.getElementById(toggle.getAttribute('data-target'));
+                if (target) {
+                    target.style.display = (target.style.display === 'none' || target.style.display === '') ? 'block' : 'none';
+                }
             });
         });
     })();

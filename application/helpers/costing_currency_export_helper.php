@@ -17,6 +17,7 @@ if (!function_exists('costing_currency_export_columns')) {
         return array(
             array('No.', 'no'),
             array('Rate', 'rate'),
+            array('Buffer', 'buffer'),
             array('Bank Charges', 'bank_charges'),
             array('Updated By', 'updated_by_name'),
             array('Valid From', 'valid_from'),
@@ -62,6 +63,7 @@ if (!function_exists('costing_currency_export_rows')) {
                 ? (string) $history['from_currency_code']
                 : 'Currency';
             $rate = (float) (isset($history['rate']) ? $history['rate'] : 0);
+            $buffer = (float) (isset($history['buffer']) ? $history['buffer'] : 0);
             $bank_charges = (float) (isset($history['bank_charges_myr']) ? $history['bank_charges_myr'] : 0);
             $valid_from = isset($history['valid_from']) ? (string) $history['valid_from'] : '';
             $timestamp = $valid_from !== '' ? strtotime($valid_from) : false;
@@ -69,6 +71,7 @@ if (!function_exists('costing_currency_export_rows')) {
             $rows[] = array(
                 'no' => (string) $number,
                 'rate' => '1 ' . $code . ' = ' . number_format($rate, 6, '.', ',') . ' MYR',
+                'buffer' => number_format($buffer, 6, '.', ',') . ' MYR',
                 'bank_charges' => 'MYR ' . number_format($bank_charges, 2, '.', ','),
                 'updated_by_name' => isset($history['updated_by_name']) && $history['updated_by_name'] !== '' ? (string) $history['updated_by_name'] : '-',
                 'valid_from' => $timestamp ? strtoupper(date('d M Y H:i', $timestamp)) : ($valid_from !== '' ? $valid_from : 'No date'),

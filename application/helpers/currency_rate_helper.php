@@ -76,7 +76,7 @@ if (!function_exists('currency_rate_costing_updates')) {
      * @param array  $rates_map        [ 'USD' => 0.2234, ... ] MYR->foreign, positive
      * @param array  $currencies       rows [ ['id'=>.., 'code'=>..], ... ] incl. base
      * @param string $base_code        the base/home currency code (e.g. MYR)
-     * @param array  $existing_by_code [ 'USD' => ['valid_from'=>'Y-m-d H:i:s','bank_charges_myr'=>..], .. ]
+     * @param array  $existing_by_code [ 'USD' => ['valid_from'=>'Y-m-d H:i:s','bank_charges_myr'=>..,'buffer'=>..], .. ]
      * @param string $rate_date        Y-m-d these rates are dated (valid_from + "today" guard)
      * @return array { updates: payload[], updated: string[], skipped: string[] }
      */
@@ -115,6 +115,9 @@ if (!function_exists('currency_rate_costing_updates')) {
 
             $converted = round(1.0 / (float) $rates_map[$code], 8); // foreign -> MYR
             $bank = ($existing && isset($existing['bank_charges_myr'])) ? (float) $existing['bank_charges_myr'] : 0.0;
+            // The buffer is a per-currency manual setting, not market data, so carry
+            // the previous value forward rather than letting the nightly feed wipe it.
+            $buffer = ($existing && isset($existing['buffer'])) ? (float) $existing['buffer'] : 0.0;
 
             $result['updates'][] = [
                 'from_currency_id'    => (int) $c['id'],
@@ -122,6 +125,7 @@ if (!function_exists('currency_rate_costing_updates')) {
                 'unit_amount'         => 1,
                 'converted_amount'    => $converted,
                 'bank_charges_myr'    => $bank,
+                'buffer'              => $buffer,
                 'updated_by_admin_id' => null, // system / auto feed
                 'valid_from'          => $rate_date . ' 00:00:00',
             ];

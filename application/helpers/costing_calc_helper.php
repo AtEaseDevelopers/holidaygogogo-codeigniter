@@ -645,6 +645,34 @@ if (!function_exists('costing_row_myr')) {
     }
 }
 
+if (!function_exists('costing_effective_rate')) {
+    /**
+     * The exchange rate actually used to convert a foreign cost to MYR: the stored
+     * market rate PLUS an additive safety buffer (same units as the rate, i.e. MYR
+     * per 1 foreign unit). The buffer cushions rate movement between quoting and
+     * payment, so quoted costs sit slightly above the raw rate.
+     *
+     *   effective = round(rate + buffer, 8)
+     *
+     * A non-positive rate means there is no conversion for the pair, so the result
+     * is 0 regardless of buffer — a buffer alone must never fabricate a rate. A
+     * negative buffer is clamped to 0 (buffer is additive-only).
+     *
+     * @param float $rate   stored market rate (>=0)
+     * @param float $buffer additive buffer in the same units (>=0)
+     * @return float effective rate (8dp)
+     */
+    function costing_effective_rate($rate, $buffer)
+    {
+        $rate   = max(0.0, (float) $rate);
+        $buffer = max(0.0, (float) $buffer);
+        if ($rate <= 0) {
+            return 0.0;
+        }
+        return round($rate + $buffer, 8);
+    }
+}
+
 if (!function_exists('costing_supplier_payment_count')) {
     /**
      * How many wire transfers a supplier line is settled with: a DEPOSIT and then a

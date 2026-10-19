@@ -61,7 +61,7 @@ $currencies = [
 ];
 $existing = [
     'SGD' => ['valid_from' => '2026-08-11 09:00:00', 'bank_charges_myr' => 5.00], // manual, dated TODAY -> skip
-    'THB' => ['valid_from' => '2026-07-01 00:00:00', 'bank_charges_myr' => 2.50], // old -> update, carry 2.50
+    'THB' => ['valid_from' => '2026-07-01 00:00:00', 'bank_charges_myr' => 2.50, 'buffer' => 0.03], // old -> update, carry 2.50 + buffer 0.03
 ];
 $plan = currency_rate_costing_updates($all['rates'], $currencies, 'MYR', $existing, '2026-08-11');
 
@@ -77,6 +77,8 @@ $assertions['plan: to_currency is MYR id']      = ($byCode[2]['to_currency_id'] 
 $assertions['plan: unit_amount is 1']           = ((int) $byCode[2]['unit_amount'] === 1);
 $assertions['plan: new USD bank charges = 0']   = (abs((float) $byCode[2]['bank_charges_myr']) < 1e-9);
 $assertions['plan: THB carries prior charges']  = (abs((float) $byCode[4]['bank_charges_myr'] - 2.50) < 1e-9);
+$assertions['plan: THB carries prior buffer']   = (abs((float) $byCode[4]['buffer'] - 0.03) < 1e-9);
+$assertions['plan: new USD buffer = 0']         = (abs((float) $byCode[2]['buffer']) < 1e-9);
 $assertions['plan: THB inverted']               = (abs($byCode[4]['converted_amount'] - (1 / 8.0)) < 1e-9);
 $assertions['plan: auto rows are system-owned'] = ($byCode[2]['updated_by_admin_id'] === null);
 $assertions['plan: valid_from dated rate_date'] = ($byCode[2]['valid_from'] === '2026-08-11 00:00:00');

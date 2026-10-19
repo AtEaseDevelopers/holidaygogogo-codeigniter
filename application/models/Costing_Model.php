@@ -74,6 +74,8 @@ class Costing_Model extends CI_Model
                 cp.sales_admin_id,
                 sales_admin.Name AS sales_admin_name,
                 cp.tour_code,
+                cp.revision_root_id,
+                cp.revision_number,
                 cp.duration_days,
                 cp.duration_nights,
                 cp.description,
@@ -143,13 +145,18 @@ class Costing_Model extends CI_Model
                 $package['cost_type_summary'][$label] = true;
             }
             $package['cost_type_summary'] = array_keys($package['cost_type_summary']);
+            $package['revision_number'] = (int) $package['revision_number'];
             $total_template_rows += $package['template_item_count'];
             $total_booking_snapshots += $package['booking_count'];
         }
         unset($package);
 
+        // Group packages into revision families (latest row per family + its history).
+        $this->load->helper('costing_package_revision');
+        $grouped = costing_group_package_revisions($packages);
+
         return array(
-            'packages' => $packages,
+            'packages' => $grouped,
             'total_packages' => count($packages),
             'total_template_rows' => $total_template_rows,
             'total_booking_snapshots' => $total_booking_snapshots,
@@ -354,7 +361,7 @@ class Costing_Model extends CI_Model
             return 0;
         }
 
-        // Tour code is fully auto: assigned once on create (qu-YYMM-XXXX), never
+        // Tour code is fully auto: assigned once on create (QU-YYMM-XXXX), never
         // touched on edit (there is no tour_code field on the form anymore).
         if (!empty($package['id'])) {
             $this->db->where('id', (int) $package['id'])->update('costing_packages', $data);
@@ -385,7 +392,7 @@ class Costing_Model extends CI_Model
     }
 
     /**
-     * Next auto tour code (qu-YYMM-XXXX) for the current month. Sequence = highest
+     * Next auto tour code (QU-YYMM-XXXX) for the current month. Sequence = highest
      * existing code in this YYMM period + 1; hand-typed / other-period codes are
      * ignored. Format/parse live in the pure costing_tour_code helper.
      */
@@ -461,15 +468,106 @@ class Costing_Model extends CI_Model
             return 0;
         }
 
+        // A plain duplicate is a brand-new, independent package: fresh monthly tour
+        // code, "(Copy)" name, and its own revision family (reset the revision columns
+        // so it does not inherit the source's lineage).
+        return $this->Deep_Copy_Package($source, array(
+            'name' => trim((string) $source['name']) . ' (Copy)',
+            'tour_code' => $this->Next_Tour_Code(),
+            'revision_root_id' => null,
+            'revision_number' => 0,
+        ));
+    }
+
+    /**
+     * Create the next revision of a costing package. A revision keeps the base
+     * quotation number and appends "-REVnn" (QU-YYMM-XXXX-REV01, -REV02, ...), stays
+     * linked to the family via revision_root_id, and is a full, independently-editable
+     * deep copy. Revisions always branch from the family's latest version (linear
+     * history), regardless of which member was passed in. Returns the new package id
+     * (0 on failure).
+     */
+    public function Create_Revision($package_id)
+    {
+        $this->load->helper('costing_tour_code');
+
+        $package_id = (int) $package_id;
+        $source = $package_id > 0 ? $this->Read_Package($package_id) : null;
+        if (empty($source)) {
+            return 0;
+        }
+
+        // The family root owns the base tour code. The base itself has no root set, so
+        // it is its own root.
+        $root_id = !empty($source['revision_root_id']) ? (int) $source['revision_root_id'] : (int) $source['id'];
+        $root = $this->Read_Package($root_id);
+        if (empty($root)) {
+            return 0;
+        }
+        $base_code = costing_tour_code_base((string) $root['tour_code']);
+
+        // Gather every member of the family (root + its revisions) to find both the
+        // latest version (our copy source) and the next revision number.
+        $members = $this->db
+            ->where('id', $root_id)
+            ->or_where('revision_root_id', $root_id)
+            ->get('costing_packages')
+            ->result_array();
+        if (empty($members)) {
+            return 0;
+        }
+
+        $latest = null;
+        $existing_codes = array();
+        foreach ($members as $member) {
+            $existing_codes[] = (string) $member['tour_code'];
+            if ($latest === null || (int) $member['revision_number'] > (int) $latest['revision_number']) {
+                $latest = $member;
+            }
+        }
+
+        // Copy from the latest member (re-read via Read_Package so the row shape matches
+        // Deep_Copy_Package's expectations).
+        $copy_source = $this->Read_Package((int) $latest['id']);
+        if (empty($copy_source)) {
+            return 0;
+        }
+
+        $next = costing_tour_code_next_revision($existing_codes, $base_code);
+
+        return $this->Deep_Copy_Package($copy_source, array(
+            // Keep the base package name — a revision is the same quote, not a copy.
+            'name' => trim((string) $root['name']),
+            'tour_code' => costing_tour_code_revision($base_code, $next),
+            'revision_root_id' => $root_id,
+            'revision_number' => $next,
+        ));
+    }
+
+    /**
+     * Deep-copy a costing package and every record hanging off it into a new package,
+     * applying $header_overrides onto the package-header row. Shared by
+     * Duplicate_Package (fresh family) and Create_Revision (linked family). Returns the
+     * new package id (0 on failure). The snapshot gets no quotation token (minted on
+     * demand), so the source's public quotation link is never shared. Supplier
+     * quotation attachments (costing_quotation_files) are deliberately NOT copied — the
+     * uploaded files are physical, uploader-owned references to the original package.
+     */
+    private function Deep_Copy_Package($source, $header_overrides = array())
+    {
+        $package_id = (int) $source['id'];
+
         $this->db->trans_start();
 
-        // 1) The package row itself. Drop the identity/timestamp columns, give it a
-        //    copy name and a fresh auto tour code; everything else (customer, sales
-        //    person, itinerary notes, quote-level fields) carries over verbatim.
+        // 1) The package row itself. Drop the identity/timestamp columns, apply the
+        //    caller's header overrides (name, tour code, revision lineage); everything
+        //    else (customer, sales person, itinerary notes, quote-level fields) carries
+        //    over verbatim.
         $package_data = $source;
         unset($package_data['id'], $package_data['created_at'], $package_data['updated_at']);
-        $package_data['name'] = trim((string) $source['name']) . ' (Copy)';
-        $package_data['tour_code'] = $this->Next_Tour_Code();
+        foreach ($header_overrides as $column => $value) {
+            $package_data[$column] = $value;
+        }
         $this->db->insert('costing_packages', $package_data);
         $new_package_id = (int) $this->db->insert_id();
 
@@ -878,6 +976,8 @@ class Costing_Model extends CI_Model
         $unit_amount = round((float) $exchange_rate['unit_amount'], 8);
         $converted_amount = round((float) $exchange_rate['converted_amount'], 8);
         $bank_charges_myr = round((float) (isset($exchange_rate['bank_charges_myr']) ? $exchange_rate['bank_charges_myr'] : 0), 2);
+        // Additive safety margin on the rate (MYR per 1 foreign unit); never negative.
+        $buffer = round(max(0, (float) (isset($exchange_rate['buffer']) ? $exchange_rate['buffer'] : 0)), 8);
         if ($unit_amount <= 0 || $converted_amount <= 0) {
             return false;
         }
@@ -887,6 +987,7 @@ class Costing_Model extends CI_Model
             'to_currency_id' => (int) $exchange_rate['to_currency_id'],
             'unit_amount' => $unit_amount,
             'rate' => round($converted_amount / $unit_amount, 8),
+            'buffer' => $buffer,
             'bank_charges_myr' => max(0, $bank_charges_myr),
             'updated_by_admin_id' => !empty($exchange_rate['updated_by_admin_id']) ? (int) $exchange_rate['updated_by_admin_id'] : null,
             'valid_from' => $exchange_rate['valid_from'],
@@ -929,6 +1030,7 @@ class Costing_Model extends CI_Model
                 $existing_by_code[strtoupper($row['from_currency_code'])] = array(
                     'valid_from'       => $row['valid_from'],
                     'bank_charges_myr' => $row['bank_charges_myr'],
+                    'buffer'           => isset($row['buffer']) ? $row['buffer'] : 0,
                 );
             }
         }
@@ -1987,6 +2089,7 @@ class Costing_Model extends CI_Model
                 cer.to_currency_id,
                 cer.unit_amount,
                 cer.rate,
+                cer.buffer,
                 cer.bank_charges_myr,
                 cer.updated_by_admin_id,
                 ROUND(cer.unit_amount * cer.rate, 8) AS converted_amount,
@@ -2021,6 +2124,7 @@ class Costing_Model extends CI_Model
                 cer.to_currency_id,
                 cer.unit_amount,
                 cer.rate,
+                cer.buffer,
                 cer.bank_charges_myr,
                 cer.updated_by_admin_id,
                 ROUND(cer.unit_amount * cer.rate, 8) AS converted_amount,
@@ -2079,8 +2183,8 @@ class Costing_Model extends CI_Model
 
         // The RATE is date-sensitive: pick the record in force on/before the travel
         // date, falling back to the most recent record when the trip predates every
-        // rate.
-        $this->db->select('rate');
+        // rate. The buffer travels with the chosen rate row and is added on top.
+        $this->db->select('rate, buffer');
         $this->db->where('from_currency_id', $from_currency_id);
         $this->db->where('to_currency_id', $to_currency_id);
 
@@ -2094,7 +2198,7 @@ class Costing_Model extends CI_Model
 
         if (!$row) {
             $row = $this->db
-                ->select('rate')
+                ->select('rate, buffer')
                 ->where('from_currency_id', $from_currency_id)
                 ->where('to_currency_id', $to_currency_id)
                 ->order_by('valid_from', 'DESC')
@@ -2107,13 +2211,17 @@ class Costing_Model extends CI_Model
             return array('rate' => 0, 'bank_charges_myr' => 0);
         }
 
+        // The effective rate = stored market rate + additive buffer (safety margin
+        // on the exchange rate, set per currency on the Costing Currency page).
+        $this->load->helper('costing_calc');
+
         // The BANK CHARGE is a fixed per-currency operational fee, NOT a market rate,
         // so it always follows the latest configured value — regardless of travel
         // date. Otherwise a charge added today would silently drop off any quote
         // whose travel date (and therefore rate) predates the charge (e.g. IDR set up
         // on 09 Sep but travelling 31 Jul showed RM 0.09 with no "incl. bank").
         return array(
-            'rate' => (float) $row['rate'],
+            'rate' => costing_effective_rate($row['rate'], isset($row['buffer']) ? $row['buffer'] : 0),
             'bank_charges_myr' => $this->Read_Latest_Bank_Charges_Myr($from_currency_id, $to_currency_id),
         );
     }
