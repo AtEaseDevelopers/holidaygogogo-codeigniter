@@ -6,8 +6,8 @@ class Team extends MY_Controller
 		parent::__construct();
 		// Team settings are OWNER-only (Level 10): they drive the booking/payment
 		// listing scope, so managing them stays with the Owner.
-		if((int)$this->session->level !== 10) {
-			redirect('Dashboard');
+		if (function_exists('nav_block_view') && nav_block_view('team')) {
+			return;
 		}
 		$this->load->model('Team_Model');
 		$this->load->model('Universal_Model');

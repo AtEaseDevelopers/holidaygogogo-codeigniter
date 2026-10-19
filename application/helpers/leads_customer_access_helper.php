@@ -130,6 +130,12 @@ if ( ! function_exists('lc_can_view'))
     function lc_can_view($module)
     {
         $CI = & get_instance();
+        if (function_exists('nav_override_for')) {
+            $override = nav_override_for($module);
+            if ($override !== null) {
+                return $override['view'];
+            }
+        }
         return lc_resolve_access($module, $CI->session->userdata('level'), lc_current_rows())['view'];
     }
 }
@@ -139,6 +145,12 @@ if ( ! function_exists('lc_can_edit'))
     function lc_can_edit($module)
     {
         $CI = & get_instance();
+        if (function_exists('nav_override_for')) {
+            $override = nav_override_for($module);
+            if ($override !== null) {
+                return $override['edit'];
+            }
+        }
         return lc_resolve_access($module, $CI->session->userdata('level'), lc_current_rows())['edit'];
     }
 }

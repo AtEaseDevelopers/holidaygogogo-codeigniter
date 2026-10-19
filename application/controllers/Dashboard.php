@@ -11,11 +11,10 @@ class Dashboard extends MY_Controller
 		
 		parent::__construct();
 
-		// Sales agents (level 20) have no Dashboard access — they land on the
-		// booking listing instead. Guard every Dashboard action, not just
-		// index(), so direct URL hits to other methods are also blocked.
-		if($this->session->userdata('level') == 20) {
-			redirect('Booking');
+		// Sales agents historically had no Dashboard access. Visibility is now
+		// nav_can_view('dashboard') (legacy rule + Settings > Navigation Access).
+		if (function_exists('nav_block_view') && nav_block_view('dashboard')) {
+			return;
 		}
 
 		$this->load->model('Dashboard_Model');
@@ -32,9 +31,10 @@ class Dashboard extends MY_Controller
 
 	{	
 
-		// Make recalculate here so that everytime on load dashboard, will read, since Simon always see dashboard.
-
-		$this->recalculate->recalculate_all_bookings();
+		// Recalculate is a write. View-only staff can open Dashboard but must not mutate bookings.
+		if ( ! function_exists('nav_can_edit') || nav_can_edit('dashboard')) {
+			$this->recalculate->recalculate_all_bookings();
+		}
 
 
 

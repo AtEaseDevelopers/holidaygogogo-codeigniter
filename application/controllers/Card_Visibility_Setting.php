@@ -21,7 +21,7 @@ class Card_Visibility_Setting extends MY_Controller
 	// OWNER only — every other role is bounced to the dashboard.
 	private function Is_Owner()
 	{
-		return (int) $this->session->level === 10;
+		return function_exists('nav_can_view') ? nav_can_view('card_visibility') : ((int) $this->session->level === 10);
 	}
 
 	function index()

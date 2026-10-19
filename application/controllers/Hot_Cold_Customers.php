@@ -13,8 +13,7 @@ class Hot_Cold_Customers extends MY_Controller
 	function __construct()
 	{
 		parent::__construct();
-		if ((int) $this->session->level !== 10) {
-			redirect(base_url('Booking'));
+		if (function_exists('nav_block_view') && nav_block_view('hot_cold_customers')) {
 			return;
 		}
 		$this->load->model('Customer_Analysis_Model');

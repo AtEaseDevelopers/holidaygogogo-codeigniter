@@ -15,8 +15,7 @@ class Ai_Usage extends MY_Controller
 	{
 		parent::__construct();
 		// Owner-only: AI spend is sensitive cost data.
-		if ((int) $this->session->level !== 10) {
-			redirect(base_url('Booking'));
+		if (function_exists('nav_block_view') && nav_block_view('ai_usage')) {
 			return;
 		}
 		$this->load->model('Ai_Usage_Model');

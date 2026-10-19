@@ -5,7 +5,27 @@ class MY_Controller extends CI_Controller
 	{
 		parent::__construct();
 		if($this->session->has_userdata('admin_id') && $this->session->has_userdata('level')) {
-			if(in_array($this->session->level, [20, 25, 45, 60])) {
+			if (function_exists('nav_apply_request_flags')) {
+				nav_apply_request_flags();
+			}
+			$nav_module = function_exists('nav_module_for_request') ? nav_module_for_request() : null;
+			$nav_lookup_exempt = ($this->router->class === 'Customer'
+				&& function_exists('lc_customer_lookup_method')
+				&& lc_customer_lookup_method($this->router->fetch_method()));
+			if ($nav_module && ! $nav_lookup_exempt && (int) $this->session->level !== 10) {
+				if ( ! nav_can_view($nav_module)) {
+					redirect(nav_home_url());
+				}
+				if (nav_is_write_request() && ! nav_can_edit($nav_module)) {
+					if ($this->input->is_ajax_request()) {
+						$this->output->set_status_header(403);
+						echo json_encode(false);
+						exit;
+					}
+					redirect(nav_home_url());
+				}
+			}
+			if($nav_module === null && in_array($this->session->level, [20, 25, 45, 60])) {
 				// Product is gated per-admin: an Owner-granted AccessControl flag
 				// (VPR) overrides the level block. See setting_module_access_helper.
 				// Customer / Guest List / GHL Leads / Manual Leads have moved to the
