@@ -518,7 +518,7 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
             . '<li>Tourism tax</li>'
             . '<li>Activities &amp; Entrance fee other than stated (if applicable)</li>'
             . '<li>Services/ Item not mentioned in the program</li>'
-            . '<li>Travel insurance (strongly recommended to purchase)</li>'
+            . '<li><a href="https://www.holidaygogogo.com/travel-insurance-malaysia-domestic-oversea/" target="_blank" rel="noopener">Travel insurance</a> (strongly recommended to purchase)</li>'
             . '<li>Other expenses not stated in the "Includes" section</li>'
             . '<li>Super peak and Peak Season Surcharges (if applicable)</li></ul>'
             . '<p><strong>Important Notes</strong></p><ul>'
