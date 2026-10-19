@@ -3408,6 +3408,18 @@ if ( ! function_exists('competitor_ice_series_web_url'))
 	}
 }
 
+if ( ! function_exists('competitor_ice_land_tour_web_url'))
+{
+	/** The ICE land-tour API is displayed at /web/ground-tour/<code>. */
+	function competitor_ice_land_tour_web_url($json, $origin)
+	{
+		$d = is_string($json) ? json_decode($json, true) : $json;
+		if ( ! is_array($d)) { return ''; }
+		$code = isset($d['code']) ? trim((string) $d['code']) : '';
+		return $code === '' ? '' : rtrim((string) $origin, '/') . '/web/ground-tour/' . rawurlencode($code);
+	}
+}
+
 if ( ! function_exists('competitor_ice_series_items'))
 {
 	/**
@@ -3742,7 +3754,8 @@ if ( ! function_exists('competitor_ice_series_to_text'))
 				if (isset($t['guide_languages'])) {
 					$lang = is_array($t['guide_languages']) ? implode('/', array_map('strval', $t['guide_languages'])) : (string) $t['guide_languages'];
 				}
-				$seg = trim($dd . ($loc !== '' ? ' from ' . $loc : '') . ($pr !== '' ? ': ' . $pr : '') . ($lang !== '' ? ' (guide: ' . $lang . ')' : ''));
+				$price = $pr !== '' ? trim($g('price_currency') . ' ' . $pr) : '';
+				$seg = trim($dd . ($loc !== '' ? ' from ' . $loc : '') . ($price !== '' ? ': ' . $price : '') . ($lang !== '' ? ' (guide: ' . $lang . ')' : ''));
 				if ($seg !== '') { $deps[] = $seg; }
 			}
 			if ($deps) { $lines[] = "Departures & prices:\n- " . implode("\n- ", $deps); }
@@ -3770,9 +3783,10 @@ if ( ! function_exists('competitor_ice_series_to_text'))
 		if ($itin !== '') { $lines[] = "Itinerary:\n" . $itin; }
 
 		$files = array();
-		foreach (array('file_copy_url', 'file_url') as $fk) {
+		foreach (array('file_copy_url', 'file_url', 'file_cn_copy_url', 'cn_file_url') as $fk) {
 			if ( ! empty($d[$fk]) && is_string($d[$fk])) { $files[] = $d[$fk]; }
 		}
+		$files = array_values(array_unique($files));
 		if ($files) { $lines[] = 'Files: ' . implode(' , ', $files); }
 
 		$text = trim(implode("\n\n", array_filter(array_map('trim', $lines), 'strlen')));

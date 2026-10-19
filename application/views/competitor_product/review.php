@@ -91,6 +91,9 @@
                                         <?php echo $p['chars'] > 0 ? '' : ' <span class="label label-light-danger label-inline" style="font-size:10px;">empty</span>'; ?>
                                         <?php if ( ! empty($p['snippet'])) { ?><div class="text-muted" style="font-size:11px; margin-top:2px;"><?php echo htmlspecialchars($p['snippet']); ?></div><?php } ?>
                                         <?php if ( ! empty($p['url'])) { ?><div style="margin-top:2px;"><a href="<?php echo htmlspecialchars($p['url']); ?>" target="_blank" rel="noopener" class="text-muted" style="font-size:11px; word-break:break-all;"><i class="la la-external-link-alt mr-1"></i><?php echo htmlspecialchars($p['url']); ?></a></div><?php } ?>
+                                        <div style="font-size:11px; margin-top:3px;">
+                                            <a href="#crawled_text_modal" class="view-crawled-text" data-index="<?php echo (int) $p['i']; ?>" aria-controls="crawled_text_modal"><i class="la la-file-alt mr-1"></i>View crawled text</a>
+                                        </div>
                                     </td>
                                     <td class="cell-kind" style="text-align:center;">
                                         <?php if ($kind === 'package') { ?>
@@ -129,11 +132,58 @@
     </div>
 </div>
 
+<div class="modal fade" id="crawled_text_modal" tabindex="-1" role="dialog" aria-labelledby="crawled_text_title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="crawled_text_title">Crawled text</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            </div>
+            <div class="modal-body">
+                <p id="crawled_text_retrieved_at" class="text-muted" style="font-size:12px;"></p>
+                <pre id="crawled_text_body" style="white-space:pre-wrap; word-break:break-word; max-height:65vh; overflow:auto; background:#f7f9fc; border:1px solid #e4e6ef; border-radius:6px; padding:12px; font-size:13px;">Loading…</pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light font-weight-bold" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     var CA_IMG = '<?php echo base_url('assets/image/sweetalert.jpg') ?>';
     var JOB        = '<?php echo $job; ?>';
     var DELETE_URL = '<?php echo base_url('Competitor_Product/Delete_Crawl_Items') ?>';
     var EXCEL_URL  = '<?php echo base_url('Competitor_Product/Download_Crawl_Excel') ?>';
+
+    var crawledTextRequest = null;
+    $(document).on('click', '.view-crawled-text', function(event) {
+        event.preventDefault();
+        if (crawledTextRequest) crawledTextRequest.abort();
+        $('#crawled_text_title').text('Crawled text');
+        $('#crawled_text_retrieved_at').text('');
+        $('#crawled_text_body').text('Loading…');
+        $('#crawled_text_modal').modal('show');
+        crawledTextRequest = $.ajax({
+            url: '<?php echo base_url('Competitor_Product/Crawled_Text'); ?>',
+            method: 'GET', dataType: 'json', timeout: 30000,
+            data: { job: JOB, index: $(this).data('index') }
+        }).done(function(response) {
+            if (!response || !response.success) {
+                $('#crawled_text_body').text((response && response.message) || 'Could not load the saved text.');
+                return;
+            }
+            $('#crawled_text_title').text(response.title || 'Crawled text');
+            $('#crawled_text_retrieved_at').text('Content retrieved at: ' + (response.retrieved_at_label || 'Not recorded'));
+            $('#crawled_text_body').text(response.text || 'No text was saved for this product.');
+        }).fail(function(xhr, status) {
+            if (status === 'abort') return;
+            $('#crawled_text_body').text((xhr.responseJSON && xhr.responseJSON.message) || 'Could not load the saved text. Please try again.');
+        });
+    });
+    $('#crawled_text_modal').on('hidden.bs.modal', function() {
+        if (crawledTextRequest) crawledTextRequest.abort();
+    });
 
     // Bulk actions apply only to enabled checkboxes in the current search results.
     function selectableItems() {

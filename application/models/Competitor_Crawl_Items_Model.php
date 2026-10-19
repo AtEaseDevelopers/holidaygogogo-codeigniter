@@ -83,6 +83,20 @@ class Competitor_Crawl_Items_Model extends CI_Model
 			->get('competitor_crawl_items')->result();
 	}
 
+	/** Read one item's original saved text without loading every product in the crawl. */
+	function Read_Item($feature, $job_id, $idx)
+	{
+		return $this->db->select('idx, url, title, item_text' . ($this->supports_metadata() ? ', metadata_json' : ''))->where('feature', (string) $feature)
+			->where('job_id', (string) $job_id)->where('idx', (int) $idx)->get('competitor_crawl_items')->row();
+	}
+
+	/** An absent item in a stored job must not be resurrected from an older file. */
+	function Has_Job($feature, $job_id)
+	{
+		return $this->db->select('id')->where('feature', (string) $feature)
+			->where('job_id', (string) $job_id)->limit(1)->get('competitor_crawl_items')->num_rows() > 0;
+	}
+
 	/** Link a crawled item to the analysis row it produced (called after Analyse). */
 	function Mark_Analysed($feature, $job_id, $idx, $analysis_id)
 	{
