@@ -4,10 +4,13 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 /**
  * Pure helpers for the daily exchange-rate cron.
  *
- * Source: open.er-api.com (free, no key, refreshes once a day). The Cron
- * method fetches the JSON; these functions turn it into a clean rates map, the
- * /Costing/Currency update plan, and the run-log summary. No DB / no HTTP in
- * here so it stays unit-testable.
+ * Source: Bank Negara Malaysia public API (api.bnm.gov.my, free, no key,
+ * official MYR reference rates). The Cron method fetches the JSON; these
+ * functions turn it into a clean rates map, the /Costing/Currency update plan,
+ * and the run-log summary. No DB / no HTTP in here so it stays unit-testable.
+ *
+ * The legacy open.er-api.com parser is kept below for reference / its tests but
+ * is no longer wired into the cron.
  */
 
 if (!function_exists('currency_rate_parse_erapi_all')) {
@@ -52,6 +55,67 @@ if (!function_exists('currency_rate_parse_erapi_all')) {
             if ($rate > 0) {
                 $out['rates'][strtoupper((string) $code)] = $rate;
             }
+        }
+
+        $out['ok'] = !empty($out['rates']);
+        if (!$out['ok']) {
+            $out['error'] = 'no_positive_rates';
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('currency_rate_parse_bnm_all')) {
+    /**
+     * Parse a Bank Negara Malaysia "/public/exchange-rate" response into a rates
+     * map, used to auto-feed every currency on /Costing/Currency from one call.
+     *
+     * BNM quotes middle_rate as MYR per `unit` of the foreign currency (unit is
+     * 1 or 100), i.e. the FOREIGN->MYR rate is middle_rate / unit. The costing
+     * planner (currency_rate_costing_updates) expects a MYR->foreign map that it
+     * inverts, so we emit the reciprocal here — rates[CODE] = unit / middle_rate
+     * — keeping that planner (and its contract) unchanged across the switch.
+     *
+     * @param mixed $response  Raw JSON string OR decoded array.
+     * @return array {
+     *   ok        bool
+     *   error     string|null
+     *   base      string          always MYR (endpoint is MYR-quoted)
+     *   rate_date string          Y-m-d from meta.last_updated, today when unknown
+     *   rates     array           [ 'USD' => 0.2234, 'JPY' => 38.71, ... ] MYR->foreign, positive only
+     * }
+     */
+    function currency_rate_parse_bnm_all($response)
+    {
+        $out = ['ok' => false, 'error' => null, 'base' => 'MYR', 'rate_date' => '', 'rates' => []];
+
+        $data = is_array($response) ? $response : json_decode((string) $response, true);
+        if (!is_array($data)) {
+            $out['error'] = 'invalid_json';
+            return $out;
+        }
+        if (empty($data['data']) || !is_array($data['data'])) {
+            $out['error'] = 'no_rates';
+            return $out;
+        }
+
+        // Stamp date from meta.last_updated ("Y-m-d H:i:s"); for logging only.
+        $last = isset($data['meta']['last_updated']) ? (string) $data['meta']['last_updated'] : '';
+        $out['rate_date'] = ($last !== '' && strlen($last) >= 10) ? substr($last, 0, 10) : gmdate('Y-m-d');
+
+        foreach ($data['data'] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $code   = isset($row['currency_code']) ? strtoupper((string) $row['currency_code']) : '';
+            $unit   = isset($row['unit']) ? (float) $row['unit'] : 1.0;
+            $middle = isset($row['rate']['middle_rate']) ? (float) $row['rate']['middle_rate'] : 0.0;
+            if ($code === '' || $unit <= 0 || $middle <= 0) {
+                continue; // no usable middle rate for this currency
+            }
+            // FOREIGN->MYR = middle/unit; store its reciprocal (MYR->foreign) so
+            // the planner's 1/rate inversion lands back on middle/unit.
+            $out['rates'][$code] = $unit / $middle;
         }
 
         $out['ok'] = !empty($out['rates']);

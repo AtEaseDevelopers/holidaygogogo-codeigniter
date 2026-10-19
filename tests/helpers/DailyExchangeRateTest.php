@@ -3,18 +3,21 @@
  * Run with: php tests/helpers/DailyExchangeRateTest.php
  *
  * Locks the daily exchange-rate cron:
- *   - Cron::fetchExchangeRates() pulls open.er-api.com /v6/latest/MYR once a day.
- *   - currency_rate_parse_erapi_all() turns the JSON into a clean rates map.
+ *   - Cron::fetchExchangeRates() pulls Bank Negara Malaysia /public/exchange-rate once a day.
+ *   - currency_rate_parse_bnm_all() turns the JSON into a clean rates map
+ *     (middle_rate / unit, emitted as its MYR->foreign reciprocal).
+ *   - currency_rate_parse_erapi_all() (legacy source) is kept + still tested.
  *   - currency_rate_costing_updates() plans the /Costing/Currency refresh
  *     (invert MYR->foreign to foreign->MYR, skip same-day, carry bank charges).
  *   - currency_rate_run_log_summary() flattens the result for the audit trail.
  *   - Exchange_Rate_Model logs each run to exchange_rate_run_log.
  *
- * Four halves:
- *   1. Pure parse    (helper): the whole rates map, success / failure shapes.
- *   2. Pure plan     (helper): inversion / skip-today / carry-forward.
- *   3. Run log       (helper + SQLite): summary fields + start/finish rows.
- *   4. Source contract: Cron / models / migrations / README wire it correctly.
+ * Five halves:
+ *   1.  Pure parse    (helper): the whole er-api rates map, success / failure shapes.
+ *   1b. Pure parse    (helper): BNM rates map (unit division, middle_rate, round-trip).
+ *   2.  Pure plan     (helper): inversion / skip-today / carry-forward.
+ *   3.  Run log       (helper + SQLite): summary fields + start/finish rows.
+ *   4.  Source contract: Cron / models / migrations / README wire it correctly.
  */
 
 if (!defined('BASEPATH')) {
@@ -47,6 +50,41 @@ $assertions['all: garbage json -> not ok']      = (currency_rate_parse_erapi_all
 // No timestamp -> dates to today (UTC).
 $nots = currency_rate_parse_erapi_all(json_encode(['result' => 'success', 'base_code' => 'MYR', 'rates' => ['USD' => 0.22]]));
 $assertions['all: no ts -> today (UTC)']         = ($nots['ok'] === true && $nots['rate_date'] === gmdate('Y-m-d'));
+
+/* ------------------------------------------------------------------ *
+ * 1b) PURE PARSE  (Bank Negara Malaysia feed)                         *
+ * ------------------------------------------------------------------ */
+
+$bnmJson = json_encode([
+    'meta' => ['quote' => 'rm', 'session' => '1700', 'last_updated' => '2026-10-16 23:01:26', 'total_result' => 5],
+    'data' => [
+        ['currency_code' => 'USD', 'unit' => 1,   'rate' => ['date' => '2026-10-16', 'buying_rate' => 4.07, 'selling_rate' => 4.09, 'middle_rate' => 4.082]],
+        ['currency_code' => 'JPY', 'unit' => 100, 'rate' => ['date' => '2026-10-16', 'buying_rate' => 2.57, 'selling_rate' => 2.60, 'middle_rate' => 2.5834]],
+        ['currency_code' => 'BAD', 'unit' => 1,   'rate' => ['date' => '2026-10-16', 'buying_rate' => 0,    'selling_rate' => 0,    'middle_rate' => 0]],      // no middle -> skip
+        ['currency_code' => 'ZUN', 'unit' => 0,   'rate' => ['date' => '2026-10-16', 'middle_rate' => 5.0]],                                                   // zero unit -> skip
+    ],
+]);
+$bnm = currency_rate_parse_bnm_all($bnmJson);
+
+$assertions['bnm: ok + base MYR']               = ($bnm['ok'] === true && $bnm['base'] === 'MYR');
+$assertions['bnm: date from meta.last_updated'] = ($bnm['rate_date'] === '2026-10-16');
+$assertions['bnm: unit=1 -> 1/middle']          = (abs($bnm['rates']['USD'] - (1 / 4.082)) < 1e-9);
+$assertions['bnm: unit=100 -> 100/middle']      = (abs($bnm['rates']['JPY'] - (100 / 2.5834)) < 1e-9);
+$assertions['bnm: ignores buying/selling']      = (abs($bnm['rates']['USD'] - (1 / 4.082)) < 1e-9); // would differ if buying/selling used
+$assertions['bnm: drops zero middle_rate']      = (!isset($bnm['rates']['BAD']));
+$assertions['bnm: drops zero unit']             = (!isset($bnm['rates']['ZUN']));
+$assertions['bnm: accepts decoded array too']   = (currency_rate_parse_bnm_all(json_decode($bnmJson, true))['ok'] === true);
+$assertions['bnm: garbage json -> not ok']      = (currency_rate_parse_bnm_all('not json')['error'] === 'invalid_json');
+$assertions['bnm: empty data -> no_rates']      = (currency_rate_parse_bnm_all('{"meta":{},"data":[]}')['error'] === 'no_rates');
+$assertions['bnm: no last_updated -> today']    = (currency_rate_parse_bnm_all(json_encode(['data' => [['currency_code' => 'USD', 'unit' => 1, 'rate' => ['middle_rate' => 4.0]]]]))['rate_date'] === gmdate('Y-m-d'));
+
+// Round-trip: BNM map -> planner must store FOREIGN->MYR = middle/unit.
+$rtCurrencies = [['id' => 1, 'code' => 'MYR'], ['id' => 2, 'code' => 'USD'], ['id' => 3, 'code' => 'JPY']];
+$rtPlan = currency_rate_costing_updates($bnm['rates'], $rtCurrencies, 'MYR', [], '2026-10-16');
+$rtByCode = [];
+foreach ($rtPlan['updates'] as $u) { $rtByCode[$u['from_currency_id']] = $u; }
+$assertions['bnm round-trip: USD->MYR = 4.082']  = (abs($rtByCode[2]['converted_amount'] - 4.082) < 1e-9);
+$assertions['bnm round-trip: JPY->MYR = mid/100'] = (abs($rtByCode[3]['converted_amount'] - (2.5834 / 100)) < 1e-9);
 
 /* ------------------------------------------------------------------ *
  * 2) PURE PLAN  (costing auto-feed)                                   *
@@ -162,8 +200,9 @@ $assertions['log: last-completed skips failed'] = (abs((float) $lastGood['rate']
 $cron = @file_get_contents(__DIR__ . '/../../application/controllers/Cron.php');
 $assertions['cron: fetchExchangeRates() defined']  = (bool) preg_match('/function\s+fetchExchangeRates\s*\(/', (string) $cron);
 $assertions['cron: CLI-gated']                     = (bool) preg_match('/fetchExchangeRates[\s\S]{0,400}is_cli\s*\(/', (string) $cron);
-$assertions['cron: hits open.er-api MYR']          = (strpos((string) $cron, 'open.er-api.com/v6/latest/MYR') !== false);
-$assertions['cron: parses full rates map']         = (strpos((string) $cron, 'currency_rate_parse_erapi_all(') !== false);
+$assertions['cron: hits BNM exchange-rate']        = (strpos((string) $cron, 'api.bnm.gov.my/public/exchange-rate') !== false);
+$assertions['cron: sends BNM Accept header']       = (strpos((string) $cron, 'application/vnd.BNM.API.v1+json') !== false);
+$assertions['cron: parses full rates map']         = (strpos((string) $cron, 'currency_rate_parse_bnm_all(') !== false);
 $assertions['cron: feeds Costing rates']           = (strpos((string) $cron, 'Auto_Update_Rates_From_Feed(') !== false);
 // Rates are stored under the REAL run date, not the API's (lagging) date.
 $assertions['cron: stamps run date']               = (bool) preg_match("/\\\$storeDate\s*=\s*date\('Y-m-d'\)/", (string) $cron);

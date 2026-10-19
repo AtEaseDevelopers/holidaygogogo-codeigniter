@@ -442,12 +442,19 @@ class Cron extends CI_Controller
 
 		$base  = 'MYR';
 		$quote = 'USD';
-		$url   = 'https://open.er-api.com/v6/latest/MYR';
+		// Bank Negara Malaysia official MYR reference rates (free, no key). The
+		// Accept header is REQUIRED — BNM rejects the call without it. The no-
+		// session endpoint returns the latest published session (0900/1200/1700,
+		// business days only); run after 17:00 MYT for the final daily rate. On
+		// weekends/holidays it returns the last session, which we re-store under
+		// the run date — same graceful staleness as the old feed.
+		$url   = 'https://api.bnm.gov.my/public/exchange-rate';
 
 		$ch = curl_init();
 		curl_setopt($ch, CURLOPT_URL, $url);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Accept: application/vnd.BNM.API.v1+json'));
 		$raw   = curl_exec($ch);
 		$errNo = curl_errno($ch);
 		$err   = curl_error($ch);
@@ -459,7 +466,7 @@ class Cron extends CI_Controller
 			return;
 		}
 
-		$all = currency_rate_parse_erapi_all($raw);
+		$all = currency_rate_parse_bnm_all($raw);
 		if (!$all['ok']) {
 			$this->fetchExchangeRates_fallback($all['error']);
 			$this->Exchange_Rate_Model->Finish_Run_Log($runId, 'failed', array('error' => $all['error']));
