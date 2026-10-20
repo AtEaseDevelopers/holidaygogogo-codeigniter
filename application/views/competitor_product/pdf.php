@@ -14,6 +14,10 @@ $doc_title = $a->product_name ?: ($a->page_title ?: 'Competitor Product');
 // Flat list of product arrays (crawl → stored products; single → one from the
 // row) via the shared mapping used by the screen view + translator.
 $products = competitor_display_products($a);
+// Stable per-product code (same as the screen view + Excel). $ptotal drives the
+// -N suffix for a combined report; a single product stays unsuffixed.
+$ptotal   = count($products);
+$feature  = isset($a->feature) ? $a->feature : 'competitor';
 
 // Static UI labels + body font for the current language. $pdf_font carries a CJK
 // family first when rendering Chinese so glyphs aren't dropped.
@@ -190,11 +194,14 @@ $justified = function ($items) use ($flat) {
     $meals = $av($p, 'meals');
 ?>
 <div class="prod">
+    <?php $pcode = competitor_product_code((int) $a->id, $feature, $idx + 1, $ptotal); ?>
     <?php if($is_crawl) { ?>
-        <div class="prod-title"><?php echo ($idx + 1) . '. ' . htmlspecialchars($pname); ?></div>
+        <div class="prod-title"><?php echo ($idx + 1) . '. ' . htmlspecialchars($pname); ?><?php if($pcode !== '') { ?> <span style="font-weight:normal; color:#6082B6;">(<?php echo htmlspecialchars($pcode); ?>)</span><?php } ?></div>
         <?php if(preg_match('#^https?://#i', $sv($p, 'url'))) { ?>
             <div class="meta"><?php echo htmlspecialchars($lbl('source', 'Source:')); ?> <?php echo htmlspecialchars($sv($p, 'url')); ?></div>
         <?php } ?>
+    <?php } elseif($pcode !== '') { ?>
+        <div class="meta"><?php echo htmlspecialchars($lbl('product', 'Product')); ?> <?php echo htmlspecialchars($pcode); ?></div>
     <?php } ?>
 
     <!-- Headline facts -->

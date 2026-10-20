@@ -5,7 +5,7 @@
                 <div class="card-title">
                     <h3 class="card-label" style="color:#6082B6;">
                         <strong>Review Crawled Products</strong>
-                        <span class="text-muted font-weight-normal" style="font-size:12px;">&nbsp; <span id="found_count"><?php echo count($products); ?></span> found</span>
+                        <span class="text-muted font-weight-normal" style="font-size:12px;">&nbsp; <span id="found_count">0</span> found</span>
                     </h3>
                 </div>
                 <div class="card-toolbar">
@@ -22,15 +22,7 @@
                 </div>
             </div>
             <div class="card-body">
-                <?php if (isset($crawl_summary)) { ?>
-                    <div class="alert alert-light-info mb-4" style="font-size:13px;">
-                        <strong>Crawl Summary:</strong>
-                        <?php echo (int) $crawl_summary['total_records']; ?> crawled records &middot;
-                        <?php echo (int) $crawl_summary['duplicate_records']; ?> duplicate records &middot;
-                        <?php echo (int) $crawl_summary['unique_products']; ?> unique products remaining &middot;
-                        <?php echo (int) $crawl_summary['needs_review']; ?> need review
-                    </div>
-                <?php } ?>
+                <div id="crawl_summary"></div>
                 <form id="crawl_export_form" method="post" action="<?php echo base_url('Competitor_Product/Download_Crawl_Excel'); ?>" style="display:none;">
                     <input type="hidden" name="job" value="<?php echo htmlspecialchars($job); ?>">
                     <input type="hidden" name="indices" id="crawl_export_indices">
@@ -38,7 +30,7 @@
                 <?php if (empty($has_ai)) { ?>
                     <div class="alert alert-light-warning" style="font-size:12px;">AI analysis is currently unavailable. You can still review the crawled products below.</div>
                 <?php } ?>
-                <!-- Search: filter the crawled products by name / description / URL -->
+                <!-- Search: filter the crawled products by name / description / URL (server-side) -->
                 <div class="form-group mb-3" style="max-width:420px;">
                     <div class="input-group">
                         <div class="input-group-prepend">
@@ -54,6 +46,7 @@
                             <tr>
                                 <th style="width:40px; text-align:center;"><input type="checkbox" id="sel_all"></th>
                                 <th style="text-align:center;">No.</th>
+                                <th style="text-align:center;">Product Code</th>
                                 <th>Product</th>
                                 <th style="text-align:center;">Type</th>
                                 <th style="text-align:center;">AI Cost (USD)</th>
@@ -62,71 +55,21 @@
                             </tr>
                         </thead>
                         <tbody id="products_body">
-                            <?php if (empty($products)) { ?>
-                                <tr id="empty_row"><td colspan="7" style="text-align:center; padding:12px;">No products crawled</td></tr>
-                            <?php } else { $n = 1; foreach ($products as $p) {
-                                $analysed = ((int) $p['analysis_id'] > 0);
-                                $kind     = (isset($p['kind']) && $p['kind'] === 'package') ? 'package' : 'itinerary';
-                                $hay = strtolower(trim($p['title'] . ' ' . $p['snippet'] . ' ' . $p['url'] . ' ' . $p['duration'] . ' ' . $kind));
-                            ?>
-                                <tr class="product-row" data-search="<?php echo htmlspecialchars($hay); ?>"<?php echo $analysed ? ' style="background:#f6fbf7;"' : ''; ?>>
-                                    <td style="text-align:center;"><input type="checkbox" class="sel-item" value="<?php echo (int) $p['i']; ?>" <?php echo $p['chars'] > 0 ? '' : 'disabled'; ?>></td>
-                                    <td class="row-no" style="text-align:center; padding:10px 8px;"><?php echo $n; ?></td>
-                                    <td>
-                                        <strong style="font-size:13px;"><?php echo htmlspecialchars($p['title']); ?></strong>
-                                        <?php if (!empty($p['quality_flags'])) { ?>
-                                            <span class="label label-light-warning label-inline ml-1" style="font-size:10px;">Needs review</span>
-                                            <div class="text-warning" style="font-size:11px; margin-top:2px;"><?php echo htmlspecialchars(implode('; ', $p['quality_flags'])); ?></div>
-                                        <?php } ?>
-                                        <?php if (isset($p['source_records']) && count($p['source_records']) > 1) { ?>
-                                            <details class="text-muted" style="font-size:11px; margin-top:2px;">
-                                                <summary><?php echo count($p['source_records']); ?> source records for this product</summary>
-                                                <?php foreach ($p['source_records'] as $record) { ?>
-                                                    <div>Original: <a href="<?php echo htmlspecialchars($record['original_url']); ?>" target="_blank" rel="noopener"><?php echo htmlspecialchars($record['original_url']); ?></a></div>
-                                                    <div>Source: <?php echo htmlspecialchars($record['source_url']); ?></div>
-                                                <?php } ?>
-                                            </details>
-                                        <?php } ?>
-                                        <?php if ( ! empty($p['duration'])) { ?><span class="label label-light-info label-inline ml-1" style="font-size:10px;"><?php echo htmlspecialchars($p['duration']); ?></span><?php } ?>
-                                        <?php echo $p['chars'] > 0 ? '' : ' <span class="label label-light-danger label-inline" style="font-size:10px;">empty</span>'; ?>
-                                        <?php if ( ! empty($p['snippet'])) { ?><div class="text-muted" style="font-size:11px; margin-top:2px;"><?php echo htmlspecialchars($p['snippet']); ?></div><?php } ?>
-                                        <?php if ( ! empty($p['url'])) { ?><div style="margin-top:2px;"><a href="<?php echo htmlspecialchars($p['url']); ?>" target="_blank" rel="noopener" class="text-muted" style="font-size:11px; word-break:break-all;"><i class="la la-external-link-alt mr-1"></i><?php echo htmlspecialchars($p['url']); ?></a></div><?php } ?>
-                                        <div style="font-size:11px; margin-top:3px;">
-                                            <a href="#crawled_text_modal" class="view-crawled-text" data-index="<?php echo (int) $p['i']; ?>" aria-controls="crawled_text_modal"><i class="la la-file-alt mr-1"></i>View crawled text</a>
-                                        </div>
-                                    </td>
-                                    <td class="cell-kind" style="text-align:center;">
-                                        <?php if ($kind === 'package') { ?>
-                                            <span class="label label-light-primary label-inline" style="font-size:11px;" data-toggle="tooltip" title="Content mentions a price">Package</span>
-                                        <?php } else { ?>
-                                            <span class="label label-light-warning label-inline" style="font-size:11px;" data-toggle="tooltip" title="No price found — itinerary only">Itinerary</span>
-                                        <?php } ?>
-                                    </td>
-                                    <td class="cell-cost" style="text-align:center; font-size:12px;"><?php echo $analysed && $p['cost'] > 0 ? number_format((float) $p['cost'], 4) : '—'; ?></td>
-                                    <td class="cell-analysed" style="text-align:center; font-size:12px;">
-                                        <?php if ($analysed && ! empty($p['analysed_at'])) { ?>
-                                            <span style="font-size:11px;"><?php echo htmlspecialchars(date('d M Y, g:i A', strtotime($p['analysed_at']))); ?></span>
-                                        <?php } else { ?>
-                                            <span class="text-muted" style="font-size:11px;">—</span>
-                                        <?php } ?>
-                                    </td>
-                                    <td class="cell-action" style="text-align:center; white-space:nowrap;">
-                                        <?php if ($analysed) { ?>
-                                            <a href="<?php echo base_url('Competitor_Product/View?id=') . (int) $p['analysis_id']; ?>" class="btn btn-icon btn-light-success btn-sm mr-1" data-toggle="tooltip" title="View analysis">
-                                                <i class="la la-search"></i>
-                                            </a>
-                                        <?php } ?>
-                                        <a href="javascript:;" class="btn btn-icon btn-light-danger btn-sm delete-item"
-                                           data-index="<?php echo (int) $p['i']; ?>"
-                                           data-toggle="tooltip" title="Delete this crawled product">
-                                            <i class="la la-trash"></i>
-                                        </a>
-                                    </td>
-                                </tr>
-                            <?php $n++; } } ?>
+                            <tr id="loading_row"><td colspan="8" style="text-align:center; padding:12px;" class="text-muted">Loading…</td></tr>
                         </tbody>
                     </table>
                 </div>
+                <div class="row mt-3 align-items-center">
+                    <div class="col-sm-12 col-md-5">
+                        <div id="products_page_info" class="dataTables_info" role="status" aria-live="polite"></div>
+                    </div>
+                    <div class="col-sm-12 col-md-7">
+                        <nav class="dataTables_paginate paging_simple_numbers" aria-label="Product pages">
+                            <ul id="products_pagination" class="pagination justify-content-end"></ul>
+                        </nav>
+                    </div>
+                </div>
+                <div id="products_load_error" class="text-danger mt-2" style="font-size:12px;" role="alert"></div>
             </div>
         </div>
     </div>
@@ -155,6 +98,15 @@
     var JOB        = '<?php echo $job; ?>';
     var DELETE_URL = '<?php echo base_url('Competitor_Product/Delete_Crawl_Items') ?>';
     var EXCEL_URL  = '<?php echo base_url('Competitor_Product/Download_Crawl_Excel') ?>';
+    var LIST_URL   = '<?php echo base_url('Competitor_Product/Review_List') ?>';
+
+    // Paging is server-side: each request returns one page of rows. Selection is kept
+    // client-side as a set of product indices so checks persist across pages, and
+    // "select all" uses the full matching index list the server returns.
+    var revPage = 1, revPageSize = 25, revSearch = '';
+    var selected = {};        // idx -> true for every checked product (all pages)
+    var currentAll = [];      // every matching product index for the current search
+    var listRequest = null, listVersion = 0;
 
     var crawledTextRequest = null;
     $(document).on('click', '.view-crawled-text', function(event) {
@@ -185,31 +137,132 @@
         if (crawledTextRequest) crawledTextRequest.abort();
     });
 
-    // Bulk actions apply only to enabled checkboxes in the current search results.
-    function selectableItems() {
-        return $('#products_body tr.product-row:visible .sel-item:not(:disabled)');
-    }
-    function selectedItems() {
-        return selectableItems().filter(':checked');
-    }
+    // --- selection (spans pages via the `selected` set) ---------------------------
     function refreshSel() {
-        var total = selectableItems().length;
-        var n = selectedItems().length;
+        var n = Object.keys(selected).length;
         $('#sel_count').text(n);
         $('#del_count').text(n);
         $('#delete_selected').prop('disabled', n === 0);
         $('#download_excel_label').text(n > 0 ? 'Download Selected (' + n + ') (Excel)' : 'Download All (Excel)');
-        $('#sel_all').prop('checked', total > 0 && n === total)
-            .prop('indeterminate', n > 0 && n < total)
-            .prop('disabled', total === 0);
+        // "Select all" reflects the current search match across all pages.
+        var pickable = currentAll.filter(function(i) { return !disabledIdx[i]; });
+        var picked = pickable.filter(function(i) { return selected[i]; }).length;
+        $('#sel_all').prop('checked', pickable.length > 0 && picked === pickable.length)
+            .prop('indeterminate', picked > 0 && picked < pickable.length)
+            .prop('disabled', pickable.length === 0);
     }
-    $('#sel_all').on('change', function() {
-        selectableItems().prop('checked', this.checked);
+    // Indices whose checkbox is disabled (empty products) — never selectable.
+    var disabledIdx = {};
+    $(document).on('change', '.sel-item', function() {
+        var v = this.value;
+        if (this.checked) selected[v] = true; else delete selected[v];
         refreshSel();
     });
-    $(document).on('change', '.sel-item', refreshSel);
+    $('#sel_all').on('change', function() {
+        var on = this.checked;
+        currentAll.forEach(function(i) {
+            if (disabledIdx[i]) return;
+            if (on) selected[i] = true; else delete selected[i];
+        });
+        $('#products_body .sel-item:not(:disabled)').prop('checked', on);
+        refreshSel();
+    });
+
+    // --- paginated load -----------------------------------------------------------
+    function buildPager(paging) {
+        var pager = [];
+        var addPage = function(page, label, disabled, active, direction) {
+            pager.push('<li class="page-item' + (direction ? ' ' + direction : '') + (disabled ? ' disabled' : '') + (active ? ' active' : '') + '">'
+                + '<button type="button" class="page-link" data-products-page="' + page + '"'
+                + (disabled || active ? ' disabled' : '') + (active ? ' aria-current="page"' : '')
+                + (direction ? ' aria-label="' + (direction === 'previous' ? 'Previous page' : 'Next page') + '"' : '')
+                + '>' + label + '</button></li>');
+        };
+        addPage(paging.page - 1, '<i class="ki ki-arrow-back" aria-hidden="true"></i>', paging.page <= 1, false, 'previous');
+        var lastPage = 0;
+        for (var p = 1; p <= paging.pages; p++) {
+            if (p !== 1 && p !== paging.pages && Math.abs(p - paging.page) > 2) continue;
+            if (lastPage && p > lastPage + 1) pager.push('<li class="page-item disabled"><span class="page-link">…</span></li>');
+            addPage(p, p, false, p === paging.page);
+            lastPage = p;
+        }
+        addPage(paging.page + 1, '<i class="ki ki-arrow-next" aria-hidden="true"></i>', paging.page >= paging.pages, false, 'next');
+        $('#products_pagination').html(pager.join(''));
+    }
+    function renderSummary(s) {
+        if (!s) { $('#crawl_summary').empty(); return; }
+        var esc = function(v) { return $('<div>').text(v == null ? '' : v).html(); };
+        $('#crawl_summary').html('<div class="alert alert-light-info mb-4" style="font-size:13px;">'
+            + '<strong>Crawl Summary:</strong> '
+            + esc(s.total_records) + ' crawled records &middot; '
+            + esc(s.duplicate_records) + ' duplicate records &middot; '
+            + esc(s.unique_products) + ' unique products remaining &middot; '
+            + esc(s.needs_review) + ' need review</div>');
+    }
+    function renderReview(res) {
+        var paging = res.pagination || { page: 1, page_size: revPageSize, pages: 1, start: 0, end: 0 };
+        revPage = paging.page;
+        revPageSize = paging.page_size;
+        currentAll = res.all_indices || [];
+        $('#found_count').text(res.total || 0);
+        renderSummary(res.summary);
+
+        var $body = $('#products_body');
+        if (!res.rows_html) {
+            $body.html('<tr><td colspan="8" style="text-align:center; padding:12px;" class="text-muted">'
+                + (revSearch ? 'No products match your search.' : 'No products crawled') + '</td></tr>');
+        } else {
+            $body.html(res.rows_html);
+        }
+        // Rebuild the disabled-index map + restore checks from the selection set.
+        disabledIdx = {};
+        $body.find('.sel-item').each(function() {
+            if (this.disabled) disabledIdx[this.value] = true;
+            this.checked = !!selected[this.value];
+        });
+        $body.find('[data-toggle="tooltip"]').tooltip();
+
+        var info = 'Showing ' + (paging.start || 0).toLocaleString() + ' to ' + (paging.end || 0).toLocaleString()
+            + ' of ' + (res.found || 0).toLocaleString() + ' entries';
+        if ((res.found || 0) !== (res.total || 0)) info += ' (filtered from ' + (res.total || 0).toLocaleString() + ')';
+        $('#products_page_info').text(info);
+        buildPager(paging);
+        refreshSel();
+    }
+    function loadReview() {
+        var version = ++listVersion;
+        if (listRequest) listRequest.abort();
+        $('#products_load_error').text('');
+        listRequest = $.getJSON(LIST_URL, { job: JOB, page: revPage, page_size: revPageSize, search: revSearch })
+            .done(function(res) { if (version === listVersion) renderReview(res); })
+            .fail(function(xhr, status) {
+                if (status !== 'abort' && version === listVersion) {
+                    $('#products_load_error').text('Could not load products. Please try again.');
+                    $('#products_body').html('<tr><td colspan="8" style="text-align:center; padding:12px;" class="text-danger">Could not load products.</td></tr>');
+                }
+            })
+            .always(function() { if (version === listVersion) listRequest = null; });
+    }
+
+    var productSearchTimer = null;
+    $('#product_search').on('input', function() {
+        revSearch = $.trim($(this).val());
+        revPage = 1;
+        clearTimeout(productSearchTimer);
+        productSearchTimer = setTimeout(loadReview, 300);
+    });
+    $(document).on('click', '#products_pagination button[data-products-page]', function() {
+        if (this.disabled) return;
+        revPage = Number($(this).attr('data-products-page'));
+        loadReview();
+        // Start each new page from the top of the list instead of leaving the user
+        // scrolled down by the pager.
+        var card = $('.card-custom').offset();
+        $('html, body').animate({ scrollTop: (card ? card.top : 0) - 20 }, 200);
+    });
+
     $('#download_excel').on('click', function() {
-        var indices = selectedItems().map(function() { return this.value; }).get();
+        var indices = Object.keys(selected);
         if (!indices.length) {
             window.location.href = EXCEL_URL + '?job=' + encodeURIComponent(JOB);
             return;
@@ -217,14 +270,13 @@
         $('#crawl_export_indices').val(indices.join(','));
         document.getElementById('crawl_export_form').submit();
     });
+
     $(document).ready(function() {
-        refreshSel();
-        $('[data-toggle="tooltip"]').tooltip();
+        loadReview();
         resumeRun();   // re-attach to a background analysis left running before a refresh
 
         // Back button: return to wherever the user opened Review from (Jobs list or a
         // host's Timeline) instead of always dumping them on the fresh-crawl index.
-        // Only trust an in-app referrer; otherwise keep the index fallback href.
         var ref = document.referrer || '';
         if (ref.indexOf('/Competitor_Product') !== -1 && ref.indexOf('/Review') === -1) {
             $('#back_btn').attr('href', ref).on('click', function(e) {
@@ -233,42 +285,10 @@
         }
     });
 
-    // Renumber the visible No. column + refresh the "N found" count. Called after
-    // a delete or a search so the numbering always matches what's on screen.
-    function renumber() {
-        var n = 0;
-        $('#products_body tr.product-row:visible').each(function() {
-            $(this).find('.row-no').text(++n);
-        });
-        $('#found_count').text(n);
-    }
-
-    // Search: show only product rows whose name / description / URL matches, then
-    // renumber. A blank query shows everything.
-    $('#product_search').on('input', function() {
-        var q = $.trim($(this).val()).toLowerCase();
-        $('#products_body tr.product-row').each(function() {
-            var hay = String($(this).attr('data-search') || '');
-            var matches = q === '' || hay.indexOf(q) !== -1;
-            $(this).toggle(matches);
-            if (!matches) $(this).find('.sel-item').prop('checked', false);
-        });
-        renumber();
-        refreshSel();
-    });
-
-    // Resync selection / numbering / empty-state after rows are removed.
-    function afterRemoval() {
-        refreshSel();
-        renumber();
-        if (!$('#products_body tr.product-row').length && !$('#empty_row').length) {
-            $('#products_body').append('<tr id="empty_row"><td colspan="7" style="text-align:center; padding:12px;">No products crawled</td></tr>');
-        }
-    }
-
+    // --- delete -------------------------------------------------------------------
     // Confirm, then delete the given product indices from the crawl (and any saved
-    // analyses) and drop their rows. Shared by the per-row trash and Delete Selected.
-    function deleteProducts(indices, $rows, title, text) {
+    // analyses). On success, drop them from the selection and reload the current page.
+    function deleteProducts(indices, title, text) {
         Swal.mixin({ customClass: { confirmButton: 'btn btn-light-success m-2', cancelButton: 'btn btn-danger m-2' }, buttonsStyling: true })
             .fire({ width: 500, background: 'url(' + CA_IMG + ')', icon: 'warning',
                 title: title, text: text,
@@ -277,40 +297,32 @@
                 if (!a.isConfirmed) return;
                 $.post(DELETE_URL, { job: JOB, indices: indices }, function(res) {
                     if (res && res.success) {
-                        $rows.fadeOut(200);
-                        setTimeout(function() { $rows.remove(); afterRemoval(); }, 220);
+                        indices.forEach(function(i) { delete selected[i]; });
+                        loadReview();
                     } else {
                         Display_Message(CA_IMG, (res && res.message) ? res.message : 'Could not delete', null);
                     }
                 }, 'json').fail(function() { Display_Message(CA_IMG, 'Could not delete. Please try again', null); });
             });
     }
-
-    // Per-row delete.
     $(document).on('click', '.delete-item', function() {
-        var $row = $(this).closest('tr');
-        deleteProducts([$(this).data('index')], $row,
+        deleteProducts([String($(this).data('index'))],
             'Delete this crawled product?',
             'It is removed from this crawl. Any saved analysis for it is also deleted.');
     });
-
-    // Bulk delete of the checked products in the current search results.
     $('#delete_selected').click(function() {
-        var $checked = selectedItems();
-        var indices = $checked.map(function() { return $(this).val(); }).get();
+        var indices = Object.keys(selected);
         if (!indices.length) { Display_Message(CA_IMG, 'Select at least one product', null); return; }
-        deleteProducts(indices, $checked.closest('tr'),
+        deleteProducts(indices,
             'Delete ' + indices.length + ' selected product' + (indices.length > 1 ? 's' : '') + '?',
             'They are removed from this crawl. Any saved analyses for them are also deleted.');
     });
 
+    // --- analyse (background) -----------------------------------------------------
     var STATE_URL = '<?php echo base_url('Competitor_Product/Job_State') ?>?job=';
-    var VIEW_URL  = '<?php echo base_url('Competitor_Product/View?id=') ?>';
     var analysing = false;   // guards against starting a second run over the first
 
-    // Remember the in-flight analyse job (per crawl) so a page refresh can re-attach to
-    // it — the worker runs server-side and merges when done, but the "Analysing…" rows
-    // + progress poll live only in this page and would otherwise vanish on reload.
+    // Remember the in-flight analyse job (per crawl) so a page refresh can re-attach.
     var LS_KEY = 'cp_analyse_' + JOB;
     function saveRun(analyseJob, indices) {
         try { localStorage.setItem(LS_KEY, JSON.stringify({ job: analyseJob, indices: indices })); } catch (e) {}
@@ -320,53 +332,16 @@
         try { var r = JSON.parse(localStorage.getItem(LS_KEY)); return (r && r.job) ? r : null; } catch (e) { return null; }
     }
 
-    // Non-blocking toast (top-right, no backdrop) so the user can keep working — or
-    // leave the page entirely — while the analysis runs in the background.
+    // Non-blocking toast so the user can keep working while the analysis runs.
     var Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false });
-
-    // Format a 'Y-m-d H:i:s' timestamp the same way the server renders "Analysed On".
-    function fmtWhen(s) {
-        var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(String(s || ''));
-        if (!m) return s || '';
-        var d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
-        var mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-        var h = d.getHours(), ap = h < 12 ? 'AM' : 'PM', h12 = (h % 12) || 12;
-        return d.getDate() + ' ' + mon + ' ' + d.getFullYear() + ', ' + h12 + ':' + ('0' + d.getMinutes()).slice(-2) + ' ' + ap;
-    }
 
     function $rowFor(idx) { return $('.sel-item[value="' + idx + '"]').closest('tr'); }
 
-    // Show a spinner in the "Analysed On" cell of each in-flight row. On a resume after
-    // refresh, rows the worker already finished are re-rendered as analysed by PHP —
-    // skipParkAnalysed keeps their View link/timestamp instead of covering it with a spinner.
-    function markPending(indices, skipAnalysed) {
+    // Spinner in the "Analysed On" cell of each in-flight row that is on the current page.
+    function markPending(indices) {
         $.each(indices, function(_, idx) {
-            var $row = $rowFor(idx);
-            if (skipAnalysed && $row.find('.cell-action .btn-light-success').length) return;
-            $row.find('.cell-analysed').html('<span class="text-primary" style="font-size:11px;"><i class="la la-spinner la-spin mr-1"></i>Analysing…</span>');
+            $rowFor(idx).find('.cell-analysed').html('<span class="text-primary" style="font-size:11px;"><i class="la la-spinner la-spin mr-1"></i>Analysing…</span>');
         });
-    }
-    // Restore a row's "Analysed On" cell to a dash (used when a run fails to start / errors).
-    function clearPending(indices) {
-        $.each(indices, function(_, idx) {
-            var $c = $rowFor(idx).find('.cell-analysed');
-            if ($c.find('.la-spinner').length) $c.html('<span class="text-muted" style="font-size:11px;">—</span>');
-        });
-    }
-
-    // Fold a finished result into its row in place: cost, analysed-on, a View link, and
-    // the analysed row tint — no full-page reload, so search/scroll are preserved.
-    function applyResult(idx, r) {
-        var $row = $rowFor(idx);
-        if (!$row.length || !r) return;
-        $row.css('background', '#f6fbf7');
-        $row.find('.cell-cost').text(r.cost > 0 ? (+r.cost).toFixed(4) : '—');
-        $row.find('.cell-analysed').html('<span style="font-size:11px;">' + fmtWhen(r.at) + '</span>');
-        var $act = $row.find('.cell-action');
-        if (r.id && !$act.find('.btn-light-success').length) {
-            $act.prepend('<a href="' + VIEW_URL + r.id + '" class="btn btn-icon btn-light-success btn-sm mr-1" data-toggle="tooltip" title="View analysis"><i class="la la-search"></i></a>');
-            $act.find('[data-toggle="tooltip"]').tooltip();
-        }
     }
 
     function pollAnalyse(analyseJob, indices) {
@@ -377,18 +352,14 @@
                     clearInterval(t);
                     clearRun();
                     analysing = false;
-                    $('#analyse_selected').prop('disabled', <?php echo empty($has_ai) ? 'true' : 'false'; ?>).html('<i class="la la-robot"></i> Analyse Selected (<span id="sel_count">' + selectedItems().length + '</span>)');
+                    $('#analyse_selected').prop('disabled', <?php echo empty($has_ai) ? 'true' : 'false'; ?>).html('<i class="la la-robot"></i> Analyse Selected (<span id="sel_count">' + Object.keys(selected).length + '</span>)');
                     if (res.state === 'done') {
-                        var results = res.results || {}, applied = 0;
-                        $.each(indices, function(_, idx) {
-                            if (results[idx]) { applyResult(idx, results[idx]); applied++; }
-                        });
-                        clearPending(indices);   // any selected item OpenAI returned nothing for
+                        var applied = res.results ? Object.keys(res.results).length : 0;
                         Toast.fire({ icon: 'success', title: applied + ' product' + (applied === 1 ? '' : 's') + ' analysed', timer: 4000, timerProgressBar: true });
                     } else {
-                        clearPending(indices);
                         Toast.fire({ icon: 'error', title: (res.message || 'Analysis failed'), timer: 6000, timerProgressBar: true });
                     }
+                    loadReview();   // refresh the current page so analysed status/cost show
                 } else {
                     Toast.update({ title: res.message || 'Analysing…' });
                 }
@@ -396,22 +367,20 @@
         }, 2500);
     }
 
-    // On page load, if a background analyse job for this crawl was left running before a
-    // refresh, re-mark its pending rows and resume polling. The poll self-heals: a job
-    // that finished (or was deleted) returns done/unknown, folds in results, and clears.
+    // On load, re-attach to a background analyse job for this crawl left running before a refresh.
     function resumeRun() {
         var run = loadRun();
         if (!run || !run.job || !(run.indices && run.indices.length)) return;
         analysing = true;
         $('#analyse_selected').prop('disabled', true).html('<i class="la la-spinner la-spin"></i> Analysing in background…');
-        markPending(run.indices, true);
+        markPending(run.indices);
         Toast.fire({ icon: 'info', title: 'Resuming background analysis…' });
         pollAnalyse(run.job, run.indices);
     }
 
     $('#analyse_selected').click(function() {
         if (analysing) return;
-        var indices = selectedItems().map(function() { return $(this).val(); }).get();
+        var indices = Object.keys(selected);
         if (!indices.length) { Display_Message(CA_IMG, 'Select at least one product', null); return; }
         var $btn = $(this);
         analysing = true;
@@ -420,7 +389,7 @@
         $.ajax({
             url: '<?php echo base_url('Competitor_Product/Analyze_Selected') ?>',
             type: 'post', dataType: 'json',
-            data: { job: '<?php echo $job; ?>', indices: indices },
+            data: { job: JOB, indices: indices },
             success: function(res) {
                 if (res && res.success && res.job) {
                     saveRun(res.job, indices);
@@ -428,16 +397,16 @@
                     pollAnalyse(res.job, indices);
                 } else {
                     analysing = false;
-                    clearPending(indices);
-                    $btn.prop('disabled', false).html('<i class="la la-robot"></i> Analyse Selected (<span id="sel_count">' + selectedItems().length + '</span>)');
+                    $btn.prop('disabled', false).html('<i class="la la-robot"></i> Analyse Selected (<span id="sel_count">' + Object.keys(selected).length + '</span>)');
                     Display_Message(CA_IMG, (res && res.message) ? res.message : 'Could not start analysis', null);
+                    loadReview();
                 }
             },
             error: function() {
                 analysing = false;
-                clearPending(indices);
-                $btn.prop('disabled', false).html('<i class="la la-robot"></i> Analyse Selected (<span id="sel_count">' + selectedItems().length + '</span>)');
+                $btn.prop('disabled', false).html('<i class="la la-robot"></i> Analyse Selected (<span id="sel_count">' + Object.keys(selected).length + '</span>)');
                 Display_Message(CA_IMG, 'Could not start analysis. Please try again', null);
+                loadReview();
             }
         });
     });

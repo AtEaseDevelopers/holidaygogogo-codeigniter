@@ -4843,6 +4843,36 @@ if ( ! function_exists('competitor_pdf_filename'))
 	}
 }
 
+if ( ! function_exists('competitor_product_code'))
+{
+	/**
+	 * Stable, human-friendly code for one analysed product, derived from its saved
+	 * competitor_analyses row id — so the same product always carries the same code
+	 * across the Review table, the View page, the PDF and every Excel export (unlike
+	 * the old sequential "No." which was just a row position).
+	 *
+	 * Format: feature prefix + 6-digit zero-padded id — competitor -> "CP-000123",
+	 * our_product -> "OP-000123". A combined-report analysis that expands to several
+	 * products suffixes each with its 1-based index ("CP-000123-1", "CP-000123-2");
+	 * a single-product analysis gets no suffix. Returns '' for a non-positive id
+	 * (an unanalysed / not-yet-saved row has no code). Pure — no DB/filesystem.
+	 *
+	 * @param int    $id      competitor_analyses.id
+	 * @param string $feature 'competitor' (default) or 'our_product'
+	 * @param int    $index   1-based product position within the analysis
+	 * @param int    $total   number of products the analysis expands to
+	 */
+	function competitor_product_code($id, $feature = 'competitor', $index = 0, $total = 1)
+	{
+		$id = (int) $id;
+		if ($id <= 0) { return ''; }
+		$prefix = ($feature === 'our_product') ? 'OP' : 'CP';
+		$code = $prefix . '-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+		if ((int) $total > 1) { $code .= '-' . (int) $index; }
+		return $code;
+	}
+}
+
 if ( ! function_exists('competitor_download_content_disposition'))
 {
 	/** Preserve Unicode download names via filename*, with a safe ASCII fallback. */
@@ -5638,6 +5668,92 @@ if ( ! function_exists('competitor_items_from_db_rows'))
 	}
 }
 
+if ( ! function_exists('competitor_review_light_row'))
+{
+	/**
+	 * Project one prepared crawl item into the lightweight row the Review page lists —
+	 * title, url, a short snippet, type, char count, analysis status + a lowercased
+	 * search "hay" — WITHOUT the (large) crawled text, so a page of rows is cheap to
+	 * render. $analysed_entry is the matching entry from the status file's analysed map
+	 * (id/cost/at), or empty. Pure.
+	 */
+	function competitor_review_light_row($i, $item, $analysed_entry = array())
+	{
+		$item  = is_array($item) ? $item : array();
+		$text  = isset($item['text']) ? (string) $item['text'] : '';
+		$url   = isset($item['url']) ? (string) $item['url'] : '';
+		$title = (isset($item['title']) && trim((string) $item['title']) !== '')
+			? trim((string) $item['title'])
+			: competitor_item_title($text, $url);
+		$meta  = competitor_item_meta($text, $title);
+		$kind  = competitor_item_kind($text) === 'package' ? 'package' : 'itinerary';
+		$a     = is_array($analysed_entry) ? $analysed_entry : array();
+		$block = isset($item['crawl_metadata']) && is_array($item['crawl_metadata']) ? $item['crawl_metadata'] : array();
+		$records = array();
+		foreach (isset($block['source_records']) && is_array($block['source_records']) ? $block['source_records'] : array() as $rec) {
+			$records[] = array(
+				'original_url' => (string) (isset($rec['original_url']) ? $rec['original_url'] : ''),
+				'source_url'   => (string) (isset($rec['source_url']) ? $rec['source_url'] : ''),
+			);
+		}
+		$duration = (string) $meta['duration'];
+		$snippet  = (string) $meta['snippet'];
+		return array(
+			'i'              => (int) $i,
+			'url'            => $url,
+			'title'          => $title,
+			'duration'       => $duration,
+			'snippet'        => $snippet,
+			'kind'           => $kind,
+			'chars'          => mb_strlen($text, 'UTF-8'),
+			'analysis_id'    => isset($a['id']) ? (int) $a['id'] : 0,
+			'cost'           => isset($a['cost']) ? (float) $a['cost'] : 0.0,
+			'analysed_at'    => isset($a['at']) ? (string) $a['at'] : '',
+			'quality_flags'  => isset($block['quality_flags']) && is_array($block['quality_flags']) ? array_values($block['quality_flags']) : array(),
+			'source_records' => $records,
+			'hay'            => strtolower(trim($title . ' ' . $snippet . ' ' . $url . ' ' . $duration . ' ' . $kind)),
+		);
+	}
+}
+
+if ( ! function_exists('competitor_review_paginate'))
+{
+	/**
+	 * Filter the Review product list by a search string (matched against each row's
+	 * 'hay') then return the requested page. page_size defaults to 25 (only accepts a
+	 * sane positive size); page is clamped into range. Returns the page rows, the FULL
+	 * matching index list (so "select all" can span pages), and pagination facts. Pure.
+	 */
+	function competitor_review_paginate($products, $search, $page, $page_size)
+	{
+		$products = is_array($products) ? array_values($products) : array();
+		$search   = is_string($search) ? trim($search) : '';
+		if ($search !== '') {
+			$matched = array();
+			foreach ($products as $p) {
+				$hay = isset($p['hay']) ? (string) $p['hay'] : '';
+				if (mb_stripos($hay, $search, 0, 'UTF-8') !== false) { $matched[] = $p; }
+			}
+		} else {
+			$matched = $products;
+		}
+		$found     = count($matched);
+		$page_size = ((int) $page_size > 0 && (int) $page_size <= 200) ? (int) $page_size : 25;
+		$pages     = max(1, (int) ceil($found / $page_size));
+		$page      = min($pages, max(1, (int) $page));
+		$offset    = ($page - 1) * $page_size;
+		$rows      = array_slice($matched, $offset, $page_size);
+		$all_indices = array();
+		foreach ($matched as $p) { $all_indices[] = (int) (isset($p['i']) ? $p['i'] : 0); }
+		return array(
+			'rows' => $rows, 'found' => $found, 'total' => count($products),
+			'page' => $page, 'page_size' => $page_size, 'pages' => $pages,
+			'start' => $found > 0 ? $offset + 1 : 0, 'end' => $offset + count($rows),
+			'all_indices' => $all_indices,
+		);
+	}
+}
+
 if ( ! function_exists('competitor_archived_host_rows'))
 {
 	/**
@@ -5757,6 +5873,62 @@ if ( ! function_exists('competitor_job_archived_rows'))
 				'analysed'    => 0,
 				'cost_total'  => (float) (isset($r->cost_total) ? $r->cost_total : 0),
 				'keyword'     => (string) (isset($r->keyword) ? $r->keyword : ''),
+				'ts'          => $ts,
+				'_sort'       => strtotime($ts) ?: 0,
+			);
+		}
+		return $rows;
+	}
+}
+
+if ( ! function_exists('competitor_job_timeline_rows'))
+{
+	/**
+	 * Per-RUN Timeline rows rebuilt from the durable crawl-job records for ONE host, so a
+	 * finished/errored crawl still shows on the Timeline after its transient status files
+	 * are cleaned up (the Timeline otherwise reads only those files). One row per job_id,
+	 * EXCLUDING any job already represented by a live status file ($covered_job_ids) so a
+	 * running / just-finished run from disk is never duplicated. Only settled (done/error)
+	 * records are rebuilt — live progress stays sourced from the files. Same row shape as a
+	 * single crawl run in Timeline_List. Pure. Caller sorts by '_sort'.
+	 */
+	function competitor_job_timeline_rows($records, $host, $covered_job_ids)
+	{
+		$host = strtolower(trim((string) $host));
+		if ($host === '') {
+			return array();
+		}
+		$covered = array();
+		foreach ((is_array($covered_job_ids) ? $covered_job_ids : array()) as $j) {
+			$k = (string) $j;
+			if ($k !== '') { $covered[$k] = true; }
+		}
+		$rows = array();
+		foreach ((is_array($records) ? $records : array()) as $r) {
+			$r      = (object) $r;
+			$rhost  = strtolower((string) (isset($r->host) ? $r->host : ''));
+			$job_id = (string) (isset($r->job_id) ? $r->job_id : '');
+			$state  = (string) (isset($r->state) ? $r->state : '');
+			if ($rhost !== $host || $job_id === '' || isset($covered[$job_id])
+				|| ! in_array($state, array('done', 'error'), true)) {
+				continue;
+			}
+			$cnt = (int) (isset($r->product_count) ? $r->product_count : 0);
+			$ts  = (string) (isset($r->created_at) ? $r->created_at : '');
+			$rows[] = array(
+				'job'         => $job_id,
+				'is_archived' => true,
+				'url'         => (string) (isset($r->src_url) ? $r->src_url : ''),
+				'name'        => (string) (isset($r->competitor_name) ? $r->competitor_name : ''),
+				'state'       => $state,
+				'mode'        => 'crawl',
+				'message'     => '',
+				'reviewable'  => ($state === 'done' && $cnt > 0),
+				'count'       => $cnt,
+				'analysed'    => 0,
+				'cost_total'  => (float) (isset($r->cost_total) ? $r->cost_total : 0),
+				'keyword'     => (string) (isset($r->keyword) ? $r->keyword : ''),
+				'ai_crawl'    => ! empty($r->ai_crawl),
 				'ts'          => $ts,
 				'_sort'       => strtotime($ts) ?: 0,
 			);

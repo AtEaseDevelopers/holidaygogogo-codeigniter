@@ -307,7 +307,14 @@ function competitor_prepare_crawl_items($items, $source_url = '', $analysed = ar
         $meta = $group['meta'];
         $retrieved_at = competitor_item_retrieved_at(array('crawl_metadata' => $meta));
         if ($retrieved_at !== '') { $meta['retrieved_at'] = $retrieved_at; }
-        $group['item']['text'] = competitor_clean_product_text($group['item']['text'], isset($group['item']['title']) ? $group['item']['title'] : '');
+        // Each member was already cleaned in the input loop above. Only a MERGED group's
+        // concatenated text needs re-cleaning (to drop headings repeated across the joined
+        // sources); for a single-source product the clean is idempotent, so skipping it
+        // avoids re-running the expensive clean over every product's full text for no
+        // change in output — the dominant cost on a large crawl.
+        if (count($group['members']) > 1) {
+            $group['item']['text'] = competitor_clean_product_text($group['item']['text'], isset($group['item']['title']) ? $group['item']['title'] : '');
+        }
         $meta['quality_flags'] = competitor_product_quality_flags($group['item']['text']);
         if (!empty($meta['identity_conflict'])) { $meta['quality_flags'][] = 'Regional itinerary details differ; review before combining'; }
         if ($meta['quality_flags']) { $needs_review++; }

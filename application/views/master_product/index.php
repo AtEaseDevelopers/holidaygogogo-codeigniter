@@ -1,12 +1,22 @@
 <?php
-// Distinct, non-empty destinations for the Destination filter dropdown.
-$destinations = array();
+// The Destination filter follows the per-analysis individual cities (details_json → cities),
+// NOT the free-form `destination` label (which lumps several cities into one string). Build a
+// per-record city list (reused on each row) + a deduped, sorted union for the dropdown options.
+$row_cities = array();   // record id => array of individual city names
+$cities     = array();   // dedup set of every city across all records
 foreach($records as $r) {
-    $d = trim((string) $r->destination);
-    if($d !== '') { $destinations[$d] = true; }
+    $details = json_decode((string) $r->details_json, true);
+    $list    = (is_array($details) && isset($details['cities']) && is_array($details['cities'])) ? $details['cities'] : array();
+    $clean   = array();
+    foreach($list as $c) {
+        $c = trim((string) $c);
+        if($c !== '') { $clean[$c] = true; $cities[$c] = true; }
+    }
+    $row_cities[(int) $r->id] = array_keys($clean);
 }
-$destinations = array_keys($destinations);
-sort($destinations);
+$cities = array_keys($cities);
+natcasesort($cities);
+$cities = array_values($cities);
 ?>
 <div class="d-flex flex-column-fluid">
     <div class="container-fluid">
@@ -49,8 +59,7 @@ sort($destinations);
                                     <div class="col-md-3">
                                         <div class="form-group">
                                             <label>Source</label>
-                                            <select id="mp_source" class="form-control selectpicker" title="--ALL SOURCES--">
-                                                <option value="">All</option>
+                                            <select id="mp_source" class="form-control selectpicker" multiple data-selected-text-format="count > 1" title="--ALL SOURCES--">
                                                 <option value="our_product">Our Product</option>
                                                 <option value="competitor">Competitor</option>
                                             </select>
@@ -59,8 +68,7 @@ sort($destinations);
                                     <div class="col-md-3">
                                         <div class="form-group">
                                             <label>Status</label>
-                                            <select id="mp_status" class="form-control selectpicker" title="--ALL STATUSES--">
-                                                <option value="">All</option>
+                                            <select id="mp_status" class="form-control selectpicker" multiple data-selected-text-format="count > 1" title="--ALL STATUSES--">
                                                 <option value="done">Analysed</option>
                                                 <option value="error">Error</option>
                                             </select>
@@ -69,10 +77,9 @@ sort($destinations);
                                     <div class="col-md-3">
                                         <div class="form-group">
                                             <label>Destination</label>
-                                            <select id="mp_dest" class="form-control selectpicker" data-live-search="true" data-live-search-style="contains" title="--ALL DESTINATIONS--">
-                                                <option value="">All</option>
-                                                <?php foreach($destinations as $d) { ?>
-                                                    <option value="<?php echo htmlspecialchars($d); ?>"><?php echo htmlspecialchars($d); ?></option>
+                                            <select id="mp_dest" class="form-control selectpicker" multiple data-actions-box="true" data-selected-text-format="count > 1" data-live-search="true" data-live-search-style="contains" title="--ALL DESTINATIONS--">
+                                                <?php foreach($cities as $c) { ?>
+                                                    <option value="<?php echo htmlspecialchars($c); ?>"><?php echo htmlspecialchars($c); ?></option>
                                                 <?php } ?>
                                             </select>
                                         </div>
@@ -126,7 +133,7 @@ sort($destinations);
                             <tr class="mp-row"
                                 data-source="<?php echo $is_our ? 'our_product' : 'competitor'; ?>"
                                 data-status="<?php echo ($r->status === 'error') ? 'error' : 'done'; ?>"
-                                data-dest="<?php echo htmlspecialchars(trim((string) $r->destination)); ?>"
+                                data-cities="<?php echo htmlspecialchars(implode('|', $row_cities[(int) $r->id])); ?>"
                                 data-search="<?php echo htmlspecialchars($search); ?>">
                                 <td style="text-align:center;"><input type="checkbox" class="mp-select" value="<?php echo (int) $r->id; ?>" aria-label="Select <?php echo htmlspecialchars($name); ?>"></td>
                                 <td class="mp-no" style="text-align:center; padding:12px 8px;"><?php echo $no; ?></td>
@@ -141,6 +148,16 @@ sort($destinations);
                                         <span class="label label-light-success label-inline font-weight-bold" style="font-size:11px;"><i class="la la-box mr-1"></i>Our Product</span>
                                     <?php } else { ?>
                                         <span class="label label-light-warning label-inline font-weight-bold" style="font-size:11px;"><i class="la la-robot mr-1"></i>Competitor</span>
+                                        <?php
+                                            $cname = trim((string) ($r->competitor_name ?? ''));
+                                            $curl  = trim((string) ($r->url ?? ''));
+                                            if($cname !== '') { ?>
+                                            <div class="text-muted" style="font-size:11px;"><?php echo htmlspecialchars($cname); ?></div>
+                                        <?php } elseif($curl !== '') {
+                                            $chost = parse_url($curl, PHP_URL_HOST);
+                                            $clabel = $chost ? $chost : $curl; ?>
+                                            <div style="font-size:11px;"><a href="<?php echo htmlspecialchars($curl); ?>" target="_blank" rel="noopener" title="<?php echo htmlspecialchars($curl); ?>"><?php echo htmlspecialchars($clabel); ?></a></div>
+                                        <?php } ?>
                                     <?php } ?>
                                 </td>
                                 <td style="font-size:12px;"><?php echo htmlspecialchars((string) $r->destination) ?: '<span class="text-muted">—</span>'; ?></td>
@@ -199,15 +216,18 @@ sort($destinations);
     // Destination). Renumbers the visible rows and toggles the empty-state row.
     function mpApplyFilters() {
         var q    = ($('#mp_search').val() || '').toLowerCase().trim();
-        var src  = $('#mp_source').val();
-        var st   = $('#mp_status').val();
-        var dest = $('#mp_dest').val();
+        var src  = $('#mp_source').val() || [];
+        var st   = $('#mp_status').val() || [];
+        var dest = $('#mp_dest').val() || [];
         var n = 0;
         $('.mp-row').each(function() {
             var $r = $(this), ok = true;
-            if(src  && String($r.data('source')) !== src)  ok = false;
-            if(ok && st   && String($r.data('status')) !== st)   ok = false;
-            if(ok && dest && String($r.data('dest'))   !== dest) ok = false;
+            if(src.length  && src.indexOf(String($r.data('source'))) === -1)  ok = false;
+            if(ok && st.length   && st.indexOf(String($r.data('status'))) === -1)   ok = false;
+            if(ok && dest.length) {
+                var rowCities = String($r.data('cities') || '').split('|');
+                ok = dest.some(function(c) { return rowCities.indexOf(c) !== -1; });
+            }
             if(ok && q    && String($r.data('search') || '').indexOf(q) === -1) ok = false;
             $r.toggle(ok);
             if(!ok) { $r.find('.mp-select').prop('checked', false); }
@@ -215,7 +235,7 @@ sort($destinations);
         });
         $('#mp_empty').toggle(n === 0);
         $('#mp_count').text(n);
-        $('#mp_download_results_label').text(q || src || st || dest ? 'Download Filtered (Excel)' : 'Download All (Excel)');
+        $('#mp_download_results_label').text(q || src.length || st.length || dest.length ? 'Download Filtered (Excel)' : 'Download All (Excel)');
         mpUpdateSelection();
     }
     $('#mp_select_all').on('change', function() {
@@ -237,7 +257,7 @@ sort($destinations);
     $('#mp_source, #mp_status, #mp_dest').on('change', mpApplyFilters);
     $('#mp_reset').on('click', function() {
         $('#mp_search').val('');
-        var $sel = $('#mp_source, #mp_status, #mp_dest').val('');
+        var $sel = $('#mp_source, #mp_status, #mp_dest').val([]);
         if($.fn.selectpicker) { $sel.selectpicker('refresh'); }
         mpApplyFilters();
     });

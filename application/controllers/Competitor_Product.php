@@ -37,17 +37,16 @@ class Competitor_Product extends MY_Controller
 	}
 
 	/**
-	 * Review a finished crawl's products and pick which to analyse. Reads the job's
-	 * items.json and lists each product (title + url) with a checkbox.
+	 * Build the lightweight Review product list for one crawl — DB-first (durable
+	 * competitor_crawl_items), else the transient items.json for old (pre-persist)
+	 * crawls. Runs the cross-product de-dup once and projects each product to a small
+	 * display row (no crawled text), so a page of rows is cheap to render. Returns
+	 * ['products'=>[...], 'src_url'=>..., 'summary'=>...] or null when the crawl has no
+	 * items. Shared by the (paginated) Review listing.
 	 */
-	function Review()
+	private function review_products($job_id)
 	{
 		$this->load->helper('competitor_analysis');
-		$job_id = preg_replace('/[^A-Za-z0-9_]/', '', (string) $this->input->get('job'));
-		if ($job_id === '') {
-			redirect(base_url('Competitor_Product'));
-			return;
-		}
 		$dir    = APPPATH . 'logs/competitor_crawl/jobs/';
 		$status = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
 		$src_url  = (is_array($status) && isset($status['url'])) ? (string) $status['url'] : '';
@@ -65,34 +64,36 @@ class Competitor_Product extends MY_Controller
 			$items = json_decode((string) @file_get_contents($dir . $job_id . '.items.json'), true);
 		}
 		if ( ! is_array($items) || empty($items)) {
+			return null;
+		}
+		$prepared = competitor_prepare_crawl_items($items, $src_url, $analysed);
+		$products = array();
+		foreach ($prepared['items'] as $i => $it) {
+			$a = isset($analysed[(string) $i]) && is_array($analysed[(string) $i]) ? $analysed[(string) $i] : array();
+			$products[] = competitor_review_light_row($i, $it, $a);
+		}
+		return array('products' => $products, 'src_url' => $src_url, 'summary' => $prepared['summary']);
+	}
+
+	/**
+	 * Review a finished crawl's products and pick which to analyse. Renders the page
+	 * shell only; the product rows load (and page) via Review_List so a crawl with
+	 * thousands of products no longer renders every row at once.
+	 */
+	function Review()
+	{
+		$job_id = preg_replace('/[^A-Za-z0-9_]/', '', (string) $this->input->get('job'));
+		if ($job_id === '') {
 			redirect(base_url('Competitor_Product'));
 			return;
 		}
-		$products = array();
-		$prepared = competitor_prepare_crawl_items($items, $src_url, $analysed);
-		$items = $prepared['items'];
-		foreach ($items as $i => $it) {
-			$text = isset($it['text']) ? (string) $it['text'] : '';
-			$url  = isset($it['url']) ? (string) $it['url'] : '';
-			$a    = isset($analysed[(string) $i]) && is_array($analysed[(string) $i]) ? $analysed[(string) $i] : array();
-			$title = (isset($it['title']) && trim((string) $it['title']) !== '')
-				? trim((string) $it['title'])                 // real <h1> name from the crawl
-				: competitor_item_title($text, $url);         // fallback (older crawls)
-			$meta = competitor_item_meta($text, $title);
-			$products[] = array(
-				'i'           => $i,
-				'url'         => $url,
-				'title'       => $title,
-				'duration'    => $meta['duration'],
-				'snippet'     => $meta['snippet'],
-				'kind'        => competitor_item_kind($text),   // 'package' (has price) | 'itinerary'
-				'chars'       => mb_strlen($text, 'UTF-8'),
-				'analysis_id' => isset($a['id']) ? (int) $a['id'] : 0,
-				'cost'        => isset($a['cost']) ? (float) $a['cost'] : 0.0,
-				'analysed_at' => isset($a['at']) ? (string) $a['at'] : '',
-				'quality_flags' => $it['crawl_metadata']['quality_flags'],
-				'source_records' => $it['crawl_metadata']['source_records'],
-			);
+		// Cheap existence guard — redirect a bad/empty job without building the product list.
+		$this->load->model('Competitor_Crawl_Items_Model');
+		$has_items = $this->Competitor_Crawl_Items_Model->Has_Job('competitor', $job_id)
+			|| is_file(APPPATH . 'logs/competitor_crawl/jobs/' . $job_id . '.items.json');
+		if ( ! $has_items) {
+			redirect(base_url('Competitor_Product'));
+			return;
 		}
 		$titles = array(
 			'tab_title'        => 'HolidayGoGoGo | Competitor Product',
@@ -100,13 +101,48 @@ class Competitor_Product extends MY_Controller
 		);
 		$this->load->view('layout/header', $titles);
 		$this->load->view('competitor_product/review', array(
-			'job'      => $job_id,
-			'src_url'  => $src_url,
-			'products' => $products,
-			'has_ai'   => (bool) get_env('OPENAI_API_KEY'),
-			'crawl_summary' => $prepared['summary'],
+			'job'    => $job_id,
+			'has_ai' => (bool) get_env('OPENAI_API_KEY'),
 		));
 		$this->load->view('layout/footer');
+	}
+
+	/**
+	 * AJAX: one page of a crawl's Review products (server-side search + paging). Returns
+	 * {rows_html, summary, found, total, all_indices, pagination}. all_indices is the
+	 * full matching index list so "select all" can span pages.
+	 */
+	function Review_List()
+	{
+		if ( ! $this->input->is_ajax_request()) {
+			redirect(base_url('Competitor_Product'));
+			return;
+		}
+		$this->output->set_content_type('application/json');
+		$this->load->helper('competitor_analysis');
+		$empty = array('rows_html' => '', 'summary' => null, 'found' => 0, 'total' => 0, 'all_indices' => array(),
+			'pagination' => array('page' => 1, 'page_size' => 25, 'pages' => 1, 'start' => 0, 'end' => 0));
+		$job_id = preg_replace('/[^A-Za-z0-9_]/', '', (string) $this->input->get('job'));
+		if ($job_id === '') { echo json_encode($empty); return; }
+		$built = $this->review_products($job_id);
+		if ($built === null) { echo json_encode($empty); return; }
+		$paged = competitor_review_paginate(
+			$built['products'],
+			(string) $this->input->get('search'),
+			(int) $this->input->get('page'),
+			(int) $this->input->get('page_size')
+		);
+		$rows_html = $this->load->view('competitor_product/_review_rows',
+			array('products' => $paged['rows'], 'start_no' => $paged['start']), true);
+		echo json_encode(array(
+			'rows_html'   => $rows_html,
+			'summary'     => $built['summary'],
+			'found'       => $paged['found'],
+			'total'       => $paged['total'],
+			'all_indices' => $paged['all_indices'],
+			'pagination'  => array('page' => $paged['page'], 'page_size' => $paged['page_size'],
+				'pages' => $paged['pages'], 'start' => $paged['start'], 'end' => $paged['end']),
+		));
 	}
 
 	/**
@@ -353,7 +389,10 @@ class Competitor_Product extends MY_Controller
 				return;
 			}
 			// No process spawn available (exec disabled) → run inline as a last resort.
+			// Mirror the background worker's 768M so the crawl/analysis doesn't exhaust
+			// the web SAPI's 256M default (.user.ini) mid-strip (competitor_strip_boilerplate).
 			@set_time_limit(600);
+			@ini_set('memory_limit', '768M');
 			$this->load->model('Product_Model');
 			$this->load->helper('product_tour_fields');
 			$our_products = competitor_format_our_products($this->Product_Model->Read_For_Comparison());
@@ -429,7 +468,10 @@ class Competitor_Product extends MY_Controller
 		}
 
 		// No process spawn available (exec disabled) → run inline as a last resort.
+		// Mirror the background worker's 768M so the analysis doesn't exhaust the
+		// web SAPI's 256M default (.user.ini) mid-strip (competitor_strip_boilerplate).
 		@set_time_limit(600);
+		@ini_set('memory_limit', '768M');
 		$this->load->model('Product_Model');
 		$this->load->helper('product_tour_fields');
 		$our_products = competitor_format_our_products($this->Product_Model->Read_For_Comparison());
@@ -468,7 +510,7 @@ class Competitor_Product extends MY_Controller
 	 * is omitted (its saved DB row is folded in by the listing); transient analyse
 	 * jobs are skipped. Each view carries a '_sort' (file mtime) for recency order.
 	 */
-	private function read_job_views($saved_analysis_ids = null)
+	private function read_job_views($saved_analysis_ids = null, $host_filter = null)
 	{
 		$dir = APPPATH . 'logs/competitor_crawl/jobs/';
 		$crawls  = array();
@@ -482,6 +524,16 @@ class Competitor_Product extends MY_Controller
 			$s = json_decode((string) file_get_contents($path), true);
 			if ( ! is_array($s)) {
 				continue;
+			}
+			// Host-scoped read (Timeline): only this host's crawl runs matter, so skip every
+			// other job BEFORE the expensive per-file work (pid checks, browser reap, line
+			// counts). Keeps the poll's cost proportional to one site, not the whole history.
+			if ($host_filter !== null) {
+				$m = isset($s['mode']) ? $s['mode'] : 'crawl';
+				if ($m !== 'crawl'
+					|| competitor_job_host((string) (isset($s['url']) ? $s['url'] : '')) !== $host_filter) {
+					continue;
+				}
 			}
 			// WATCHDOG: a job still claiming queued/running whose worker PID is dead (past a
 			// grace window) has crashed — flip it to error so the UI stops spinning forever,
@@ -830,7 +882,7 @@ class Competitor_Product extends MY_Controller
 		}
 		$this->output->set_content_type('application/json');
 		$host = $this->clean_host($this->input->get('host'));
-		$collected = $this->read_job_views();
+		$collected = $this->read_job_views(null, $host);
 		$runs = array();
 		$running = false;
 		foreach ($collected['crawls'] as $v) {
@@ -842,6 +894,19 @@ class Competitor_Product extends MY_Controller
 			}
 			$runs[] = $v;
 		}
+		// DB fallback: a finished/errored run whose transient status files were cleaned up
+		// would vanish from the Timeline even though its crawl + products are durably saved.
+		// Re-hydrate those runs from the crawl-job records, skipping any already shown above.
+		$covered_job_ids = array();
+		foreach ($runs as $v) {
+			if (isset($v['job'])) { $covered_job_ids[] = $v['job']; }
+		}
+		$this->load->model('Competitor_Crawl_Jobs_Model');
+		$runs = array_merge($runs, competitor_job_timeline_rows(
+			$this->Competitor_Crawl_Jobs_Model->Read_All('competitor'),
+			$host,
+			$covered_job_ids
+		));
 		usort($runs, function ($a, $b) { return $b['_sort'] - $a['_sort']; });
 		foreach ($runs as &$r) { unset($r['_sort']); }
 		unset($r);
@@ -1152,7 +1217,10 @@ class Competitor_Product extends MY_Controller
 		}
 
 		// No process spawn available (exec disabled) → translate inline as a last resort.
+		// Mirror the background worker's 768M so the AI translate doesn't exhaust the
+		// web SAPI's 256M default (.user.ini).
 		@set_time_limit(600);
+		@ini_set('memory_limit', '768M');
 		$this->load->library('CompetitorAnalysisService');
 		try {
 			$overlay = $this->competitoranalysisservice->translate_analysis(

@@ -18,6 +18,11 @@ $labels = (isset($labels) && is_array($labels)) ? $labels
 $L      = function ($k, $fallback) use ($labels) { return isset($labels[$k]) ? $labels[$k] : $fallback; };
 $has_cn = ! empty($has_cn);
 $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
+// Stable per-product code shown on screen + in the PDF/Excel. $pcount is the
+// authoritative product total (drives the -N suffix), matching the export.
+$feature = isset($a->feature) ? $a->feature : 'competitor';
+$pcount  = count(competitor_display_products($a));
+$base_code = competitor_product_code((int) $a->id, $feature);
 ?>
 <div class="d-flex flex-column-fluid">
     <div class="container-fluid">
@@ -26,6 +31,9 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
                 <div class="card-title">
                     <h3 class="card-label" style="color:#6082B6;">
                         <strong><?php echo htmlspecialchars($title); ?></strong>
+                        <?php if($base_code !== '') { ?>
+                            <span class="label label-light-dark label-inline font-weight-bold ml-2" style="font-size:12px;"><?php echo htmlspecialchars($base_code); ?></span>
+                        <?php } ?>
                         <?php if($is_crawl) { ?>
                             <span class="label label-light-primary label-inline font-weight-bold ml-2" style="font-size:12px;"><?php echo (int) $a->product_count; ?> <?php echo htmlspecialchars($L('products', 'products')); ?></span>
                         <?php } elseif(!empty($a->tour_code)) { ?>
@@ -102,6 +110,8 @@ $pdf_qs = 'id=' . (int) $a->id . ($lang !== 'en' ? '&lang=' . $lang : '');
                                 <div class="card-header" id="head_<?php echo $pid; ?>">
                                     <div class="card-title <?php echo $open ? '' : 'collapsed'; ?>" data-toggle="collapse" data-target="#body_<?php echo $pid; ?>" aria-expanded="<?php echo $open ? 'true' : 'false'; ?>" style="cursor:pointer; font-size:15px;">
                                         <span class="font-weight-bolder text-dark"><?php echo ($i + 1) . '. ' . htmlspecialchars($pname); ?></span>
+                                        <?php $pcode = competitor_product_code((int) $a->id, $feature, $i + 1, $pcount);
+                                              if($pcode !== '') { ?><span class="label label-light-dark label-inline font-weight-bold ml-2" style="font-size:12px;"><?php echo htmlspecialchars($pcode); ?></span><?php } ?>
                                         <?php if($pdest !== '') { ?><span class="text-muted ml-2" style="font-size:13px;"><?php echo htmlspecialchars($pdest); ?></span><?php } ?>
                                         <?php if($pprice !== '') { ?><span class="label label-light-success label-inline font-weight-bold ml-2" style="font-size:12px;"><?php echo htmlspecialchars($pprice); ?></span><?php } ?>
                                     </div>

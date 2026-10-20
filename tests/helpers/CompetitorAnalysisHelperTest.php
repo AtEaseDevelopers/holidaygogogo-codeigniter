@@ -2387,5 +2387,86 @@ check('job_archived zero-product row shown', 'holidaytourstravel.com', $jar[1]['
 check('job_archived zero-product not reviewable', false, $jar[1]['reviewable']);
 check('job_archived empty input', array(), competitor_job_archived_rows(null, null));
 
+// ---- competitor_job_timeline_rows (per-run DB fallback for the Timeline) -----
+// A finished/errored crawl must still appear per-RUN after its status files are gone,
+// but a run already shown from a live file must NOT be duplicated.
+$tl_recs = array(
+    (object) array('job_id' => 'sa2', 'host' => 'superalitravel.com', 'src_url' => 'https://superalitravel.com/', 'state' => 'done',  'product_count' => 2054, 'created_at' => '2026-10-13 11:57:44', 'keyword' => 'bali', 'competitor_name' => 'Superali', 'cost_total' => 0, 'ai_crawl' => 1),
+    (object) array('job_id' => 'sa1', 'host' => 'superalitravel.com', 'src_url' => 'https://superalitravel.com/', 'state' => 'error', 'product_count' => 0,    'created_at' => '2026-10-10 09:00:00', 'keyword' => '',     'competitor_name' => 'Superali', 'cost_total' => 0, 'ai_crawl' => 0),
+    (object) array('job_id' => 'sa0', 'host' => 'superalitravel.com', 'src_url' => 'https://superalitravel.com/', 'state' => 'running', 'product_count' => 0,  'created_at' => '2026-10-09 09:00:00', 'keyword' => '',     'competitor_name' => 'Superali', 'cost_total' => 0, 'ai_crawl' => 0),
+    (object) array('job_id' => 'other', 'host' => 'gd.my',           'src_url' => 'https://gd.my/',             'state' => 'done',  'product_count' => 10,   'created_at' => '2026-10-12 09:00:00', 'keyword' => '',     'competitor_name' => '',         'cost_total' => 0, 'ai_crawl' => 0),
+);
+// 'sa2' is already live from a status file -> excluded; 'sa0' is running (live state) -> skipped;
+// 'other' is a different host -> skipped. Only 'sa1' (settled, uncovered, this host) remains.
+$tl = competitor_job_timeline_rows($tl_recs, 'superalitravel.com', array('sa2'));
+check('timeline_rows only uncovered settled same-host run', 1, count($tl));
+check('timeline_rows is the error run', 'sa1', $tl[0]['job']);
+check('timeline_rows marked archived', true, $tl[0]['is_archived']);
+check('timeline_rows error run not reviewable', false, $tl[0]['reviewable']);
+check('timeline_rows carries src_url', 'https://superalitravel.com/', $tl[0]['url']);
+// Nothing covered: both settled runs surface, newest-first order left to the caller's sort.
+$tl_all = competitor_job_timeline_rows($tl_recs, 'superalitravel.com', array());
+check('timeline_rows both settled runs when none covered', 2, count($tl_all));
+check('timeline_rows done run reviewable with products', true,
+    $tl_all[0]['job'] === 'sa2' ? $tl_all[0]['reviewable'] : $tl_all[1]['reviewable']);
+check('timeline_rows empty host returns none', array(), competitor_job_timeline_rows($tl_recs, '', array()));
+check('timeline_rows empty input', array(), competitor_job_timeline_rows(null, 'superalitravel.com', null));
+
+// ---- competitor_review_light_row (lightweight Review row projection) ---------
+$lr = competitor_review_light_row(7, array(
+    'url' => 'https://x.com/bali-5d',
+    'title' => 'Bali 5D4N',
+    'text' => 'Join our Bali tour. Price from RM1999 per person. 5 days 4 nights.',
+    'crawl_metadata' => array(
+        'quality_flags' => array('Day-by-day itinerary not detected'),
+        'source_records' => array(
+            array('original_url' => 'https://x.com/a', 'source_url' => 'https://x.com/s', 'record_id' => 'r1', 'canonical_url' => 'c'),
+        ),
+    ),
+), array('id' => 42, 'cost' => 0.0123, 'at' => '2026-10-13 10:00:00'));
+check('light_row index', 7, $lr['i']);
+check('light_row title', 'Bali 5D4N', $lr['title']);
+check('light_row keeps analysis id/cost/at', array(42, 0.0123, '2026-10-13 10:00:00'),
+    array($lr['analysis_id'], $lr['cost'], $lr['analysed_at']));
+check('light_row kind package (has price)', 'package', $lr['kind']);
+check('light_row carries chars > 0', true, $lr['chars'] > 0);
+check('light_row drops heavy text (no text key)', false, isset($lr['text']));
+check('light_row source_records trimmed to 2 keys', array('original_url','source_url'),
+    array_keys($lr['source_records'][0]));
+check('light_row quality flags preserved', 1, count($lr['quality_flags']));
+check('light_row hay is lowercased + searchable', true, strpos($lr['hay'], 'bali 5d4n') !== false);
+// Title falls back to a derived title when the crawl gave none; itinerary = no price.
+$lr2 = competitor_review_light_row(0, array('url' => 'https://x.com/p', 'text' => 'Some itinerary text with no price here.'), array());
+check('light_row no-analysis defaults', array(0, 0.0, ''), array($lr2['analysis_id'], $lr2['cost'], $lr2['analysed_at']));
+check('light_row kind itinerary (no price)', 'itinerary', $lr2['kind']);
+
+// ---- competitor_review_paginate (server-side search + paging) ----------------
+$prods = array();
+for ($k = 1; $k <= 130; $k++) {
+    $prods[] = array('i' => $k, 'hay' => ($k % 2 === 0 ? 'bali tour ' : 'tokyo trip ') . $k);
+}
+$pg1 = competitor_review_paginate($prods, '', 1, 50);
+check('paginate total', 130, $pg1['total']);
+check('paginate found (no search)', 130, $pg1['found']);
+check('paginate page 1 size 50', 50, count($pg1['rows']));
+check('paginate pages', 3, $pg1['pages']);
+check('paginate start/end', array(1, 50), array($pg1['start'], $pg1['end']));
+check('paginate all_indices spans every match', 130, count($pg1['all_indices']));
+$pg3 = competitor_review_paginate($prods, '', 3, 50);
+check('paginate last page remainder', 30, count($pg3['rows']));
+check('paginate last page end clamps to found', 130, $pg3['end']);
+$pgOver = competitor_review_paginate($prods, '', 99, 50);
+check('paginate page clamps into range', 3, $pgOver['page']);
+$pgs = competitor_review_paginate($prods, 'bali', 1, 25);
+check('paginate search narrows found', 65, $pgs['found']);
+check('paginate search page size', 25, count($pgs['rows']));
+check('paginate zero page_size falls back to 25', 25, competitor_review_paginate($prods, '', 1, 0)['page_size']);
+check('paginate oversized page_size falls back to 25', 25, competitor_review_paginate($prods, '', 1, 9999)['page_size']);
+check('paginate default page_size is 25 (no size given)', 25, competitor_review_paginate($prods, '', 1, null)['page_size']);
+check('paginate empty products', array(0, 0, 1), (function() {
+    $r = competitor_review_paginate(array(), '', 1, 50);
+    return array($r['found'], $r['total'], $r['pages']);
+})());
+
 echo "\n" . ($failures === 0 ? "ALL PASS\n" : "{$failures} FAILURE(S)\n");
 exit($failures === 0 ? 0 : 1);
