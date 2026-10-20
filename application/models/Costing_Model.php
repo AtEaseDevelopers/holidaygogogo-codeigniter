@@ -262,6 +262,8 @@ class Costing_Model extends CI_Model
                 // 18 Sep 2026: flight mode (4.3) + hotel pricing columns (4.2).
                 'quote_flight_mode'      => isset($package['quote_flight_mode']) ? $package['quote_flight_mode'] : '',
                 'quote_hotel_columns'    => isset($package['quote_hotel_columns']) ? $package['quote_hotel_columns'] : '',
+                // 20 Oct 2026: per-column % for auto-filling the 2nd+ price columns.
+                'quote_hotel_pcts'       => isset($package['quote_hotel_pcts']) ? $package['quote_hotel_pcts'] : '',
                 // 5 Oct 2026: first-column title (Hotel / Room Type) + Single Supp on/off.
                 'quote_hotel_title_label' => isset($package['quote_hotel_title_label']) ? $package['quote_hotel_title_label'] : '',
                 'quote_show_single_supp'  => isset($package['quote_show_single_supp']) ? $package['quote_show_single_supp'] : '',

@@ -647,6 +647,8 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
 
         // Hotel pricing columns (4.2) + flight mode (4.3), normalised.
         $hotel_columns = costing_quote_hotel_columns_normalize($q_val('quote_hotel_columns'));
+        // 20 Oct 2026: stored per-column % (auto-fill the 2nd+ columns from col 1).
+        $hotel_pcts = costing_quote_hotel_pcts_normalize($q_val('quote_hotel_pcts'), count($hotel_columns));
         $flight_mode   = costing_quote_normalize_flight_mode($q_val('quote_flight_mode'));
         // 5 Oct 2026: first-column title (Hotel / Room Type) + Single Supp on/off.
         $hotel_title_label = costing_quote_normalize_hotel_title_label($q_val('quote_hotel_title_label'));
@@ -788,6 +790,7 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
             <!-- Bootstrap state for the JS renderer -->
             <script type="application/json" id="cw-logi-state"><?php echo json_encode(array(
                 'columns'      => $hotel_columns,
+                'columnPcts'   => array_map(function ($p) { return $p === null ? '' : (string) $p; }, $hotel_pcts),
                 'hotels'       => $hotel_state,
                 'showSingleSupp' => $show_single_supp,
                 'flightMode'   => $flight_mode,
@@ -2033,6 +2036,7 @@ jQuery(function () {
     if (!stateEl) { return; }
     var S = JSON.parse(stateEl.textContent || '{}');
     S.columns = (S.columns && S.columns.length) ? S.columns : ['Twin / Triple'];
+    S.columnPcts = S.columnPcts || [];
     S.hotels = S.hotels || [];
     S.options = S.options || [];
     S.comboPricing = S.comboPricing || [];
@@ -2064,6 +2068,11 @@ jQuery(function () {
     function readHotels() {
         S.columns = Array.prototype.map.call(hotelThead.querySelectorAll('.cw-hcol-label'), function (el) { return el.value; });
         if (!S.columns.length) { S.columns = ['Twin / Triple']; }
+        // Per-column % (aligned to columns; col 0 has no % input → stays '').
+        S.columnPcts = S.columns.map(function () { return ''; });
+        Array.prototype.forEach.call(hotelThead.querySelectorAll('.cw-hcol-pct'), function (el) {
+            var c = +el.getAttribute('data-c'); if (c >= 0) { S.columnPcts[c] = el.value; }
+        });
         S.hotels = Array.prototype.map.call(hotelTbody.querySelectorAll('.cw-hotel-row'), function (tr) {
             return {
                 hotel_name: tr.querySelector('.cw-hotel-name').value,
@@ -2081,8 +2090,13 @@ jQuery(function () {
         var singleStyle = S.showSingleSupp ? '' : 'display:none;';
         var ths = '<tr><th>' + esc(firstLabel) + '</th>';
         S.columns.forEach(function (label, c) {
+            var removeBtn = (S.columns.length > 1) ? '<button type="button" class="btn btn-icon btn-sm btn-light-danger cw-hcol-remove" data-c="' + c + '" data-toggle="tooltip" title="Remove column"><i class="la la-times"></i></button>' : '';
+            var pctVal = (S.columnPcts && S.columnPcts[c] != null) ? S.columnPcts[c] : '';
+            var colExtra = (c > 0)
+                ? '<div class="d-flex align-items-center mt-1" style="gap:4px;"><input type="text" inputmode="decimal" class="form-control form-control-sm cw-hcol-pct" style="flex:1;" name="quote_hotel_pcts[' + c + ']" data-c="' + c + '" value="' + esc(pctVal) + '" placeholder="% of col 1" title="Auto-fill this column as a % of the first column">' + removeBtn + '</div>'
+                : (removeBtn ? '<div class="mt-1">' + removeBtn + '</div>' : '');
             ths += '<th style="width:160px;"><input type="text" class="form-control form-control-sm cw-hcol-label" name="quote_hotel_columns[]" list="' + titleListId + '" value="' + esc(label) + '" placeholder="Column title">' +
-                (S.columns.length > 1 ? '<button type="button" class="btn btn-icon btn-sm btn-light-danger mt-1 cw-hcol-remove" data-c="' + c + '" data-toggle="tooltip" title="Remove column"><i class="la la-times"></i></button>' : '') +
+                colExtra +
                 '</th>';
         });
         ths += '<th class="text-right cw-single-col" style="width:150px;' + singleStyle + '">Single Supp (RM)</th><th style="width:44px;"></th></tr>';
@@ -2105,14 +2119,44 @@ jQuery(function () {
 
     hotelTable.addEventListener('click', function (e) {
         var rmCol = e.target.closest('.cw-hcol-remove');
-        if (rmCol) { readHotels(); var c = +rmCol.getAttribute('data-c'); if (S.columns.length > 1) { S.columns.splice(c, 1); S.hotels.forEach(function (h) { h.prices.splice(c, 1); }); renderHotels(); } return; }
+        if (rmCol) { readHotels(); var c = +rmCol.getAttribute('data-c'); if (S.columns.length > 1) { S.columns.splice(c, 1); S.columnPcts.splice(c, 1); S.hotels.forEach(function (h) { h.prices.splice(c, 1); }); renderHotels(); } return; }
         var rmRow = e.target.closest('.cw-hotel-remove');
         if (rmRow) { readHotels(); S.hotels.splice(+rmRow.getAttribute('data-i'), 1); if (!S.hotels.length) { S.hotels = [blankHotel()]; } renderHotels(); return; }
     });
     document.getElementById('cw-hotel-add').addEventListener('click', function () { readHotels(); S.hotels.push(blankHotel()); renderHotels(); });
     if (titleLabelSel) { titleLabelSel.addEventListener('change', function () { readHotels(); renderHotels(); }); }
     if (singleToggle) { singleToggle.addEventListener('change', function () { readHotels(); S.showSingleSupp = singleToggle.checked; renderHotels(); }); }
-    document.getElementById('cw-hotel-addcol').addEventListener('click', function () { readHotels(); S.columns.push(''); S.hotels.forEach(function (h) { h.prices.push(''); }); renderHotels(); });
+    document.getElementById('cw-hotel-addcol').addEventListener('click', function () { readHotels(); S.columns.push(''); S.columnPcts.push(''); S.hotels.forEach(function (h) { h.prices.push(''); }); renderHotels(); });
+
+    // Column % auto-fill: for the 2nd+ columns, typing a percentage fills every hotel
+    // row's cell in that column as first-column price × %. Cells stay editable after.
+    function applyColumnPct(c, pctRaw) {
+        var pct = parseFloat(String(pctRaw).replace(/[^0-9.\-]/g, ''));
+        if (!isFinite(pct)) { return; } // blank / invalid: leave cells untouched
+        Array.prototype.forEach.call(hotelTbody.querySelectorAll('.cw-hotel-row'), function (tr) {
+            var cells = tr.querySelectorAll('.cw-hotel-price');
+            if (!cells[c] || !cells[0]) { return; }
+            var base = parseFloat(String(cells[0].value).replace(/[^0-9.\-]/g, ''));
+            if (!isFinite(base)) { return; } // no first-column price yet → skip row
+            cells[c].value = (Math.round(base * pct) / 100).toFixed(2); // base*pct/100, 2dp
+        });
+    }
+    function reapplyAllPct() {
+        Array.prototype.forEach.call(hotelThead.querySelectorAll('.cw-hcol-pct'), function (el) {
+            if (String(el.value).trim() !== '') { applyColumnPct(+el.getAttribute('data-c'), el.value); }
+        });
+    }
+    hotelTable.addEventListener('input', function (e) {
+        var pctEl = e.target.closest('.cw-hcol-pct');
+        if (pctEl) { applyColumnPct(+pctEl.getAttribute('data-c'), pctEl.value); return; }
+        // If a first-column price is edited, re-apply any column percentages to keep rows in sync.
+        var priceEl = e.target.closest('.cw-hotel-price');
+        if (priceEl) {
+            var row = priceEl.closest('.cw-hotel-row');
+            var cells = row ? row.querySelectorAll('.cw-hotel-price') : [];
+            if (cells[0] === priceEl) { reapplyAllPct(); } // only when the FIRST column changed
+        }
+    });
 
     // 4.1 — pull hotel names + first-column selling rate from the Costing combinations.
     document.getElementById('cw-hotel-pull').addEventListener('click', function () {
@@ -2130,6 +2174,7 @@ jQuery(function () {
             });
             if (!S.hotels.length) { S.hotels = [blankHotel()]; }
             renderHotels();
+            reapplyAllPct(); // fill the 2nd+ columns from the pulled col-1 prices using any set %
         };
         if (typeof Swal !== 'undefined') {
             Swal.fire({ icon: 'question', title: 'Pull from Costing?', text: 'This replaces the hotel rows with your ' + S.comboPricing.length + ' combination(s) and their selling price per pax.', showCancelButton: true, confirmButtonText: 'Pull' })

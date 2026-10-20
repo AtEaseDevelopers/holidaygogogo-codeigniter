@@ -390,6 +390,36 @@ if (!function_exists('costing_quote_flight_option_prepare')) {
     }
 }
 
+if (!function_exists('costing_quote_hotel_pcts_normalize')) {
+    /**
+     * Normalise the per-column percentages for the hotel pricing table (20 Oct 2026):
+     * the 2nd+ columns can be auto-filled as a % of the first column, and that %
+     * is remembered so the editor shows it back. Returns exactly $count values
+     * aligned to the pricing columns — a float (percent) or null when blank. Index 0
+     * (the first column) is always null; it has no percentage.
+     *
+     * @param mixed $value JSON string, or array keyed by column index (sparse OK)
+     * @param int   $count number of pricing columns
+     * @return array<int, float|null>
+     */
+    function costing_quote_hotel_pcts_normalize($value, $count)
+    {
+        $count = max(1, (int) $count);
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $value = is_array($decoded) ? $decoded : array();
+        }
+        $value = (array) $value;
+        $out = array();
+        for ($i = 0; $i < $count; $i++) {
+            $out[] = ($i === 0 || !isset($value[$i]))
+                ? null
+                : costing_quote_price_normalize($value[$i]);
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('costing_quote_prepare_extra_level')) {
     /**
      * Normalise the NEW package-level quote fields introduced by the 18 Sep 2026
@@ -398,14 +428,17 @@ if (!function_exists('costing_quote_prepare_extra_level')) {
      *
      * @param array $post
      * @return array {quote_flight_mode:string, quote_hotel_columns:string(JSON),
-     *                quote_hotel_title_label:string, quote_show_single_supp:int}
+     *                quote_hotel_pcts:string(JSON), quote_hotel_title_label:string,
+     *                quote_show_single_supp:int}
      */
     function costing_quote_prepare_extra_level($post)
     {
         $post = (array) $post;
+        $columns = costing_quote_hotel_columns_normalize(isset($post['quote_hotel_columns']) ? $post['quote_hotel_columns'] : null);
         return array(
             'quote_flight_mode'       => costing_quote_normalize_flight_mode(isset($post['quote_flight_mode']) ? $post['quote_flight_mode'] : null),
-            'quote_hotel_columns'     => json_encode(costing_quote_hotel_columns_normalize(isset($post['quote_hotel_columns']) ? $post['quote_hotel_columns'] : null)),
+            'quote_hotel_columns'     => json_encode($columns),
+            'quote_hotel_pcts'        => json_encode(costing_quote_hotel_pcts_normalize(isset($post['quote_hotel_pcts']) ? $post['quote_hotel_pcts'] : null, count($columns))),
             'quote_hotel_title_label' => costing_quote_normalize_hotel_title_label(isset($post['quote_hotel_title_label']) ? $post['quote_hotel_title_label'] : null),
             'quote_show_single_supp'  => costing_quote_single_supp_enabled(isset($post['quote_show_single_supp']) ? $post['quote_show_single_supp'] : null) ? 1 : 0,
         );

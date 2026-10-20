@@ -242,11 +242,23 @@ $assertions['extra: mode normalized'] = $extra['quote_flight_mode'] === 'git';
 $assertions['extra: columns json']    = $extra['quote_hotel_columns'] === json_encode(array('Twin', 'Triple'));
 $assertions['extra: title kept']      = $extra['quote_hotel_title_label'] === 'Room Type';
 $assertions['extra: single off -> 0'] = $extra['quote_show_single_supp'] === 0;
-$assertions['extra: four keys']       = (array_keys($extra) === array('quote_flight_mode', 'quote_hotel_columns', 'quote_hotel_title_label', 'quote_show_single_supp'));
+$assertions['extra: five keys']       = (array_keys($extra) === array('quote_flight_mode', 'quote_hotel_columns', 'quote_hotel_pcts', 'quote_hotel_title_label', 'quote_show_single_supp'));
 // Defaults when nothing posted: title -> Hotel, single supp -> 1 (on).
 $extraDefault = costing_quote_prepare_extra_level(array());
 $assertions['extra default: title hotel'] = $extraDefault['quote_hotel_title_label'] === 'Hotel';
 $assertions['extra default: single on -> 1'] = $extraDefault['quote_show_single_supp'] === 1;
+
+// --- per-column % for hotel pricing (20 Oct 2026) ---------------------------
+// Aligned to column count; index 0 (first column) always null; blanks -> null.
+$assertions['pcts: index0 always null'] = costing_quote_hotel_pcts_normalize(array(0 => '50', 1 => '80'), 2) === array(null, 80.0);
+$assertions['pcts: pads to count']      = costing_quote_hotel_pcts_normalize(array(1 => '80'), 3) === array(null, 80.0, null);
+$assertions['pcts: sparse keys kept']   = costing_quote_hotel_pcts_normalize(array(1 => '', 2 => '75'), 3) === array(null, null, 75.0);
+$assertions['pcts: strips % sign']      = costing_quote_hotel_pcts_normalize(array(1 => '80%'), 2) === array(null, 80.0);
+$assertions['pcts: from json']          = costing_quote_hotel_pcts_normalize(json_encode(array(null, 80.0)), 2) === array(null, 80.0);
+$assertions['pcts: null -> all null']   = costing_quote_hotel_pcts_normalize(null, 2) === array(null, null);
+// prepare_extra_level encodes the pcts JSON aligned to the (normalised) columns.
+$extraPct = costing_quote_prepare_extra_level(array('quote_hotel_columns' => array('Twin', 'Child'), 'quote_hotel_pcts' => array(1 => '80')));
+$assertions['extra: pcts json aligned'] = $extraPct['quote_hotel_pcts'] === json_encode(array(null, 80.0));
 // Legacy level contract unchanged.
 $assertions['level still eight fields'] = count(costing_quote_level_fields()) === 8;
 
