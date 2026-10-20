@@ -209,9 +209,16 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
     </div>
     <div class="col-md-6 mb-4">
         <div class="text-muted font-weight-bold mb-2" style="font-size:13px;"><?php echo htmlspecialchars($lbl('local_transport', 'Local Transport')); ?></div>
-        <?php $chips($av('local_transport')); ?>
+        <?php $bullets($av('local_transport')); ?>
     </div>
 </div>
+
+<?php if($has($av('destination_details'))) { ?>
+    <div class="mb-5">
+        <h5 class="font-weight-bolder text-dark"><?php echo htmlspecialchars($lbl('destination_details', 'Destination Details')); ?></h5>
+        <?php $bullets($av('destination_details')); ?>
+    </div>
+<?php } ?>
 
 <!-- Flights & Meals -->
 <div class="row mb-2">
@@ -240,6 +247,13 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
         </div>
     </div>
 </div>
+
+<?php if($has($av('food_beverage'))) { ?>
+    <div class="mb-5">
+        <h6 class="font-weight-bolder text-dark"><?php echo htmlspecialchars($lbl('food_beverage', 'Food & Beverages')); ?></h6>
+        <?php $bullets($av('food_beverage')); ?>
+    </div>
+<?php } ?>
 
 <!-- Stay & Highlights -->
 <div class="row mb-2">
@@ -306,6 +320,13 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
 <!-- ===================== TAB: AI Analysis (assessment with reasoning) ===================== -->
 <div class="tab-pane fade" id="<?php echo $tab_ai; ?>" role="tabpanel">
 
+<?php if($has($sv('main_usp'))) { ?>
+    <div class="p-4 rounded mb-5" style="background:#E1F0FF;">
+        <h5 class="font-weight-bolder text-dark"><?php echo htmlspecialchars($lbl('main_usp', 'Main Selling Point')); ?></h5>
+        <div style="font-size:14px;"><?php echo htmlspecialchars($sv('main_usp')); ?></div>
+    </div>
+<?php } ?>
+
 <!-- Traveller fit -->
 <?php if($has($sv('target_traveller')) || $has($sv('child_friendly')) || $has($sv('senior_friendly'))) { ?>
     <h5 class="font-weight-bolder text-dark mt-3 mb-3"><i class="la la-users mr-1" style="color:#6082B6;"></i><?php echo htmlspecialchars($lbl('traveller_fit', 'Traveller Fit')); ?></h5>
@@ -356,6 +377,13 @@ $sum_sections = function_exists('competitor_summary_sections') ? competitor_summ
                 </div>
             <?php } ?>
         </div>
+    </div>
+<?php } ?>
+
+<?php if($has($av('customer_advice'))) { ?>
+    <div class="mb-5">
+        <h5 class="font-weight-bolder text-dark"><?php echo htmlspecialchars($lbl('customer_advice', 'Advice for Your Trip')); ?></h5>
+        <?php $bullets($av('customer_advice')); ?>
     </div>
 <?php } ?>
 

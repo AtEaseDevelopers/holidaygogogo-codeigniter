@@ -190,6 +190,11 @@ $justified = function ($items) use ($flat) {
         ?>
     </table>
 
+    <?php if($has($sv($p, 'main_usp'))) { ?>
+        <h2><?php echo htmlspecialchars($lbl('main_usp', 'Main Selling Point')); ?></h2>
+        <div class="box"><?php echo htmlspecialchars($sv($p, 'main_usp')); ?></div>
+    <?php } ?>
+
     <!-- Traveller fit -->
     <?php if($has($sv($p, 'target_traveller')) || $has($sv($p, 'child_friendly')) || $has($sv($p, 'senior_friendly'))) { ?>
         <h2><?php echo htmlspecialchars($lbl('traveller_fit', 'Traveller Fit')); ?></h2>
@@ -230,9 +235,14 @@ $justified = function ($items) use ($flat) {
         </tr>
         <tr>
             <td><h4><?php echo htmlspecialchars($lbl('tour_style', 'Tour Style')); ?></h4><?php echo $chips($av($p, 'tour_styles')); ?></td>
-            <td><h4><?php echo htmlspecialchars($lbl('local_transport', 'Local Transport')); ?></h4><?php echo $chips($av($p, 'local_transport')); ?></td>
+            <td><h4><?php echo htmlspecialchars($lbl('local_transport', 'Local Transport')); ?></h4><?php echo $bullets($av($p, 'local_transport')); ?></td>
         </tr>
     </table>
+
+    <?php if($has($av($p, 'destination_details'))) { ?>
+        <h2><?php echo htmlspecialchars($lbl('destination_details', 'Destination Details')); ?></h2>
+        <?php echo $bullets($av($p, 'destination_details')); ?>
+    <?php } ?>
 
     <!-- Flights & Meals (no section banner — the web view groups these by column
          header only, so the PDF follows suit). Flight block shows only when the
@@ -262,6 +272,11 @@ $justified = function ($items) use ($flat) {
             </td>
         </tr>
     </table>
+
+    <?php if($has($av($p, 'food_beverage'))) { ?>
+        <h2><?php echo htmlspecialchars($lbl('food_beverage', 'Food & Beverages')); ?></h2>
+        <?php echo $bullets($av($p, 'food_beverage')); ?>
+    <?php } ?>
 
     <!-- Stay & Highlights -->
     <table class="three group">
@@ -311,6 +326,11 @@ $justified = function ($items) use ($flat) {
                 <span class="pre"><?php echo htmlspecialchars($sec['text']); ?></span>
             </div>
         <?php } ?>
+    <?php } ?>
+
+    <?php if($has($av($p, 'customer_advice'))) { ?>
+        <h2><?php echo htmlspecialchars($lbl('customer_advice', 'Advice for Your Trip')); ?></h2>
+        <?php echo $bullets($av($p, 'customer_advice')); ?>
     <?php } ?>
 
     <!-- Pros / Cons -->

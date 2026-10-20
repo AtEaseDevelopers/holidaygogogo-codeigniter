@@ -78,14 +78,16 @@ class CompetitorExcelExport
     {
         $fields = array(
             'product_name' => 'Product Name', 'url' => 'Product URL', 'tour_code' => 'Tour Code',
-            'destination' => 'Destination', 'duration' => 'Duration', 'departure_city' => 'Departure City',
+            'destination' => 'Destination', 'destination_details' => 'Destination Details',
+            'main_usp' => 'Main Selling Point', 'duration' => 'Duration', 'departure_city' => 'Departure City',
             'price' => 'Price', 'price_from' => 'Price From', 'price_to' => 'Price To', 'currency' => 'Currency',
             'difficulty' => 'Difficulty', 'target_traveller' => 'Target Traveller', 'suitable_age' => 'Suitable Age',
             'child_friendly' => 'Child Friendly', 'senior_friendly' => 'Senior Friendly',
             'flight_departure' => 'Departure Flight', 'flight_return' => 'Return Flight',
             'countries' => 'Countries', 'cities' => 'Cities', 'travel_months' => 'Travel Months',
             'themes' => 'Themes', 'tour_styles' => 'Tour Styles', 'local_transport' => 'Local Transport',
-            'hotels' => 'Hotels', 'usp' => 'Unique Selling Points', 'inclusions' => 'Inclusions',
+            'hotels' => 'Accommodation', 'food_beverage' => 'Food & Beverages',
+            'customer_advice' => 'Advice for Your Trip', 'usp' => 'Unique Selling Points', 'inclusions' => 'Inclusions',
             'exclusions' => 'Exclusions', 'shopping_stops' => 'Shopping Stops', 'optional_tours' => 'Optional Tours',
             'special_remarks' => 'Special Remarks', 'pros' => 'Pros', 'cons' => 'Cons', 'summary' => 'Summary',
             'matched_product' => 'Matched Product', 'comparison' => 'Comparison vs Our Products',
@@ -204,8 +206,8 @@ class CompetitorExcelExport
         $sheet->setAutoFilter('A1:' . $last_column . $last_row);
         foreach ($columns as $index => $label) {
             $column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index + 1);
-            $width = preg_match('/Text|Description|Summary|Comparison|Justification|Remarks/', $label) ? 70 : 25;
-            if (in_array($label, array('Unique Selling Points', 'Inclusions', 'Exclusions', 'Pros', 'Cons', 'Optional Tours', 'Shopping Stops'), true)) { $width = 60; }
+            $width = preg_match('/Text|Description|Details|Advice|Summary|Comparison|Justification|Remarks/', $label) ? 70 : 25;
+            if (in_array($label, array('Main Selling Point', 'Unique Selling Points', 'Local Transport', 'Accommodation', 'Food & Beverages', 'Inclusions', 'Exclusions', 'Pros', 'Cons', 'Optional Tours', 'Shopping Stops'), true)) { $width = 60; }
             if (strpos($label, 'URL') !== false || strpos($label, 'Source') !== false) { $width = 45; }
             if (strpos($label, 'No.') !== false || $label === 'Part') { $width = 12; }
             $sheet->getColumnDimension($column)->setWidth($width);

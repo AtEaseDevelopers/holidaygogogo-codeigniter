@@ -161,8 +161,9 @@ if ( ! function_exists('competitor_output_contract'))
 			. '"price_to": string (highest price, "" if unknown), '
 			. '"currency": string (ISO code if identifiable, else ""), '
 			. '"destination": string (main destination label), '
-			. '"countries": string[] (every country visited), '
-			. '"cities": string[] (every city/town visited), '
+			. '"countries": string[] (every country actually visited; exclude airport connections and transit-only countries), '
+			. '"cities": string[] (every city/town actually visited; exclude airport connections and transit-only stops), '
+			. '"destination_details": string[] (each city/region appears ONCE, in first-visit route order, naming its country when supplied and combining all its visits, experiences and overnight stays across the supplied days in that entry. Distinguish sightseeing, overnight stays and transit-only stops; do not count an airport connection or an unspecified departure-transfer endpoint as a visited destination. Use concrete details from this tour, not generic destination descriptions), '
 			. '"duration": string (days/nights e.g. "5D4N"), '
 			. '"travel_months": string[] (departure months/dates offered), '
 			. '"departure_city": string (where the tour departs from), '
@@ -171,29 +172,32 @@ if ( ! function_exists('competitor_output_contract'))
 			. '"themes": string[] (DERIVE trip themes e.g. "Nature","Culture","Shopping"), '
 			. '"tour_styles": string[] (DERIVE e.g. "Group tour","Free & easy","Luxury"), '
 			. '"difficulty": string (DERIVE physical difficulty e.g. "Easy","Moderate","Challenging"), '
-			. '"local_transport": string[] (coach, bullet train, cruise, ferry, etc.), '
+			. '"local_transport": string[] (one transport service or leg per entry: mode, named service, from/to route, day, duration and class when supplied. Preserve whether it is included, optional, self-arranged or only proposed; do not invent journey times, vehicle facilities or private transfers), '
 			. '"inclusions": string[] (one included item per entry, only when the source explicitly confirms it is covered by the price; preserve quantities, dates, prices, exceptions and conditions with that item), '
 			. '"exclusions": string[] (one explicitly excluded item per entry; preserve quantities, prices, exceptions and conditions with that item. Missing inclusion information is UNKNOWN, not proof that something is excluded), '
-			. '"hotels": string[] (hotels/accommodation named), '
+			. '"hotels": string[] (one accommodation option per entry: city/location, property name or stated category, nights, room/occupancy basis and relevant facilities or conditions when supplied. Retain "or similar", proposed/confirmed status, alternatives and single supplements. Do not infer star ratings, central locations, accessibility, connecting rooms or amenities from a brand or property name), '
 			. '"meals": {"breakfast": string, "lunch": string, "dinner": string} (for each meal, work through the day-by-day meal plan and give the COUNT plus the exact days it is provided e.g. "3 (Day 2,3,4)"; "" if the plan never provides that meal — do not guess a count), '
+			. '"food_beverage": string[] (one dining experience or meal/beverage condition per entry, with its day and included, optional or own-expense status when stated. Name a meal location ONLY when explicitly established for that meal; otherwise omit the location. A day covering several cities does not place every meal in its headline destination: breakfast before an intercity transfer must not be relocated to the arrival city. Retain named dishes, restaurants, meal style, drinks, dietary arrangements and meal substitutions when supplied. Decode B/L/D only when the meal-plan legend establishes their meaning; never count an in-flight meal as a provided tour meal without confirmation. Do not assume halal, vegetarian, allergy-safe meals or included drinks), '
 			. '"shopping_stops": string[] (EVERY shopping/factory/retail stop the source states. Format EACH item as "<stop> — <justification>" where the justification is GROUNDED IN FACT FROM THE SOURCE — state the concrete detail directly (the itinerary day and what happens there), e.g. "Pearl gallery — Day 3 includes a guided visit to a pearl factory". Do NOT invent stops or reasons; if the source names a stop but gives no supporting detail, list the stop alone with no justification), '
 			. '"optional_tours": string[] (EVERY optional/add-on tour listed, each one verbatim WITH its price and conditions e.g. min pax / what is included — never drop, merge or summarise any), '
 			. '"special_remarks": string[] (EVERY important note/term/condition, each listed separately — e.g. guide/commentary language, nationality restriction, room & single-supplement rules, insurance, disclaimers; do not omit any), '
 			. '"scenic_highlights": [{"name": string, "description": string}] (DERIVE the key scenic/sightseeing highlights; "name" is the place/attraction, "description" tells the customer what to EXPECT during their visit there — the sights, views, activities and experience from the traveller\'s point of view, roughly 1-2 sentences. Only include a highlight when the source gives concrete clues about it; leave "description" "" if the source names the place but says nothing about the experience), '
 			. '"target_traveller": string (DERIVE ideal traveller e.g. "Families","Seniors","Couples"), '
-			. '"suitable_age": string (DERIVE suitable age range), '
+			. '"suitable_age": string (stated age limits or ranges only; "" when none are supplied. Do not invent numeric age cutoffs from activity names or traveller stereotypes), '
 			. '"child_friendly": string (DERIVE "Yes"/"No" + short reason), '
 			. '"senior_friendly": string (DERIVE "Yes"/"No" + short reason), '
+			. '"main_usp": string (DERIVE the SINGLE strongest reason to choose this tour, in 1-2 sentences of at most 40 words: name one specific experience, feature or coherent route combination and explain why it appeals to a traveller with a specific interest or need. Keep supporting inclusions in usp rather than bundling them into this headline. Retain optional/extra-cost conditions when applicable. Prioritise concrete differences over generic claims such as "great value" or "unforgettable". Do not claim exclusivity, cheapest pricing or superiority without supporting evidence; "" when there is no basis), '
 			. '"usp": string[] (DERIVE unique selling points for the target traveller, ONE specific selling point per entry in the format "<Category>: <selling point>". Use these exact category names consistently across products: "Destination coverage", "Scenic transport", "Unique experience", "Travel style", "Accommodation", "Meals", "Value", "Traveller features". Repeat a category for separate points, e.g. "Scenic transport: Bergen Railway" and "Scenic transport: Flåm Railway". For Scenic transport, create a separate entry for each named railway, cruise or ferry crossing; do not combine different modes or routes into one point. Do not imply that an experience is included in the price unless explicitly confirmed), '
 			. '"traveller_segments": [{"segment": string (EXACTLY one of: "single","elderly","teenager","couple","family_kids","family_elderly","company"), "suitability": string ("High"/"Medium"/"Low"), "justification": string (a THOROUGH, well-reasoned verdict of AT LEAST 4-6 sentences on WHY this tour does or does not suit that traveller type. Do NOT give a thin one-liner. Build the case by: (1) citing SEVERAL CONCRETE tour attributes by name — pace & walking difficulty, itinerary intensity & free time, meals, hotel tier, specific activities/attractions, child/senior friendliness, price/value, group vs free-and-easy style; (2) explaining HOW each cited attribute helps or hurts THIS specific traveller type (e.g. why long walking days matter for elderly, why the activity mix matters for teenagers); (3) naming BOTH the strongest reasons it fits AND the main caveats or trade-offs, so the reasoning is balanced; (4) ending with a clear takeaway that justifies the High/Medium/Low level given. Ground every claim in the source — do NOT invent facts.)}] '
 				. '(Assess ALL SEVEN traveller types once each, in that order. Judge each strictly from concrete clues in the source; give a suitability level and a rich, well-evidenced justification as described above. If the source genuinely gives no basis to judge a type, still include it with suitability "" and a short note on exactly what information is missing to make the call — do NOT invent facts), '
-			. '"itinerary": [{"day": string, "title": string, "description": string}] (one entry per day; the description must list ALL places/activities visited that day, not just a few), '
+			. '"itinerary": [{"day": string, "title": string, "description": string}] (one entry per supplied day, keeping the original order and day numbering. Name the route and ALL places/activities, then preserve stated visit type such as entrance visit/photo stop/drive past, transfers, travel times, meals, free time and overnight accommodation. Keep optional activities and extra costs explicit. Explain what the traveller actually does without adding attractions, schedules or missing days), '
+			. '"customer_advice": string[] (DERIVE practical, ready-to-send advice that helps THIS customer decide and prepare, with one action and its tour-specific reason per entry. Relate advice to the best-fit traveller, confirmed walking/transfer demands, optional costs, meal needs and room arrangements where relevant. Use conditional wording for individual needs; ask for confirmation of material information gaps without claiming arrangements are unavailable. Do not promise upgrades, special services, dietary provision or customisation that has not been confirmed. Avoid generic packing, visa, weather, medical or destination advice unrelated to the supplied tour), '
 			. '"pros": string[] (advantages FROM THE CUSTOMER\'S POINT OF VIEW — what a traveller booking this tour actually gains, not marketing spin. ONE observation per entry, formatted "<benefit> — <justification>". The benefit must be supported by concrete tour details; explain its relevance without inventing outcomes, savings or extra sightseeing time), '
 			. '"cons": string[] (evidence-based drawbacks FROM THE CUSTOMER\'S POINT OF VIEW, ONE observation per entry. Distinguish a confirmed product limitation from a possible concern for a particular traveller: use "Product limitation: <drawback> — <justification>" for an explicit exclusion, restriction or extra cost; use "Traveller concern: <concern> — <affected traveller type and why it may matter>" for a potential suitability concern supported by concrete tour details. Use conditional language for concerns; never present them as universal defects. A missing price, child policy, accessibility detail or other unstated arrangement is NEVER eligible for cons, even if phrased as something to check or confirm; put it ONLY in special_remarks as "Information gap: <detail>". Do not invent sales pressure, tiring transfers, missing facilities or exclusions merely because the source does not mention them), '
 			. '"summary": string (a DETAILED overview, roughly 150-250 words, written as several short labelled paragraphs each separated by a BLANK LINE. Use these exact labels, each on its own line immediately followed by its text: '
 				. '"Overview:" (what the tour is — main destination, the FULL route through the key cities/regions in order, total duration, departure city, and the overall tour style & pace); '
 				. '"Best for:" (the ideal traveller for this tour and, if the source hints it, who it is NOT suited to, each with a short reason); '
-				. '"Inclusions & value:" (the key things the price covers — flights, hotel tier, meals, transport — and how the pricing is positioned: budget / mid-range / premium relative to what is offered); '
+				. '"Inclusions & value:" (the confirmed flights, accommodation, meals and transport the price covers, the price basis and material extra costs; explain value through concrete benefits without unsupported budget/premium labels or market-price comparisons); '
 				. '"Highlights:" (the 2-3 standout experiences that make this tour worth booking); '
 				. '"Watch-outs:" (the main limitations, extra costs or things a traveller should check before booking). '
 				. 'SYNTHESISE the source into genuine insight — do NOT merely restate raw field values. Omit any single labelled paragraph whose information is genuinely absent from the source rather than guessing, but keep the rest.), '
@@ -210,6 +214,8 @@ if ( ! function_exists('competitor_output_contract'))
 			. "Missing prices, child policies, facilities or arrangements are information gaps, not product drawbacks. When material, record them in special_remarks as 'Information gap: <detail that needs confirmation>' instead of putting them in cons or assuming they are unavailable. Ignore navigation, related tours and recommendation cards; never use another tour's price or inclusions for this product. If conflicting details cannot be resolved, leave the affected field unknown and preserve the conflict in special_remarks. "
 			. "WRITING STYLE: every human-readable value (all descriptions, justifications, pros, cons, highlights, summary and notes) is shown to — and shared directly with — the traveller, so write it as ready-to-send customer copy. State facts directly as facts and speak to the traveller naturally. NEVER refer to the evidence or how you know it: do not write \"the source states\", \"the source mentions\", \"the itinerary states/says/lists\", \"the terms require/state\", \"according to the source/page\" or any similar meta-reference. Grounding governs WHAT you may say, not HOW you phrase it — e.g. instead of \"The source states guests can relax by the pool\" write \"Unwind by the resort swimming pool\"; instead of \"the itinerary states 566KM for Aswan-Abu Simbel\" write \"Long drives such as 566KM Aswan-Abu Simbel-Aswan can be tiring\"; instead of \"the terms require travellers to be physically and medically fit\" write \"You should be physically and medically fit\". "
 			. "Fields marked DERIVE: only fill them when the source contains concrete clues that support the value; base the value strictly on those clues, not on general knowledge, typical-tour patterns, or what is likely. "
+			. "CUSTOMER DECISION: connect the main USP, suitability verdicts and advice to the same concrete tour details. Judge mobility, interests, rooming and group needs individually; age or family status alone does not establish suitability. A named hotel, coach or attraction does not establish child facilities, step-free access, meeting rooms or dietary provision. Give each traveller type a distinct reasoned verdict and an actionable takeaway; use an unknown verdict when the evidence is insufficient rather than filling a sentence quota. "
+			. "CHRONOLOGY CHECK: cross-check destination_details, food_beverage, transport, hotels and itinerary against the same day-by-day sequence. A breakfast before a transfer does not take place in the arrival city merely because that city is in the day title. Keep meals, overnight stays and transfers attached to their actual day and known location; omit unknown locations. List each destination once, combining repeat visits or departure-day details into its existing entry. "
 			. "If the source gives no clue for a DERIVE field, leave it \"\" or []. Do NOT guess. "
 			. "For every other field use \"\" or [] when the source does not state it — never invent literal facts like prices, hotel names, dates or codes. "
 			. "FINAL REVIEW before returning JSON: verify that every list entry contains only ONE item with all its related conditions; every inclusion is explicitly confirmed; and every cons entry describes a confirmed attribute, restriction, exclusion or cost. Remove missing-information claims from cons and record them only as Information gap entries in special_remarks. For example, 'headline price is not displayed' is an Information gap, never a Product limitation. Unknown child policies, accessibility arrangements and luggage assistance are likewise Information gaps; a stated 2-berth cabin or transport change can support a conditional Traveller concern without claiming missing arrangements are drawbacks. Do not duplicate information gaps in cons. An unresolved conflict between a headline price and a dated price table is also an Information gap; leave affected price fields unknown and preserve both figures with their dates, adult/child basis and group-size conditions in special_remarks. Different adult/child or group-size rates are not themselves conflicts; keep each rate's conditions attached. An activity or food available at a visited attraction is not automatically included in the package price.";
@@ -4535,6 +4541,7 @@ if ( ! function_exists('competitor_parse_ai_response'))
 			'price_to'         => $str($get('price_to')),
 			'currency'         => $str($get('currency')),
 			'destination'      => $str($get('destination')),
+			'main_usp'         => $str($get('main_usp')),
 			'duration'         => $str($get('duration')),
 			'departure_city'   => $str($get('departure_city')),
 			'flight_departure' => $str($get('flight_departure')),
@@ -4550,6 +4557,7 @@ if ( ! function_exists('competitor_parse_ai_response'))
 			// Multi-entry lists.
 			'countries'        => $list($get('countries')),
 			'cities'           => $list($get('cities')),
+			'destination_details' => $list($get('destination_details')),
 			'travel_months'    => $list($get('travel_months')),
 			'themes'           => $list($get('themes')),
 			'tour_styles'      => $list($get('tour_styles')),
@@ -4557,6 +4565,8 @@ if ( ! function_exists('competitor_parse_ai_response'))
 			'inclusions'       => $list($get('inclusions')),
 			'exclusions'       => $list($get('exclusions')),
 			'hotels'           => $list($get('hotels')),
+			'food_beverage'    => $list($get('food_beverage')),
+			'customer_advice'  => $list($get('customer_advice')),
 			'shopping_stops'   => $list($get('shopping_stops')),
 			'optional_tours'   => $list($get('optional_tours')),
 			'special_remarks'  => $list($get('special_remarks')),
@@ -4937,7 +4947,7 @@ if ( ! function_exists('competitor_translate_scalar_keys'))
 		return array(
 			'product_name', 'destination', 'duration', 'departure_city', 'difficulty',
 			'target_traveller', 'suitable_age', 'child_friendly', 'senior_friendly',
-			'summary', 'comparison', 'matched_product',
+			'summary', 'comparison', 'matched_product', 'main_usp',
 		);
 	}
 }
@@ -4951,6 +4961,7 @@ if ( ! function_exists('competitor_translate_list_keys'))
 			'countries', 'cities', 'travel_months', 'themes', 'tour_styles', 'local_transport',
 			'inclusions', 'exclusions', 'hotels', 'shopping_stops', 'optional_tours',
 			'special_remarks', 'usp', 'pros', 'cons',
+			'destination_details', 'food_beverage', 'customer_advice',
 		);
 	}
 }
@@ -5266,6 +5277,8 @@ if ( ! function_exists('competitor_row_to_product'))
 			'product_name' => $g('product_name'), 'tour_code' => $g('tour_code'),
 			'price' => $g('price'), 'price_from' => $g('price_from'), 'price_to' => $g('price_to'),
 			'currency' => $g('currency'), 'destination' => $g('destination'), 'duration' => $g('duration'),
+			'main_usp' => $g('main_usp'), 'destination_details' => $g('destination_details', array()),
+			'food_beverage' => $g('food_beverage', array()), 'customer_advice' => $g('customer_advice', array()),
 			'departure_city' => $g('departure_city'), 'flight_departure' => $g('flight_departure'), 'flight_return' => $g('flight_return'),
 			'difficulty' => $g('difficulty'), 'target_traveller' => $g('target_traveller'), 'suitable_age' => $g('suitable_age'),
 			'child_friendly' => $g('child_friendly'), 'senior_friendly' => $g('senior_friendly'),
@@ -5347,6 +5360,8 @@ if ( ! function_exists('competitor_ui_labels'))
 	{
 		$en = array(
 			'tour_code' => 'Tour Code', 'destination' => 'Destination', 'duration' => 'Duration',
+			'destination_details' => 'Destination Details', 'main_usp' => 'Main Selling Point',
+			'food_beverage' => 'Food & Beverages', 'customer_advice' => 'Advice for Your Trip',
 			'departure_city' => 'Departure City', 'price_range' => 'Price Range', 'currency' => 'Currency',
 			'difficulty' => 'Difficulty', 'suitable_age' => 'Suitable Age',
 			'traveller_fit' => 'Traveller Fit', 'target_traveller' => 'Target Traveller',
@@ -5360,7 +5375,7 @@ if ( ! function_exists('competitor_ui_labels'))
 			'themes' => 'Themes', 'tour_style' => 'Tour Style', 'local_transport' => 'Local Transport',
 			'flight_details' => 'Flight Details', 'departure' => 'Departure', 'return' => 'Return',
 			'meals' => 'Meals', 'breakfast' => 'Breakfast', 'lunch' => 'Lunch', 'dinner' => 'Dinner',
-			'hotels' => 'Hotels', 'scenic_highlights' => 'Scenic Highlights',
+			'hotels' => 'Accommodation', 'scenic_highlights' => 'Scenic Highlights',
 			'shopping_stops' => 'Shopping Stops', 'inclusions' => 'Inclusions', 'exclusions' => 'Exclusions',
 			'optional_tours' => 'Optional Tours', 'special_remarks' => 'Special Remarks',
 			'daily_itinerary' => 'Daily Itinerary', 'summary' => 'Summary', 'pros' => 'Pros', 'cons' => 'Cons',
@@ -5372,6 +5387,8 @@ if ( ! function_exists('competitor_ui_labels'))
 		);
 		$cn = array(
 			'tour_code' => '行程代码', 'destination' => '目的地', 'duration' => '行程天数',
+			'destination_details' => '目的地详情', 'main_usp' => '核心卖点',
+			'food_beverage' => '餐饮详情', 'customer_advice' => '给您的出游建议',
 			'departure_city' => '出发城市', 'price_range' => '价格范围', 'currency' => '货币',
 			'difficulty' => '难度', 'suitable_age' => '适合年龄',
 			'traveller_fit' => '适合人群', 'target_traveller' => '目标旅客',
@@ -5385,7 +5402,7 @@ if ( ! function_exists('competitor_ui_labels'))
 			'themes' => '主题', 'tour_style' => '行程风格', 'local_transport' => '当地交通',
 			'flight_details' => '航班详情', 'departure' => '去程', 'return' => '回程',
 			'meals' => '餐食', 'breakfast' => '早餐', 'lunch' => '午餐', 'dinner' => '晚餐',
-			'hotels' => '酒店', 'scenic_highlights' => '精华景点',
+			'hotels' => '住宿', 'scenic_highlights' => '精华景点',
 			'shopping_stops' => '购物站', 'inclusions' => '包含项目', 'exclusions' => '不包含项目',
 			'optional_tours' => '自费项目', 'special_remarks' => '特别说明',
 			'daily_itinerary' => '每日行程', 'summary' => '总结', 'pros' => '优点', 'cons' => '缺点',
