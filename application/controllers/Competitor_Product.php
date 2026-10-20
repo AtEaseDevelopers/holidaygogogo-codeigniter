@@ -37,32 +37,72 @@ class Competitor_Product extends MY_Controller
 	}
 
 	/**
-	 * Build the lightweight Review product list for one crawl — DB-first (durable
-	 * competitor_crawl_items), else the transient items.json for old (pre-persist)
-	 * crawls. Runs the cross-product de-dup once and projects each product to a small
-	 * display row (no crawled text), so a page of rows is cheap to render. Returns
-	 * ['products'=>[...], 'src_url'=>..., 'summary'=>...] or null when the crawl has no
-	 * items. Shared by the (paginated) Review listing.
+	 * Build the Review grouping for one crawl from the DURABLE store, WITHOUT loading the
+	 * crawl's full text. A big crawl is 100+ MB of item_text; de-duping it in memory (as
+	 * this used to) fataled on memory_limit. Instead we read only idx/url/title + the
+	 * per-row fingerprints in metadata_json, run the de-dup on empty-text pseudo-items
+	 * (competitor_review_grouping), and leave fetching item_text to the caller for just
+	 * the page it shows. Returns the grouping (order/reps/index_map/summary/src_url) or
+	 * null when the crawl isn't in the durable store (then the caller uses the legacy
+	 * items.json path). Legacy rows lacking stored fingerprints have ONLY their own text
+	 * loaded so grouping still agrees.
 	 */
-	private function review_products($job_id)
+	private function review_build($job_id)
 	{
 		$this->load->helper('competitor_analysis');
 		$dir    = APPPATH . 'logs/competitor_crawl/jobs/';
 		$status = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
 		$src_url  = (is_array($status) && isset($status['url'])) ? (string) $status['url'] : '';
 		$analysed = (is_array($status) && isset($status['analysed']) && is_array($status['analysed'])) ? $status['analysed'] : array();
-		// DB-FIRST: the durable competitor_crawl_items is the source of truth when it has
-		// this crawl; the transient items file is only a fallback for old (pre-persist) crawls.
 		$this->load->model('Competitor_Crawl_Items_Model');
-		$db = $this->Competitor_Crawl_Items_Model->Read_By_Job('competitor', $job_id);
-		if ( ! empty($db)) {
-			$shaped = competitor_items_from_db_rows($db);
-			$items  = $shaped['items'];
-			if (empty($analysed)) { $analysed = $shaped['analysed']; }
-			if ($src_url === '') { $src_url = (string) $db[0]->src_url; }
-		} else {
-			$items = json_decode((string) @file_get_contents($dir . $job_id . '.items.json'), true);
+		$meta = $this->Competitor_Crawl_Items_Model->Read_Meta_By_Job('competitor', $job_id);
+		if (empty($meta)) {
+			return null;
 		}
+		if ($src_url === '') { $src_url = (string) $meta[0]->src_url; }
+		// id-only analysed map straight from the durable store (every analysed row), so a
+		// caller (delete) can refund/clean analyses even for members absent from the file.
+		$db_analysed = array();
+		foreach ($meta as $row) {
+			if ((int) $row->analysis_id > 0) { $db_analysed[(string) $row->idx] = array('id' => (int) $row->analysis_id); }
+		}
+		// Analysed map: prefer the status file (carries cost/at); else derive id-only from DB.
+		if (empty($analysed)) { $analysed = $db_analysed; }
+		// Only legacy rows whose metadata lacks fingerprints need their text to group.
+		$need_text = array();
+		foreach ($meta as $row) {
+			$m = isset($row->metadata_json) ? json_decode((string) $row->metadata_json, true) : null;
+			if ( ! (is_array($m) && ! empty($m['signatures']) && ! empty($m['content_hashes']))) {
+				$need_text[] = (int) $row->idx;
+			}
+		}
+		$texts = array();
+		foreach (array_chunk($need_text, 300) as $chunk) {
+			foreach ($this->Competitor_Crawl_Items_Model->Read_By_Idx('competitor', $job_id, $chunk) as $tr) {
+				$texts[(int) $tr->idx] = (string) $tr->item_text;
+			}
+		}
+		$g = competitor_review_grouping($meta, $src_url, $analysed, $texts);
+		$g['src_url'] = $src_url;
+		$g['db_analysed'] = $db_analysed;
+		return $g;
+	}
+
+	/**
+	 * Legacy fallback: build the full light product list for a crawl that predates the
+	 * durable store and lives only in items.json. This keeps the original in-memory
+	 * behaviour for those (rare, old, small) file-only crawls; every current crawl goes
+	 * through the memory-bounded review_build() instead. Returns ['products','src_url',
+	 * 'summary'] or null.
+	 */
+	private function review_products_legacy($job_id)
+	{
+		$this->load->helper('competitor_analysis');
+		$dir    = APPPATH . 'logs/competitor_crawl/jobs/';
+		$status = json_decode((string) @file_get_contents($dir . $job_id . '.json'), true);
+		$src_url  = (is_array($status) && isset($status['url'])) ? (string) $status['url'] : '';
+		$analysed = (is_array($status) && isset($status['analysed']) && is_array($status['analysed'])) ? $status['analysed'] : array();
+		$items = json_decode((string) @file_get_contents($dir . $job_id . '.items.json'), true);
 		if ( ! is_array($items) || empty($items)) {
 			return null;
 		}
@@ -124,14 +164,61 @@ class Competitor_Product extends MY_Controller
 			'pagination' => array('page' => 1, 'page_size' => 25, 'pages' => 1, 'start' => 0, 'end' => 0));
 		$job_id = preg_replace('/[^A-Za-z0-9_]/', '', (string) $this->input->get('job'));
 		if ($job_id === '') { echo json_encode($empty); return; }
-		$built = $this->review_products($job_id);
+		$search    = (string) $this->input->get('search');
+		$page      = (int) $this->input->get('page');
+		$page_size = (int) $this->input->get('page_size');
+
+		// Memory-bounded DB path: group from metadata only, search in MySQL, then fetch
+		// item_text for just the page's representatives.
+		$g = $this->review_build($job_id);
+		if ($g !== null) {
+			$this->load->model('Competitor_Crawl_Items_Model');
+			$order = $g['order'];
+			if (trim($search) !== '') {
+				$keep = array();
+				foreach ($this->Competitor_Crawl_Items_Model->Search_Idx_By_Job('competitor', $job_id, $search) as $hit) {
+					$rep = isset($g['index_map'][$hit]) ? (int) $g['index_map'][$hit] : (int) $hit;
+					$keep[$rep] = true;
+				}
+				$order = array_values(array_filter($order, function ($rep) use ($keep) { return isset($keep[$rep]); }));
+			}
+			$found     = count($order);
+			$page_size = ($page_size > 0 && $page_size <= 200) ? $page_size : 25;
+			$pages     = max(1, (int) ceil($found / $page_size));
+			$page      = min($pages, max(1, $page));
+			$offset    = ($page - 1) * $page_size;
+			$page_idx  = array_slice($order, $offset, $page_size);
+			$rowmap = array();
+			foreach ($this->Competitor_Crawl_Items_Model->Read_By_Idx('competitor', $job_id, $page_idx) as $row) {
+				$rowmap[(int) $row->idx] = $row;
+			}
+			$products = array();
+			foreach ($page_idx as $ri) {
+				$rep  = $g['reps'][$ri];
+				$row  = isset($rowmap[$ri]) ? $rowmap[$ri] : null;
+				$item = array('url' => $rep['url'], 'title' => $rep['title'],
+					'text' => $row ? (string) $row->item_text : '',
+					'crawl_metadata' => array('source_records' => $rep['source_records'], 'quality_flags' => $rep['quality_flags']));
+				$products[] = competitor_review_light_row($ri, $item, $rep['analysed']);
+			}
+			$start = $found > 0 ? $offset + 1 : 0;
+			$rows_html = $this->load->view('competitor_product/_review_rows',
+				array('products' => $products, 'start_no' => $start), true);
+			echo json_encode(array(
+				'rows_html'   => $rows_html,
+				'summary'     => $g['summary'],
+				'found'       => $found,
+				'total'       => count($g['order']),
+				'all_indices' => array_map('intval', $order),
+				'pagination'  => array('page' => $page, 'page_size' => $page_size,
+					'pages' => $pages, 'start' => $start, 'end' => $offset + count($page_idx)),
+			));
+			return;
+		}
+		// Legacy file-only crawls (pre durable store): keep the original in-memory paging.
+		$built = $this->review_products_legacy($job_id);
 		if ($built === null) { echo json_encode($empty); return; }
-		$paged = competitor_review_paginate(
-			$built['products'],
-			(string) $this->input->get('search'),
-			(int) $this->input->get('page'),
-			(int) $this->input->get('page_size')
-		);
+		$paged = competitor_review_paginate($built['products'], $search, $page, $page_size);
 		$rows_html = $this->load->view('competitor_product/_review_rows',
 			array('products' => $paged['rows'], 'start_no' => $paged['start']), true);
 		echo json_encode(array(
@@ -172,19 +259,32 @@ class Competitor_Product extends MY_Controller
 		}
 		// DB-FIRST: when the durable competitor_crawl_items has this crawl, (re)materialise
 		// the items file from it so the analyse worker (which reads items_file by index)
-		// consumes the authoritative products — not a possibly-stale file. Same idx is
-		// preserved, so the selected indices stay valid. Fall back to the existing file
-		// only for old (pre-persist) crawls the DB doesn't have.
+		// consumes the authoritative products — not a possibly-stale file. The grouping is
+		// done from metadata ONLY (memory-bounded), and item_text is loaded for just the
+		// members of the SELECTED representatives — never the whole crawl (a big crawl's
+		// text is 100+ MB and de-duping it all in memory used to exhaust memory_limit).
+		// Same rep idx is preserved, so the selected indices stay valid. Fall back to the
+		// existing file only for old (pre-persist) crawls the DB doesn't have.
 		$this->load->helper('competitor_analysis');
 		$this->load->model('Competitor_Crawl_Items_Model');
-		$db = $this->Competitor_Crawl_Items_Model->Read_By_Job('competitor', $src_id);
-		if ( ! empty($db)) {
-			$shaped = competitor_items_from_db_rows($db);
-			$prepared = competitor_prepare_crawl_items($shaped['items'], (string) $db[0]->src_url, $shaped['analysed']);
+		$g = $this->review_build($src_id);
+		if ($g !== null) {
+			// Map each selected index to its representative, then gather every member of
+			// those representatives so the merged (de-duped) text is complete.
+			$members = array();
+			foreach ($g['index_map'] as $m => $rep) { $members[(int) $rep][] = (int) $m; }
+			$want = array();
+			foreach ($indices as $idx) {
+				$rep = isset($g['index_map'][$idx]) ? (int) $g['index_map'][$idx] : (int) $idx;
+				foreach (isset($members[$rep]) ? $members[$rep] : array($rep) as $mi) { $want[$mi] = true; }
+			}
+			$rows = $this->Competitor_Crawl_Items_Model->Read_By_Idx('competitor', $src_id, array_keys($want));
+			$shaped = competitor_items_from_db_rows($rows);
+			$prepared = competitor_prepare_crawl_items($shaped['items'], $g['src_url'], $shaped['analysed']);
 			@file_put_contents($items_file, json_encode($prepared['items'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 			$indices = array_values(array_unique(array_map(function ($idx) use ($prepared) { return isset($prepared['index_map'][$idx]) ? $prepared['index_map'][$idx] : $idx; }, $indices)));
 			if ( ! is_array($status)) {
-				$status = array('url' => (string) $db[0]->src_url);
+				$status = array('url' => $g['src_url']);
 			}
 		} elseif ( ! is_file($items_file)) {
 			echo json_encode(array('success' => false, 'message' => 'Crawl not found.'));
@@ -241,16 +341,43 @@ class Competitor_Product extends MY_Controller
 			echo json_encode(array('success' => false, 'message' => 'Select at least one product.'));
 			return;
 		}
-		$status = json_decode((string) @file_get_contents($status_file), true);
-		$items  = json_decode((string) @file_get_contents($items_file), true);
+		$this->load->helper('competitor_analysis');
 		$this->load->model('Competitor_Crawl_Items_Model');
-		$db = $this->Competitor_Crawl_Items_Model->Read_By_Job('competitor', $job_id);
-		if ($db) {
-			$shaped = competitor_items_from_db_rows($db);
-			$items = $shaped['items'];
-			if (!is_array($status)) { $status = array('url' => (string) $db[0]->src_url); }
-			$status['analysed'] = array_replace($shaped['analysed'], isset($status['analysed']) ? $status['analysed'] : array());
+		$status = json_decode((string) @file_get_contents($status_file), true);
+		// DB-FIRST, memory-bounded: group from metadata only (no 100+ MB of item_text).
+		$g = $this->review_build($job_id);
+		if ($g !== null) {
+			if ( ! is_array($status)) { $status = array('url' => $g['src_url']); }
+			// Fill any analysed entries missing from the file with the DB's id-only map, so
+			// a deleted product's analysis is still removed + cost refunded.
+			$status['analysed'] = array_replace($g['db_analysed'], isset($status['analysed']) ? $status['analysed'] : array());
+			// Selected display indices → their representatives → every member of those reps.
+			$representatives = array();
+			foreach ($indices as $idx) {
+				if (isset($g['index_map'][$idx])) { $representatives[(int) $g['index_map'][$idx]] = true; }
+			}
+			$member_idx = array_keys(array_filter($g['index_map'], function ($rep) use ($representatives) { return isset($representatives[$rep]); }));
+			if (!$member_idx) { echo json_encode(array('success' => false, 'message' => 'Selected products are no longer available.')); return; }
+			// Remove over a light idx-only map (remove only unsets keys + recounts — it
+			// never needs the text), which also refunds cost + lists the analyses to drop.
+			$light  = array_fill_keys(array_keys($g['index_map']), true);
+			$result = competitor_remove_crawl_items($light, $status, $member_idx);
+			foreach ($result['deleted_analysis_ids'] as $aid) {
+				$this->Competitor_Analysis_Model->Delete((int) $aid);
+			}
+			$this->Competitor_Crawl_Items_Model->Delete_Items_By_Idx('competitor', $job_id, $member_idx);
+			// Fresh (post-delete) crawl summary from the bounded grouping; drop the cached
+			// items file so a deleted product can't resurrect from a stale full-text cache.
+			$after = $this->review_build($job_id);
+			$result['status']['crawl_summary'] = $after !== null ? $after['summary']
+				: array('total_records' => 0, 'duplicate_records' => 0, 'unique_products' => 0, 'needs_review' => 0);
+			@file_put_contents($status_file, json_encode($result['status'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+			@unlink($items_file);
+			echo json_encode(array('success' => true));
+			return;
 		}
+		// Legacy file-only crawls (pre durable store): original in-memory prune.
+		$items = json_decode((string) @file_get_contents($items_file), true);
 		if ( ! is_array($status) || ! is_array($items)) {
 			echo json_encode(array('success' => false, 'message' => 'Crawl not found.'));
 			return;
@@ -267,9 +394,6 @@ class Competitor_Product extends MY_Controller
 		}
 		@file_put_contents($items_file, json_encode($result['items'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 		@file_put_contents($status_file, json_encode($result['status'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-		// Keep the durable store in step: drop the same items so a deleted product
-		// can't resurrect from the DB fallback (and no analysis_id is left dangling).
-		$this->load->model('Competitor_Crawl_Items_Model');
 		$this->Competitor_Crawl_Items_Model->Delete_Items_By_Idx('competitor', $job_id, $indices);
 		echo json_encode(array('success' => true));
 	}

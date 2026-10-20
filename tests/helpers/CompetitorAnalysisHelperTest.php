@@ -2468,5 +2468,64 @@ check('paginate empty products', array(0, 0, 1), (function() {
     return array($r['found'], $r['total'], $r['pages']);
 })());
 
+// ---- competitor_review_grouping (memory-bounded Review grouping) --------------
+// Guards the OOM fix: the Review listing must group/paginate from metadata_json ONLY
+// (no item_text), yet produce the SAME grouping, index_map and summary as the full
+// in-memory competitor_prepare_crawl_items path that fataled on big crawls.
+//
+// Fixture: 3 crawled rows where idx 0 and idx 2 are the SAME product (shared canonical
+// url + identical signature) reached via two source urls, and idx 1 is a different
+// product. Each row already carries its fingerprints in metadata (the common case).
+$sigA = array('days' => 5, 'code' => 'BALI5', 'route' => array('bali'));
+$sigB = array('days' => 8, 'code' => 'JP8',   'route' => array('tokyo'));
+$metaRows = array(
+    (object) array('idx' => 0, 'url' => 'https://x.com/bali?utm=a', 'title' => 'Bali 5D', 'analysis_id' => 0,
+        'src_url' => 'https://x.com/', 'metadata_json' => json_encode(array(
+            'canonical_url' => 'https://x.com/bali', 'content_hashes' => array('h-bali'),
+            'signatures' => array($sigA), 'quality_flags' => array(),
+            'source_records' => array(array('record_id' => 'rec0', 'original_url' => 'https://x.com/bali?utm=a',
+                'url' => 'https://x.com/bali?utm=a', 'source_url' => 'https://x.com/', 'canonical_url' => 'https://x.com/bali'))))),
+    (object) array('idx' => 1, 'url' => 'https://x.com/japan', 'title' => 'Japan 8D', 'analysis_id' => 99,
+        'src_url' => 'https://x.com/', 'metadata_json' => json_encode(array(
+            'canonical_url' => 'https://x.com/japan', 'content_hashes' => array('h-jp'),
+            'signatures' => array($sigB), 'quality_flags' => array('Package price is missing; confirm the current price and its basis'),
+            'source_records' => array(array('record_id' => 'rec1', 'original_url' => 'https://x.com/japan',
+                'url' => 'https://x.com/japan', 'source_url' => 'https://x.com/', 'canonical_url' => 'https://x.com/japan'))))),
+    (object) array('idx' => 2, 'url' => 'https://x.com/bali?ref=z', 'title' => 'Bali 5D', 'analysis_id' => 0,
+        'src_url' => 'https://x.com/', 'metadata_json' => json_encode(array(
+            'canonical_url' => 'https://x.com/bali', 'content_hashes' => array('h-bali'),
+            'signatures' => array($sigA), 'quality_flags' => array(),
+            'source_records' => array(array('record_id' => 'rec2', 'original_url' => 'https://x.com/bali?ref=z',
+                'url' => 'https://x.com/bali?ref=z', 'source_url' => 'https://x.com/', 'canonical_url' => 'https://x.com/bali'))))),
+);
+$grp = competitor_review_grouping($metaRows, 'https://x.com/', array('1' => array('id' => 99)));
+check('grouping collapses the two Bali sources into one product', array(0, 1), $grp['order']);
+check('grouping maps idx 2 to representative idx 0', 0, $grp['index_map'][2]);
+check('grouping summary unique/duplicate/total', array(2, 1, 3),
+    array($grp['summary']['unique_products'], $grp['summary']['duplicate_records'], $grp['summary']['total_records']));
+check('grouping merges source_records on the rep', 2, count($grp['reps'][0]['source_records']));
+check('grouping carries analysed entry onto the rep', array('id' => 99), $grp['reps'][1]['analysed']);
+check('grouping needs_review counts the Japan price-gap flag', 1, $grp['summary']['needs_review']);
+
+// A row WITHOUT stored fingerprints must still group — its text (from the $texts map)
+// is used to derive them, exactly as the full path would. Here two legacy rows share a
+// url key but conflicting signatures (different day counts) → they must NOT merge.
+$legacyRows = array(
+    (object) array('idx' => 0, 'url' => 'https://y.com/tour', 'title' => '', 'analysis_id' => 0,
+        'src_url' => 'https://y.com/', 'metadata_json' => null),
+    (object) array('idx' => 1, 'url' => 'https://y.com/tour', 'title' => '', 'analysis_id' => 0,
+        'src_url' => 'https://y.com/', 'metadata_json' => ''),
+);
+$legacyItems = array(
+    0 => array('url' => 'https://y.com/tour', 'text' => '5 days 4 nights. Price from RM1000. Visit the north route only.'),
+    1 => array('url' => 'https://y.com/tour', 'text' => '12 days 11 nights grand tour covering the entire south and east.'),
+);
+$legacyGrp = competitor_review_grouping($legacyRows, 'https://y.com/',
+    array(), array(0 => $legacyItems[0]['text'], 1 => $legacyItems[1]['text']));
+$legacyFull = competitor_prepare_crawl_items($legacyItems, 'https://y.com/');
+check('grouping (no-metadata) matches full prepare unique count',
+    $legacyFull['summary']['unique_products'], $legacyGrp['summary']['unique_products']);
+check('grouping (no-metadata) matches full prepare index_map', $legacyFull['index_map'], $legacyGrp['index_map']);
+
 echo "\n" . ($failures === 0 ? "ALL PASS\n" : "{$failures} FAILURE(S)\n");
 exit($failures === 0 ? 0 : 1);

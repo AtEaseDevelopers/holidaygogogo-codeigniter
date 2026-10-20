@@ -83,6 +83,62 @@ class Competitor_Crawl_Items_Model extends CI_Model
 			->get('competitor_crawl_items')->result();
 	}
 
+	/**
+	 * One crawl's rows WITHOUT item_text — just the small columns + metadata_json the
+	 * Review listing's dedup needs. A big crawl's item_text is 100+ MB, so the listing
+	 * must never SELECT it in bulk; the per-row fingerprints in metadata_json are enough
+	 * to group/paginate, and item_text is fetched (via Read_By_Idx) only for the page
+	 * actually shown. Ordered by idx so grouping runs in the same order as the full read.
+	 */
+	function Read_Meta_By_Job($feature, $job_id)
+	{
+		return $this->db->select('id, idx, url, title, analysis_id, src_url, host' . ($this->supports_metadata() ? ', metadata_json' : ''))
+			->where('feature', (string) $feature)
+			->where('job_id', (string) $job_id)
+			->order_by('idx', 'ASC')
+			->get('competitor_crawl_items')->result();
+	}
+
+	/**
+	 * The full rows (incl. item_text + metadata_json) for a bounded set of idx — the
+	 * products on the current Review page, or the items a selected analyse/delete touches.
+	 * Keeps memory proportional to the selection, not the whole crawl. Returns [] for an
+	 * empty idx list. Keyed by idx in the caller.
+	 */
+	function Read_By_Idx($feature, $job_id, $indices)
+	{
+		$clean = array();
+		foreach (is_array($indices) ? $indices : array() as $i) {
+			if (is_numeric($i) && (int) $i >= 0) { $clean[] = (int) $i; }
+		}
+		if (empty($clean)) { return array(); }
+		return $this->db->select('idx, url, title, item_text, analysis_id' . ($this->supports_metadata() ? ', metadata_json' : ''))
+			->where('feature', (string) $feature)
+			->where('job_id', (string) $job_id)
+			->where_in('idx', array_values(array_unique($clean)))
+			->order_by('idx', 'ASC')
+			->get('competitor_crawl_items')->result();
+	}
+
+	/**
+	 * The idx of every row of a crawl whose title, url OR item_text matches the search
+	 * term — the text scan runs in MySQL (returning only idx), so the Review search never
+	 * pulls item_text into PHP. The caller maps these member idx to their representatives.
+	 */
+	function Search_Idx_By_Job($feature, $job_id, $term)
+	{
+		$term = trim((string) $term);
+		if ($term === '') { return array(); }
+		$like = '%' . $this->db->escape_like_str($term) . '%';
+		$rows = $this->db->query(
+			'SELECT idx FROM `competitor_crawl_items` WHERE `feature` = ? AND `job_id` = ? '
+			. 'AND (`title` LIKE ? OR `url` LIKE ? OR `item_text` LIKE ?) ORDER BY `idx` ASC',
+			array((string) $feature, (string) $job_id, $like, $like, $like))->result();
+		$out = array();
+		foreach ($rows as $row) { $out[] = (int) $row->idx; }
+		return $out;
+	}
+
 	/** Read one item's original saved text without loading every product in the crawl. */
 	function Read_Item($feature, $job_id, $idx)
 	{

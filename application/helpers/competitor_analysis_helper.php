@@ -5754,6 +5754,114 @@ if ( ! function_exists('competitor_review_paginate'))
 	}
 }
 
+if ( ! function_exists('competitor_review_grouping'))
+{
+	/**
+	 * Build the Review listing's dedup grouping WITHOUT holding the crawl's full text.
+	 *
+	 * The Review page used to load every product's item_text (a big crawl is 100+ MB)
+	 * just to run competitor_prepare_crawl_items + paginate — three live copies of the
+	 * text blew past the PHP memory_limit and fataled. The dedup only needs each item's
+	 * url + the small fingerprints (signatures / content_hashes / source_records), which
+	 * are already persisted in competitor_crawl_items.metadata_json. So we feed prepare
+	 * EMPTY-text pseudo-items carrying just those fingerprints: the grouping, index_map
+	 * and record/duplicate counts come out identical, but no large text is ever held.
+	 * The caller then loads item_text for ONLY the representatives shown on the page.
+	 *
+	 * $meta_rows  the crawl's rows (objects/arrays) with idx, url, title, analysis_id and
+	 *             metadata_json (decoded array or raw JSON). item_text is NOT needed.
+	 * $src_url    the crawl source URL (for synthesised source records).
+	 * $analysed   the status/DB analysed map (idx => {id,cost,at}); steers which member
+	 *             represents a merged group and seeds each rep's analysis badge.
+	 * $texts      idx => raw item_text, ONLY for rows whose metadata lacks fingerprints
+	 *             (legacy pre-metadata crawls); such a row's fingerprints are recomputed
+	 *             from its text exactly as prepare would. Rows WITH metadata need no text.
+	 * Returns ['order'=>[rep idx...], 'reps'=>[rep idx => {url,title,source_records,
+	 *   quality_flags,analysed}], 'index_map'=>[member idx => rep idx], 'summary'=>...].
+	 * Pure; no DB/filesystem.
+	 */
+	function competitor_review_grouping($meta_rows, $src_url, $analysed = array(), $texts = array())
+	{
+		$meta_rows = is_array($meta_rows) ? $meta_rows : array();
+		$analysed  = is_array($analysed) ? $analysed : array();
+		$texts     = is_array($texts) ? $texts : array();
+		$src_url   = (string) $src_url;
+		$pseudo    = array();
+		$flag_by_idx = array();
+		foreach ($meta_rows as $r) {
+			$r    = (object) $r;
+			$idx  = (int) (isset($r->idx) ? $r->idx : 0);
+			$url  = (string) (isset($r->url) ? $r->url : '');
+			$title = (string) (isset($r->title) ? $r->title : '');
+			$meta = null;
+			if (isset($r->metadata_json)) {
+				$meta = is_array($r->metadata_json) ? $r->metadata_json : json_decode((string) $r->metadata_json, true);
+			}
+			$meta = is_array($meta) ? $meta : array();
+			$has_sig  = isset($meta['signatures']) && is_array($meta['signatures']) && $meta['signatures'];
+			$has_hash = isset($meta['content_hashes']) && is_array($meta['content_hashes']) && $meta['content_hashes'];
+			// Fingerprints come from metadata when present; only a legacy row that lacks
+			// them needs its (supplied) text re-cleaned to derive them — mirroring the
+			// per-item derivation inside competitor_prepare_crawl_items so grouping agrees.
+			$clean = ($has_sig && $has_hash) ? '' : competitor_clean_product_text((string) (isset($texts[$idx]) ? $texts[$idx] : ''), $title);
+			$original  = ! empty($meta['original_url']) ? (string) $meta['original_url'] : $url;
+			$source    = ! empty($meta['source_url']) ? (string) $meta['source_url'] : ($src_url !== '' ? $src_url : $original);
+			$canonical = ! empty($meta['canonical_url']) ? (string) $meta['canonical_url'] : '';
+			$records   = (isset($meta['source_records']) && is_array($meta['source_records'])) ? $meta['source_records'] : array();
+			$hashes    = $has_hash ? $meta['content_hashes'] : array(sha1($clean));
+			$signatures = $has_sig ? $meta['signatures'] : array(competitor_product_signature($clean));
+			if ( ! $records) {
+				$records[] = array('record_id' => sha1($original . "\n" . $url . "\n" . $idx),
+					'original_url' => $original, 'url' => $url, 'source_url' => $source, 'canonical_url' => $canonical);
+				$retrieved_at = competitor_item_retrieved_at(array('crawl_metadata' => $meta));
+				if ($retrieved_at !== '') { $records[0]['retrieved_at'] = $retrieved_at; }
+			}
+			$flag_by_idx[$idx] = (isset($meta['quality_flags']) && is_array($meta['quality_flags']))
+				? array_values($meta['quality_flags'])
+				: competitor_product_quality_flags($clean);
+			$pseudo[$idx] = array('url' => $url, 'title' => $title, 'text' => '', 'crawl_metadata' => array(
+				'original_url' => $original, 'source_url' => $source, 'canonical_url' => $canonical,
+				'source_records' => $records, 'content_hashes' => $hashes, 'signatures' => $signatures,
+			));
+		}
+		$prepared = competitor_prepare_crawl_items($pseudo, $src_url, $analysed);
+		// Reverse the index_map so a rep's quality flags can union those of its members.
+		$members = array();
+		foreach ($prepared['index_map'] as $m => $rep) { $members[(int) $rep][] = (int) $m; }
+		$order = $reps = array();
+		$needs_review = 0;
+		foreach ($prepared['items'] as $rep => $item) {
+			$rep = (int) $rep;
+			$order[] = $rep;
+			$m = (isset($item['crawl_metadata']) && is_array($item['crawl_metadata'])) ? $item['crawl_metadata'] : array();
+			$flags = array();
+			foreach (isset($members[$rep]) ? $members[$rep] : array($rep) as $mi) {
+				foreach (isset($flag_by_idx[$mi]) ? $flag_by_idx[$mi] : array() as $f) { $flags[$f] = true; }
+			}
+			$flags = array_keys($flags);
+			if ( ! empty($m['identity_conflict'])) {
+				$conflict = 'Regional itinerary details differ; review before combining';
+				if ( ! in_array($conflict, $flags, true)) { $flags[] = $conflict; }
+			}
+			if ($flags) { $needs_review++; }
+			$reps[$rep] = array(
+				'url'            => (string) (isset($item['url']) ? $item['url'] : ''),
+				'title'          => (string) (isset($item['title']) ? $item['title'] : ''),
+				'source_records' => (isset($m['source_records']) && is_array($m['source_records'])) ? $m['source_records'] : array(),
+				'quality_flags'  => $flags,
+				'analysed'       => (isset($analysed[(string) $rep]) && is_array($analysed[(string) $rep])) ? $analysed[(string) $rep] : array(),
+			);
+		}
+		return array('order' => $order, 'reps' => $reps, 'index_map' => $prepared['index_map'],
+			'summary' => array(
+				'total_records'    => $prepared['summary']['total_records'],
+				'duplicate_records' => $prepared['summary']['duplicate_records'],
+				'unique_products'  => $prepared['summary']['unique_products'],
+				'needs_review'     => $needs_review,
+			));
+	}
+}
+
 if ( ! function_exists('competitor_archived_host_rows'))
 {
 	/**

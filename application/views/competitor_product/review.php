@@ -233,6 +233,8 @@
         var version = ++listVersion;
         if (listRequest) listRequest.abort();
         $('#products_load_error').text('');
+        // Show the same "Loading…" row the page opens with while the next page is fetched.
+        $('#products_body').html('<tr><td colspan="8" style="text-align:center; padding:12px;" class="text-muted">Loading…</td></tr>');
         listRequest = $.getJSON(LIST_URL, { job: JOB, page: revPage, page_size: revPageSize, search: revSearch })
             .done(function(res) { if (version === listVersion) renderReview(res); })
             .fail(function(xhr, status) {
