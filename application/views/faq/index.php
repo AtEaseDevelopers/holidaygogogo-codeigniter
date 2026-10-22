@@ -62,6 +62,19 @@
 					</h3>
 				</div>
 				<div class="card-toolbar">
+						<?php
+							// Carry the active tag/destination filter onto the Excel & PDF
+							// download links so they export only the rows the user is
+							// looking at (Read_Faqs() reads these same GET params). The
+							// Export template stays full on purpose - re-importing a
+							// filtered template would wipe every other FAQ.
+							$faq_export_filter = array();
+							$faq_f_tag = trim((string)$this->input->get('tag'));
+							$faq_f_dest = trim((string)$this->input->get('destination'));
+							if($faq_f_tag !== '') { $faq_export_filter['tag'] = $faq_f_tag; }
+							if($faq_f_dest !== '') { $faq_export_filter['destination'] = $faq_f_dest; }
+							$faq_export_qs = empty($faq_export_filter) ? '' : ('?' . http_build_query($faq_export_filter));
+						?>
 					<!-- Toolbar is split into two aligned rows:
 					     Row 1 = read/consume actions (Internal FAQs, Excel, PDF)
 					     Row 2 = author/AI actions (AI Suggestions, Export, Import, Create FAQ) -->
@@ -71,10 +84,10 @@
 								<i class="la la-book"></i>Internal FAQs
 							</a>
 							<?php if($can_edit) { ?>
-								<a href="<?php echo base_url('Faq/Download'); ?>" class="btn btn-light-success font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Download every FAQ as an Excel file">
+								<a href="<?php echo base_url('Faq/Download') . $faq_export_qs; ?>" class="btn btn-light-success font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="<?php echo $faq_export_qs === '' ? 'Download every FAQ as an Excel file' : 'Download the filtered FAQs as an Excel file'; ?>">
 									<i class="la la-file-excel"></i>Excel
 								</a>
-								<a href="<?php echo base_url('Faq/Download_Pdf'); ?>" class="btn btn-light-danger font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="Download every FAQ as a PDF file">
+								<a href="<?php echo base_url('Faq/Download_Pdf') . $faq_export_qs; ?>" class="btn btn-light-danger font-weight-bold ml-2 mb-1" data-toggle="tooltip" title="<?php echo $faq_export_qs === '' ? 'Download every FAQ as a PDF file' : 'Download the filtered FAQs as a PDF file'; ?>">
 									<i class="la la-file-pdf"></i>PDF
 								</a>
 							<?php } ?>
