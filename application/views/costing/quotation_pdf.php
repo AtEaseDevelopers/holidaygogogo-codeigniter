@@ -303,7 +303,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
             </tr>
             <tr>
                 <td class="k">TOTAL PAX</td>
-                <td><?php echo $TotalPax > 0 ? ($TotalPax . 'pax') : '-'; ?></td>
+                <td><?php echo $PricingBasis !== '' ? html_escape($PricingBasis) : ($TotalPax > 0 ? ($TotalPax . 'pax') : '-'); ?></td>
             </tr>
         </table>
 
