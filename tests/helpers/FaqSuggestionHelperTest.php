@@ -367,4 +367,25 @@ assert_eq('preview keeps exactly max',
 	str_repeat('b', 10),
 	faq_suggestion_input_preview(str_repeat('b', 10), 10));
 
+// ---- poll_action (background-mode wait loop decision) ----------------------
+// Guards the fix for "Operation timed out after 300000ms with 0 bytes received":
+// the FAQ run now sends the Responses call with background=true and polls, so the
+// wait loop must (a) stop on terminal states, (b) keep waiting while pending and
+// in-budget, and (c) give up once the overall deadline passes.
+assert_eq('poll completed',            'completed', faq_suggestion_poll_action('completed', 10, 1500));
+assert_eq('poll completed case-ins',   'completed', faq_suggestion_poll_action('COMPLETED', 10, 1500));
+assert_eq('poll failed',               'failed',    faq_suggestion_poll_action('failed', 10, 1500));
+assert_eq('poll cancelled',            'failed',    faq_suggestion_poll_action('cancelled', 10, 1500));
+assert_eq('poll canceled (us spell)',  'failed',    faq_suggestion_poll_action('canceled', 10, 1500));
+assert_eq('poll incomplete',           'failed',    faq_suggestion_poll_action('incomplete', 10, 1500));
+assert_eq('poll expired',              'failed',    faq_suggestion_poll_action('expired', 10, 1500));
+assert_eq('poll queued -> wait',       'wait',      faq_suggestion_poll_action('queued', 10, 1500));
+assert_eq('poll in_progress -> wait',  'wait',      faq_suggestion_poll_action('in_progress', 10, 1500));
+assert_eq('poll blank -> wait',        'wait',      faq_suggestion_poll_action('', 10, 1500));
+// Deadline wins over "wait" (but never over a terminal success/failure).
+assert_eq('poll pending past deadline','timeout',   faq_suggestion_poll_action('in_progress', 1500, 1500));
+assert_eq('poll pending over deadline','timeout',   faq_suggestion_poll_action('queued', 1501, 1500));
+assert_eq('poll done past deadline',   'completed', faq_suggestion_poll_action('completed', 9999, 1500));
+assert_eq('poll fail past deadline',   'failed',    faq_suggestion_poll_action('failed', 9999, 1500));
+
 echo "\nAll FaqSuggestionHelper tests passed.\n";

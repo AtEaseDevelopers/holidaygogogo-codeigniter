@@ -296,30 +296,29 @@ class FaqSuggestionService
 			$payload['temperature'] = 0.2;
 		}
 
+		$background = $this->background_enabled();
+		if ($background) {
+			// Background mode: OpenAI queues the job and returns an id immediately,
+			// so a slow reasoning model (gpt-5.5 over a multi-day transcript) can't
+			// hold one connection open past the request timeout — the old failure was
+			// "Operation timed out after 300000ms with 0 bytes received". We then poll
+			// short GETs until it finishes. 'store' must be true to stay retrievable.
+			$payload['background'] = true;
+			$payload['store']      = true;
+		}
+
 		$this->log('request', array(
 			'model'      => $this->model(),
 			'input_len'  => is_string($input) ? strlen($input) : strlen((string) json_encode($input)),
+			'background' => $background,
 		));
 
 		$started = microtime(true);
-		$ch = curl_init();
-		curl_setopt_array($ch, array(
-			CURLOPT_URL            => $base . '/responses',
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_POST           => true,
-			CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-			CURLOPT_CONNECTTIMEOUT => 15,
-			CURLOPT_TIMEOUT        => 300,
-			CURLOPT_HTTPHEADER     => array(
-				'Content-Type: application/json',
-				'Authorization: Bearer ' . $key,
-			),
-		));
-		$resp  = curl_exec($ch);
-		$errno = curl_errno($ch);
-		$error = curl_error($ch);
-		$code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
+		// The initial POST: in background mode it returns in moments with a job id;
+		// in the synchronous fallback it blocks for the whole generation.
+		list($resp, $errno, $error, $code) = $this->http_json(
+			'POST', $base . '/responses', $payload, $background ? 60 : $this->sync_timeout()
+		);
 		$ms = (int) round((microtime(true) - $started) * 1000);
 
 		if ($errno) {
@@ -327,12 +326,17 @@ class FaqSuggestionService
 			throw new Exception('Could not reach OpenAI: ' . $error);
 		}
 		$json = json_decode($resp, true);
-		$this->last_usage = competitor_extract_usage($json);
 		if ($code >= 400) {
-			$msg = isset($json['error']['message']) ? $json['error']['message'] : ('HTTP ' . $code);
+			$msg = (is_array($json) && isset($json['error']['message'])) ? $json['error']['message'] : ('HTTP ' . $code);
 			$this->log('http_error', array('code' => $code, 'message' => $msg, 'ms' => $ms));
 			throw new Exception('OpenAI error: ' . $msg);
 		}
+		if ($background) {
+			// Block here in short poll cycles until the job reaches a terminal state.
+			$json = $this->await_response($base, $key, is_array($json) ? $json : array(), $started);
+			$ms   = (int) round((microtime(true) - $started) * 1000);
+		}
+		$this->last_usage = competitor_extract_usage($json);
 
 		$text = competitor_extract_responses_text($json);
 		if ($text === '') {
@@ -348,6 +352,125 @@ class FaqSuggestionService
 			throw new Exception('OpenAI did not complete the source extraction. Try importing a smaller source.');
 		}
 		return $text;
+	}
+
+	/** True unless .env FAQ_SUGGESTION_BACKGROUND=0 (proxy base-URLs without background support). */
+	protected function background_enabled()
+	{
+		$v = get_env('FAQ_SUGGESTION_BACKGROUND');
+		return ($v === '' || $v === null) ? true : (bool) (int) $v;
+	}
+
+	/** Overall seconds to wait for a background job before giving up (default 25 min). */
+	protected function max_wait()
+	{
+		$v = (int) get_env('FAQ_SUGGESTION_MAX_WAIT');
+		return $v > 0 ? $v : 1500;
+	}
+
+	/** Per-request timeout for the synchronous (non-background) fallback (default 300s). */
+	protected function sync_timeout()
+	{
+		$v = (int) get_env('FAQ_SUGGESTION_TIMEOUT');
+		return $v > 0 ? $v : 300;
+	}
+
+	/**
+	 * One JSON cURL round-trip to OpenAI. Returns [body, errno, error, http_code].
+	 * Centralises auth + timeouts so request()/await_response share one transport.
+	 * A null $payload on POST sends an empty body (used by the cancel endpoint).
+	 */
+	protected function http_json($method, $url, $payload, $timeout)
+	{
+		$key     = get_env('OPENAI_API_KEY');
+		$headers = array('Authorization: Bearer ' . $key);
+		$opts    = array(
+			CURLOPT_URL            => $url,
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CONNECTTIMEOUT => 15,
+			CURLOPT_TIMEOUT        => (int) $timeout,
+		);
+		if ($method === 'POST') {
+			$opts[CURLOPT_POST]       = true;
+			$opts[CURLOPT_POSTFIELDS] = ($payload === null) ? '' : json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+			if ($payload !== null) {
+				$headers[] = 'Content-Type: application/json';
+			}
+		} elseif ($method !== 'GET') {
+			$opts[CURLOPT_CUSTOMREQUEST] = $method;
+		}
+		$opts[CURLOPT_HTTPHEADER] = $headers;
+
+		$ch = curl_init();
+		curl_setopt_array($ch, $opts);
+		$resp  = curl_exec($ch);
+		$errno = curl_errno($ch);
+		$error = curl_error($ch);
+		$code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+		return array($resp, $errno, $error, $code);
+	}
+
+	/**
+	 * Poll a backgrounded Responses job (short GETs) until it reaches a terminal
+	 * state, and return the final response JSON. The wait/stop decision is the
+	 * pure, unit-tested faq_suggestion_poll_action(). Transient poll errors are
+	 * tolerated until the overall deadline; a deadline overrun cancels the job
+	 * (best-effort) and throws. Throws on failure / timeout.
+	 */
+	protected function await_response($base, $key, $json, $started)
+	{
+		$id = (is_array($json) && isset($json['id'])) ? (string) $json['id'] : '';
+		if ($id === '') {
+			throw new Exception('OpenAI did not return a background job id.');
+		}
+		$deadline = $this->max_wait();
+		$interval = 5; // seconds between polls
+
+		while (true) {
+			$status  = (is_array($json) && isset($json['status'])) ? (string) $json['status'] : '';
+			$elapsed = microtime(true) - $started;
+			$action  = faq_suggestion_poll_action($status, $elapsed, $deadline);
+
+			if ($action === 'completed') {
+				return $json;
+			}
+			if ($action === 'failed') {
+				$msg = (is_array($json) && isset($json['error']['message'])) ? $json['error']['message']
+					: ((is_array($json) && isset($json['incomplete_details']['reason'])) ? $json['incomplete_details']['reason'] : $status);
+				$this->log('background_failed', array('id' => $id, 'status' => $status, 'message' => $msg));
+				throw new Exception('OpenAI could not complete the request: ' . $msg);
+			}
+			if ($action === 'timeout') {
+				$this->cancel_response($base, $id);
+				$this->log('background_timeout', array('id' => $id, 'waited_ms' => (int) round($elapsed * 1000)));
+				throw new Exception('OpenAI timed out after ' . (int) $deadline . 's while generating. Try a smaller date range.');
+			}
+
+			sleep($interval);
+			list($resp, $errno, $error, $code) = $this->http_json('GET', $base . '/responses/' . rawurlencode($id), null, 60);
+			if ($errno) {
+				// A dropped poll is not fatal — keep trying until the deadline.
+				$this->log('poll_curl_error', array('id' => $id, 'errno' => $errno, 'error' => $error));
+				continue;
+			}
+			$decoded = json_decode($resp, true);
+			if ($code >= 400) {
+				$msg = (is_array($decoded) && isset($decoded['error']['message'])) ? $decoded['error']['message'] : ('HTTP ' . $code);
+				$this->log('poll_http_error', array('id' => $id, 'code' => $code, 'message' => $msg));
+				throw new Exception('OpenAI error while polling: ' . $msg);
+			}
+			if (is_array($decoded)) {
+				$json = $decoded;
+			}
+		}
+	}
+
+	/** Best-effort cancel of a backgrounded job we gave up waiting on; never throws. */
+	protected function cancel_response($base, $id)
+	{
+		try { $this->http_json('POST', $base . '/responses/' . rawurlencode($id) . '/cancel', null, 15); }
+		catch (Exception $e) { /* ignore */ }
 	}
 
 	/**

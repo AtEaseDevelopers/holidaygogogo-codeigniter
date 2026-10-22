@@ -662,3 +662,32 @@ if (!function_exists('faq_suggestion_parse_response')) {
 		return $out;
 	}
 }
+
+if (!function_exists('faq_suggestion_poll_action')) {
+	/**
+	 * Decide what a background-response poller should do next, given OpenAI's
+	 * latest status string and how long we have already waited. Pure so the
+	 * worker's wait loop (FaqSuggestionService::await_response) is unit-testable
+	 * without the network / sleep. Returns one of:
+	 *   'completed' — terminal success, use the response
+	 *   'failed'    — terminal failure/cancel/incomplete, throw
+	 *   'timeout'   — still pending but past the overall deadline, give up
+	 *   'wait'      — still pending within the deadline, poll again
+	 *
+	 * The deadline is checked before 'wait' so a zero/elapsed budget never loops.
+	 */
+	function faq_suggestion_poll_action($status, $elapsed_seconds, $deadline_seconds)
+	{
+		$status = strtolower(trim((string) $status));
+		if ($status === 'completed') {
+			return 'completed';
+		}
+		if (in_array($status, array('failed', 'cancelled', 'canceled', 'incomplete', 'expired'), true)) {
+			return 'failed';
+		}
+		if ((float) $elapsed_seconds >= (float) $deadline_seconds) {
+			return 'timeout';
+		}
+		return 'wait';
+	}
+}
