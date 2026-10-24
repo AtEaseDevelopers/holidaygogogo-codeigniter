@@ -15,6 +15,7 @@ class Cron extends CI_Controller
 	function __construct()
 	{
 		parent::__construct();
+		$this->logLastWorkingMinute();
 		$this->load->model('Booking_Model');
 		$this->load->model('Booking_Product_Model');
 		$this->load->model('Payment_Model');
@@ -24,6 +25,17 @@ class Cron extends CI_Controller
 		$this->load->model('Booking_Model');
 		$this->load->model('Customer_Model');
 		$this->load->library('AutoCountService'); // <-- where you put Guzzle API
+	}
+
+	private function logLastWorkingMinute()
+	{
+		// Keep the latest invocation time so we can check that cron is running.
+		$logFile = APPPATH . 'logs/cron_last_working_minute.log';
+		$message = date('Y-m-d H:i') . ' | Cron/' . $this->router->fetch_method() . PHP_EOL;
+
+		if (@file_put_contents($logFile, $message, LOCK_EX) === false) {
+			error_log('Cron heartbeat: unable to write ' . $logFile);
+		}
 	}
 
 	function index()
