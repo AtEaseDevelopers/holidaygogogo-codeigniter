@@ -10,6 +10,19 @@ $filter_customer_email = isset($filters['customer_email']) ? $filters['customer_
 $filter_sales_admin_id = isset($filters['sales_admin_id']) ? (int) $filters['sales_admin_id'] : 0;
 $sales_agents = isset($sales_agents) ? $sales_agents : array();
 $has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0);
+
+// Carry the active listing filters onto the Excel export link so the download
+// mirrors exactly what is on screen.
+$export_params = array_filter(array(
+    'search' => $filter_search,
+    'tour_code' => $filter_tour_code,
+    'status' => $filter_status,
+    'customer_name' => $filter_customer_name,
+    'customer_contact' => $filter_customer_contact,
+    'customer_email' => $filter_customer_email,
+    'sales_admin_id' => $filter_sales_admin_id > 0 ? $filter_sales_admin_id : '',
+), function ($value) { return $value !== '' && $value !== null; });
+$export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) : '';
 ?>
 
 <div class="d-flex flex-column-fluid">
@@ -25,9 +38,18 @@ $has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_stat
                     <a href="<?php echo base_url('Costing/Create'); ?>" class="btn btn-primary font-weight-bold mr-2">
                         <i class="la la-plus"></i>Create Package
                     </a>
-                    <a href="<?php echo base_url('Costing/Currency'); ?>" class="btn btn-light-primary font-weight-bold">
+                    <a href="<?php echo base_url('Costing/Currency'); ?>" class="btn btn-light-primary font-weight-bold mr-2">
                         <i class="la la-coins"></i>Currency Setup
                     </a>
+                    <a href="<?php echo base_url('Costing/Export_Packages') . $export_qs; ?>" class="btn btn-light-success font-weight-bold mr-2" data-toggle="tooltip" title="Export all packages with full detail to Excel">
+                        <i class="la la-file-excel"></i>Export Excel
+                    </a>
+                    <a href="<?php echo base_url('Costing/Import_Template'); ?>" class="btn btn-light-info font-weight-bold mr-2" data-toggle="tooltip" title="Download the Excel template for bulk package upload">
+                        <i class="la la-file-download"></i>Import Template
+                    </a>
+                    <button type="button" class="btn btn-info font-weight-bold" data-toggle="modal" data-target="#costing_import_modal" title="Upload a filled template to create packages">
+                        <i class="la la-file-import"></i>Import Excel
+                    </button>
                 </div>
             </div>
             <div class="card-body">
@@ -36,6 +58,16 @@ $has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_stat
                 <?php } ?>
                 <?php if ($this->session->flashdata('message_error')) { ?>
                     <div class="alert alert-danger"><?php echo html_escape($this->session->flashdata('message_error')); ?></div>
+                <?php } ?>
+                <?php if ($this->session->flashdata('import_result')) { ?>
+                    <div class="alert alert-warning">
+                        <strong>Import notes:</strong>
+                        <ul class="mb-0 mt-2">
+                            <?php foreach ((array) $this->session->flashdata('import_result') as $line) { ?>
+                                <li><?php echo html_escape($line); ?></li>
+                            <?php } ?>
+                        </ul>
+                    </div>
                 <?php } ?>
 
                 <div class="mb-6">
@@ -343,4 +375,46 @@ $has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_stat
             });
         });
     })();
+</script>
+
+<!-- Bulk Import Costing Packages (Excel) -->
+<div class="modal fade" id="costing_import_modal" tabindex="-1" role="dialog" aria-labelledby="costing_import_label" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <form action="<?php echo base_url('Costing/Import'); ?>" method="post" enctype="multipart/form-data" id="costing_import_form">
+            <div class="modal-content">
+                <div class="modal-header" style="background-color:#D7E2F2;">
+                    <h5 class="modal-title" id="costing_import_label" style="color:#6082B6;"><strong>Import Costing Packages</strong></h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light-primary" role="alert" style="border-left:4px solid #6082B6;">
+                        Download <strong>Import Template</strong> first. Fill the <strong>Packages</strong> sheet (one package per row) and attach cost items, combinations, hotels and flights on the other sheets using the same <strong>Package Name</strong>. The <strong>Instructions</strong> sheet lists the valid category / currency codes.
+                    </div>
+                    <div class="form-group">
+                        <label>Excel File <span class="text-danger">*</span></label>
+                        <div class="custom-file">
+                            <input type="file" name="import_file" class="custom-file-input" id="costing_import_file" accept=".xlsx,.xls" required>
+                            <label class="custom-file-label" for="costing_import_file" id="costing_import_file_label">Choose .xlsx / .xls file</label>
+                        </div>
+                        <span class="form-text text-muted">You'll see a confirmation with any errors before anything is created. Each package needs pax &gt; 0 and at least one cost item. The last 3 uploads are kept as backups.</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light font-weight-bold" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-info font-weight-bold" id="costing_import_submit">
+                        <i class="la la-search"></i>Preview &amp; Validate
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+    $('#costing_import_file').on('change', function() {
+        var name = (this.files && this.files.length) ? this.files[0].name : 'Choose .xlsx / .xls file';
+        $('#costing_import_file_label').text(name);
+    });
+    $('#costing_import_form').on('submit', function() {
+        $('#costing_import_submit').prop('disabled', true).html('<i class="la la-spinner la-spin"></i>Validating...');
+    });
 </script>

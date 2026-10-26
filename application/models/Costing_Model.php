@@ -21,7 +21,14 @@ class Costing_Model extends CI_Model
         return $this->no_multiply_codes;
     }
 
-    public function Read_Packages_Dashboard($filters = array())
+    /**
+     * Build the shared WHERE clause for the package listing/export from the
+     * common filter set (search / tour code / status / sales person / customer
+     * name-contact-email). Returns the full "WHERE ..." string (or '' when no
+     * filter is active) so both the dashboard and the Excel export filter the
+     * exact same way. Table alias is cp.
+     */
+    private function Build_Package_Filter_Where($filters = array())
     {
         $where = array();
 
@@ -62,7 +69,12 @@ class Costing_Model extends CI_Model
             $where[] = "cp.sales_admin_id = " . $sales_admin_id;
         }
 
-        $where_sql = !empty($where) ? ('WHERE ' . implode(' AND ', $where)) : '';
+        return !empty($where) ? ('WHERE ' . implode(' AND ', $where)) : '';
+    }
+
+    public function Read_Packages_Dashboard($filters = array())
+    {
+        $where_sql = $this->Build_Package_Filter_Where($filters);
 
         $packages = $this->db->query("
             SELECT
@@ -163,6 +175,194 @@ class Costing_Model extends CI_Model
             'total_currencies' => (int) $this->db->count_all('costing_currencies'),
             'latest_rate_count' => count($this->Read_Latest_Exchange_Rates()),
         );
+    }
+
+    /**
+     * Flat, detail-rich data set for the Costing Package listing Excel export.
+     * Honours the same filter set as Read_Packages_Dashboard (via the shared
+     * Build_Package_Filter_Where) but returns EVERY matching package row flat
+     * (no revision-family grouping) plus the underlying detail batch-read for
+     * the whole set: the latest booking's cost line items + combinations, and
+     * the package-level hotel/flight quotation rows.
+     *
+     * @return array {packages, items, hotels, flights, combinations}
+     */
+    public function Read_Packages_For_Export($filters = array())
+    {
+        $where_sql = $this->Build_Package_Filter_Where($filters);
+
+        $packages = $this->db->query("
+            SELECT
+                cp.id,
+                cp.name,
+                cp.customer_name,
+                cp.customer_contact,
+                cp.customer_email,
+                cp.sales_admin_id,
+                sales_admin.Name AS sales_admin_name,
+                cp.tour_code,
+                cp.duration_days,
+                cp.duration_nights,
+                cp.status,
+                cp.updated_at,
+                cb.id AS latest_booking_id,
+                cb.travel_date AS latest_travel_date,
+                cb.total_pax AS latest_total_pax,
+                cb.status AS latest_booking_status,
+                cbf.margin_percentage,
+                cbf.selling_price_per_pax,
+                cbf.total_revenue,
+                cbf.total_cost,
+                cbf.total_profit
+            FROM costing_packages cp
+            LEFT JOIN admin sales_admin ON sales_admin.AdminID = cp.sales_admin_id
+            LEFT JOIN costing_bookings cb ON cb.id = (
+                SELECT cb_latest.id
+                FROM costing_bookings cb_latest
+                WHERE cb_latest.package_id = cp.id
+                ORDER BY cb_latest.id DESC
+                LIMIT 1
+            )
+            LEFT JOIN costing_booking_financials cbf ON cbf.booking_id = cb.id
+            " . $where_sql . "
+            ORDER BY cp.updated_at DESC, cp.id DESC
+        ")->result_array();
+
+        $package_ids = array();
+        $booking_ids = array();
+        $package_meta = array();          // package_id  => [name, tour_code]
+        $booking_to_package = array();    // booking_id  => package_id
+        foreach ($packages as &$package) {
+            $package_id = (int) $package['id'];
+            $package_ids[] = $package_id;
+            $package['latest_booking_label'] = !empty($package['latest_booking_id'])
+                ? $this->Build_Booking_Number(array(
+                    'id' => $package['latest_booking_id'],
+                    'travel_date' => $package['latest_travel_date'],
+                ))
+                : 'No booking yet';
+            $package_meta[$package_id] = array(
+                'name' => (string) $package['name'],
+                'tour_code' => (string) $package['tour_code'],
+            );
+            if (!empty($package['latest_booking_id'])) {
+                $bid = (int) $package['latest_booking_id'];
+                $booking_ids[] = $bid;
+                $booking_to_package[$bid] = $package_id;
+            }
+        }
+        unset($package);
+
+        return array(
+            'packages' => $packages,
+            'items' => $this->Read_Export_Booking_Items($booking_ids, $booking_to_package, $package_meta),
+            'combinations' => $this->Read_Export_Combinations($booking_ids, $booking_to_package, $package_meta),
+            'hotels' => $this->Read_Export_Package_Rows('costing_quote_hotels', $package_ids, $package_meta),
+            'flights' => $this->Read_Export_Package_Rows('costing_quote_flights', $package_ids, $package_meta),
+        );
+    }
+
+    /**
+     * Batch-read the cost line items of a set of booking snapshots, stamping each
+     * row with its owning package's name + tour_code for the standalone export
+     * sheet. Ordered by booking, then the manual sort order, then id.
+     */
+    private function Read_Export_Booking_Items($booking_ids, $booking_to_package, $package_meta)
+    {
+        if (empty($booking_ids)) {
+            return array();
+        }
+
+        $rows = $this->db
+            ->select('
+                costing_booking_items.booking_id,
+                costing_booking_items.category,
+                costing_booking_items.name,
+                costing_booking_items.supplier,
+                costing_booking_items.pax_type,
+                costing_booking_items.quantity,
+                costing_booking_items.unit_price,
+                costing_booking_items.total_amount,
+                costing_booking_items.myr_per_unit,
+                costing_currencies.code AS currency
+            ')
+            ->join('costing_currencies', 'costing_currencies.id = costing_booking_items.currency_id', 'left')
+            ->where_in('costing_booking_items.booking_id', $booking_ids)
+            ->order_by('costing_booking_items.booking_id', 'ASC')
+            ->order_by('costing_booking_items.sort_order', 'ASC')
+            ->order_by('costing_booking_items.id', 'ASC')
+            ->get('costing_booking_items')
+            ->result_array();
+
+        return $this->Stamp_Export_Package_Meta($rows, $booking_to_package, $package_meta, 'booking_id');
+    }
+
+    /**
+     * Batch-read the customer-facing combinations of a set of booking snapshots,
+     * stamped with package name + tour_code.
+     */
+    private function Read_Export_Combinations($booking_ids, $booking_to_package, $package_meta)
+    {
+        if (empty($booking_ids)) {
+            return array();
+        }
+
+        $rows = $this->db
+            ->select('costing_booking_id, name, selling_price_per_pax')
+            ->where_in('costing_booking_id', $booking_ids)
+            ->order_by('costing_booking_id', 'ASC')
+            ->order_by('sort_order', 'ASC')
+            ->order_by('id', 'ASC')
+            ->get('costing_combinations')
+            ->result_array();
+
+        return $this->Stamp_Export_Package_Meta($rows, $booking_to_package, $package_meta, 'costing_booking_id');
+    }
+
+    /**
+     * Batch-read a per-package quotation table (hotels / flights), stamped with
+     * package name + tour_code. Rows are keyed directly by package_id.
+     */
+    private function Read_Export_Package_Rows($table, $package_ids, $package_meta)
+    {
+        if (empty($package_ids)) {
+            return array();
+        }
+
+        $rows = $this->db
+            ->where_in('package_id', $package_ids)
+            ->order_by('package_id', 'ASC')
+            ->order_by('sort_order', 'ASC')
+            ->order_by('id', 'ASC')
+            ->get($table)
+            ->result_array();
+
+        $map = array();
+        foreach ($package_ids as $pid) {
+            $map[(int) $pid] = (int) $pid;
+        }
+
+        return $this->Stamp_Export_Package_Meta($rows, $map, $package_meta, 'package_id');
+    }
+
+    /**
+     * Attach package_name + tour_code to each detail row by resolving its owning
+     * package through $key (a booking-id or package-id column) -> $id_to_package
+     * -> $package_meta. Pure array transform (no DB).
+     */
+    private function Stamp_Export_Package_Meta($rows, $id_to_package, $package_meta, $key)
+    {
+        foreach ($rows as &$row) {
+            $owner = isset($row[$key]) ? (int) $row[$key] : 0;
+            $package_id = isset($id_to_package[$owner]) ? $id_to_package[$owner] : 0;
+            $meta = isset($package_meta[$package_id]) ? $package_meta[$package_id] : array('name' => '', 'tour_code' => '');
+            $row['package_id'] = $package_id;
+            $row['package_name'] = $meta['name'];
+            $row['tour_code'] = $meta['tour_code'];
+        }
+        unset($row);
+
+        return $rows;
     }
 
     public function Read_Package_Workspace_Data($package_id, $booking_id = null, $base_currency_code = 'MYR', $force_new_snapshot = false)
@@ -373,6 +573,68 @@ class Costing_Model extends CI_Model
         $data['tour_code'] = $this->Next_Tour_Code();
         $this->db->insert('costing_packages', $data);
         return (int) $this->db->insert_id();
+    }
+
+    /**
+     * Active currencies (public reader for the Excel import template / parser).
+     * Thin wrapper over the private Read_Currencies so no query logic is duplicated.
+     *
+     * @return array list of ['id','code','name','symbol']
+     */
+    public function Read_Currency_List()
+    {
+        return $this->Read_Currencies();
+    }
+
+    /**
+     * Create ONE package from an assembled Excel-import payload (the shape
+     * costing_import_assemble_packages() produces). Wraps the three existing save
+     * paths in a single transaction so a package is all-or-nothing:
+     *   Save_Package -> Generate_Booking_Snapshot (items/combos/financials/rates)
+     *   -> Save_Quote_Details (hotels/flights/quote-level) -> Save_Itinerary_Days
+     *   (per-day rows + package itinerary notes).
+     * The inner methods open their own nested transactions; CI counts the depth so
+     * the outer trans_complete() is the real commit point. Returns
+     * ['ok'=>bool, 'package_id'=>int].
+     *
+     * @param array $pkg {save_package, snapshot_payload, hotels, flight_options, quote_level}
+     * @return array
+     */
+    public function Import_Package($pkg)
+    {
+        // Guard the two conditions under which Generate_Booking_Snapshot bails out
+        // BEFORE opening any transaction, so we never insert a package row that we
+        // would then be unable to cleanly roll back (it bails before its own
+        // trans_start, i.e. without a query error for CI to detect).
+        $sp = (array) $pkg['snapshot_payload'];
+        $has_pax = (max(0, (int) $sp['adult_count']) + max(0, (int) $sp['child_count'])) > 0;
+        $has_items = !empty($sp['rows']) || !empty($sp['combinations']);
+        if (!$has_pax || !$has_items) {
+            return array('ok' => false, 'package_id' => 0);
+        }
+
+        $this->db->trans_start();
+
+        $package_id = $this->Save_Package($pkg['save_package']);
+        if ($package_id > 0) {
+            $this->Generate_Booking_Snapshot($package_id, $pkg['snapshot_payload']);
+            $this->Save_Quote_Details(
+                $package_id,
+                isset($pkg['hotels']) ? (array) $pkg['hotels'] : array(),
+                isset($pkg['flight_options']) ? (array) $pkg['flight_options'] : array(),
+                isset($pkg['quote_level']) ? (array) $pkg['quote_level'] : array()
+            );
+            $this->Save_Itinerary_Days(
+                $package_id,
+                isset($pkg['itinerary']) ? (array) $pkg['itinerary'] : array(),
+                isset($pkg['itinerary_level']) ? (array) $pkg['itinerary_level'] : array()
+            );
+        }
+
+        $this->db->trans_complete();
+
+        $ok = ($package_id > 0) && (bool) $this->db->trans_status();
+        return array('ok' => $ok, 'package_id' => $ok ? $package_id : 0);
     }
 
     /**

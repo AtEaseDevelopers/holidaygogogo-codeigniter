@@ -248,6 +248,36 @@ class Competitor_Analysis_Model extends CI_Model
 		return true;
 	}
 
+	/**
+	 * Persist a Tour Information edit. $columns are top-level competitor_analyses
+	 * columns (tour_code, destination, inclusions JSON, …); $details are keys to
+	 * merge INTO the existing details_json so every untouched key (AI-analysis
+	 * fields, crawl_metadata, source_file, …) survives. The cached translation
+	 * overlay is cleared because the English source changed — 中文 re-translates from
+	 * the corrected text on next use. Returns false when the row is missing.
+	 */
+	function Update_Tour_Info($id, $columns, $details)
+	{
+		$row = $this->db->select('details_json')
+			->get_where('competitor_analyses', array('id' => (int) $id, 'feature' => $this->feature))->row();
+		if ( ! $row) {
+			return false;
+		}
+		$existing = json_decode((string) $row->details_json, true);
+		if ( ! is_array($existing)) {
+			$existing = array();
+		}
+		$merged = array_merge($existing, is_array($details) ? $details : array());
+
+		$update = is_array($columns) ? $columns : array();
+		$update['details_json']      = json_encode($merged, JSON_UNESCAPED_UNICODE);
+		$update['translations_json'] = null;
+
+		$this->db->where('id', (int) $id)->where('feature', $this->feature)
+			->update('competitor_analyses', $update);
+		return true;
+	}
+
 	function Delete($id)
 	{
 		$this->db->delete('competitor_analyses', array('id' => (int) $id, 'feature' => $this->feature));

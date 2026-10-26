@@ -201,7 +201,7 @@ if ( ! function_exists('competitor_output_contract'))
 				. '"Highlights:" (the 2-3 standout experiences that make this tour worth booking); '
 				. '"Watch-outs:" (the main limitations, extra costs or things a traveller should check before booking). '
 				. 'SYNTHESISE the source into genuine insight — do NOT merely restate raw field values. Omit any single labelled paragraph whose information is genuinely absent from the source rather than guessing, but keep the rest.), '
-			. '"comparison": string (FIRST find a product in OUR PRODUCTS below that MATCHES or is SIMILAR to this competitor product — same/overlapping destination or tour type. If one matches, compare against THAT product only using these exact labels, each on its own line followed by its text, with a blank line between sections: "Matched product:", "Pricing:", "Competitor advantages:", "Our advantages:", "Gaps / unknowns:", "Recommendation:". Put each advantage or gap on its own line within its section. Separate confirmed advantages from missing information; never treat an unmentioned inclusion as an exclusion. Compare prices only on a stated, comparable currency and basis; otherwise explain the missing basis without guessing conversions. If NONE of our products match or are similar, do NOT force a comparison — use "No comparable product:" and state plainly that we have no comparable product on our side for this destination/type.), '
+			. '"comparison": string (FIRST find a product in OUR PRODUCTS below that covers the SAME OR A SIMILAR DESTINATION as this competitor product — match on destination (same or overlapping country/region/city; it need not be an exact match), NOT on tour type, theme, duration or price. If one covers the same or a similar destination, compare against THAT product only using these exact labels, each on its own line followed by its text, with a blank line between sections: "Matched product:", "Pricing:", "Competitor advantages:", "Our advantages:", "Gaps / unknowns:", "Recommendation:". Put each advantage or gap on its own line within its section. Separate confirmed advantages from missing information; never treat an unmentioned inclusion as an exclusion. Compare prices only on a stated, comparable currency and basis; otherwise explain the missing basis without guessing conversions. If NONE of our products cover the same or a similar destination, do NOT force a comparison — use "No comparable product:" and state plainly that we have no product for this destination on our side.), '
 			. '"matched_product": string (the EXACT "name" from OUR PRODUCTS you compared against in "comparison"; "" if none matched)'
 			. '}';
 		return "Reply with ONLY a single JSON object, no markdown, no code fences, matching exactly this shape: "
@@ -6075,5 +6075,174 @@ if ( ! function_exists('competitor_log_event'))
 	{
 		$line = '[' . date('Y-m-d H:i:s') . '] ' . (string) $message . "\n";
 		@file_put_contents(APPPATH . 'logs/crawl_events.log', $line, FILE_APPEND | LOCK_EX);
+	}
+}
+
+if ( ! function_exists('competitor_tour_info_simple_fields'))
+{
+	/**
+	 * The editable Tour Information fields that are either a plain scalar or a plain
+	 * string list — the spec shared by the edit form (to render inputs) and the save
+	 * parser (to read them back), so the two can never drift. Grouped for layout.
+	 *
+	 * Each field: ['key' => post/storage key, 'label' => UI label, 'kind' =>
+	 * 'scalar'|'list', 'store' => 'column'|'detail']. 'store' says where the value
+	 * lives once saved: a top-level competitor_analyses column, or inside
+	 * details_json. The four STRUCTURED fields (meals, scenic_highlights,
+	 * shopping_stops, itinerary) are NOT here — they have bespoke widgets/parsing.
+	 * Pure — no DB/framework.
+	 */
+	function competitor_tour_info_simple_fields()
+	{
+		return array(
+			'Facts' => array(
+				array('key' => 'tour_code',      'label' => 'Tour Code',      'kind' => 'scalar', 'store' => 'column'),
+				array('key' => 'destination',    'label' => 'Destination',    'kind' => 'scalar', 'store' => 'column'),
+				array('key' => 'duration',       'label' => 'Duration',       'kind' => 'scalar', 'store' => 'column'),
+				array('key' => 'departure_city', 'label' => 'Departure City', 'kind' => 'scalar', 'store' => 'detail'),
+				array('key' => 'price_from',     'label' => 'Price From',     'kind' => 'scalar', 'store' => 'detail'),
+				array('key' => 'price_to',       'label' => 'Price To',       'kind' => 'scalar', 'store' => 'detail'),
+				array('key' => 'price',          'label' => 'Price (headline)', 'kind' => 'scalar', 'store' => 'column'),
+				array('key' => 'currency',       'label' => 'Currency',       'kind' => 'scalar', 'store' => 'column'),
+				array('key' => 'difficulty',     'label' => 'Difficulty',     'kind' => 'scalar', 'store' => 'detail'),
+				array('key' => 'suitable_age',   'label' => 'Suitable Age',   'kind' => 'scalar', 'store' => 'detail'),
+			),
+			'Coverage' => array(
+				array('key' => 'countries',       'label' => 'Countries',       'kind' => 'list', 'store' => 'detail'),
+				array('key' => 'cities',          'label' => 'Cities',          'kind' => 'list', 'store' => 'detail'),
+				array('key' => 'travel_months',   'label' => 'Travel Months',   'kind' => 'list', 'store' => 'detail'),
+				array('key' => 'themes',          'label' => 'Themes',          'kind' => 'list', 'store' => 'detail'),
+				array('key' => 'tour_styles',     'label' => 'Tour Style',      'kind' => 'list', 'store' => 'detail'),
+				array('key' => 'local_transport', 'label' => 'Local Transport', 'kind' => 'list', 'store' => 'detail'),
+			),
+			'Flights' => array(
+				array('key' => 'flight_departure', 'label' => 'Flight Departure', 'kind' => 'scalar', 'store' => 'detail'),
+				array('key' => 'flight_return',    'label' => 'Flight Return',    'kind' => 'scalar', 'store' => 'detail'),
+			),
+			'Destination & Food' => array(
+				array('key' => 'destination_details', 'label' => 'Destination Details', 'kind' => 'list', 'store' => 'detail'),
+				array('key' => 'food_beverage',       'label' => 'Food & Beverages',    'kind' => 'list', 'store' => 'detail'),
+			),
+			'Stay' => array(
+				array('key' => 'hotels', 'label' => 'Hotels', 'kind' => 'list', 'store' => 'detail'),
+			),
+			'Inclusions' => array(
+				array('key' => 'inclusions',     'label' => 'Inclusions',     'kind' => 'list', 'store' => 'column'),
+				array('key' => 'exclusions',     'label' => 'Exclusions',     'kind' => 'list', 'store' => 'detail'),
+				array('key' => 'optional_tours', 'label' => 'Optional Tours', 'kind' => 'list', 'store' => 'detail'),
+			),
+			'Notes' => array(
+				array('key' => 'special_remarks', 'label' => 'Special Remarks', 'kind' => 'list', 'store' => 'detail'),
+			),
+		);
+	}
+}
+
+if ( ! function_exists('competitor_tour_info_lines_to_list'))
+{
+	/**
+	 * Split a textarea value (one item per line) into a clean list of non-empty
+	 * trimmed strings. Mirrors the list-cleaning idiom used elsewhere in this
+	 * helper. Pure.
+	 */
+	function competitor_tour_info_lines_to_list($text)
+	{
+		$lines = preg_split('/\R/u', (string) $text);
+		if ( ! is_array($lines)) { return array(); }
+		$lines = array_map('trim', $lines);
+		$lines = array_filter($lines, function ($x) { return $x !== ''; });
+		return array_values($lines);
+	}
+}
+
+if ( ! function_exists('competitor_tour_info_from_post'))
+{
+	/**
+	 * Parse the Tour Information edit form POST into the two buckets the model
+	 * persists: ['columns' => <top-level competitor_analyses columns>, 'details' =>
+	 * <keys merged into details_json>]. Only the Tour Information fields are read;
+	 * every other stored key (AI-analysis fields, crawl_metadata, source_file, …) is
+	 * left out so the model's merge preserves them untouched.
+	 *
+	 * Simple scalar/list fields come from competitor_tour_info_simple_fields(). The
+	 * four structured fields are parsed from their bespoke inputs:
+	 *   - meals            : meal_breakfast / meal_lunch / meal_dinner
+	 *   - scenic_highlights: parallel scenic_name[] / scenic_desc[]  -> [{name,description}]
+	 *   - shopping_stops   : parallel shopping_point[] / shopping_just[] -> "point — justification" strings
+	 *   - itinerary        : parallel itin_day[] / itin_title[] / itin_desc[]  -> [{day,title,description}]
+	 * `inclusions` is a top-level JSON column, so it is emitted into 'columns' as a
+	 * json-encoded array string. Pure — no DB/framework.
+	 */
+	function competitor_tour_info_from_post($post)
+	{
+		$post    = is_array($post) ? $post : array();
+		$columns = array();
+		$details = array();
+		$get     = function ($k) use ($post) { return isset($post[$k]) ? $post[$k] : null; };
+		$arr     = function ($k) use ($post) { return (isset($post[$k]) && is_array($post[$k])) ? $post[$k] : array(); };
+
+		foreach (competitor_tour_info_simple_fields() as $fields) {
+			foreach ($fields as $f) {
+				$key = $f['key'];
+				if ($f['kind'] === 'list') {
+					$value = competitor_tour_info_lines_to_list($get($key));
+					// A top-level JSON list column (inclusions) stores encoded text.
+					if ($f['store'] === 'column') { $value = json_encode($value, JSON_UNESCAPED_UNICODE); }
+				} else {
+					$value = trim((string) $get($key));
+				}
+				if ($f['store'] === 'column') { $columns[$key] = $value; }
+				else                          { $details[$key] = $value; }
+			}
+		}
+
+		// Meals map.
+		$details['meals'] = array(
+			'breakfast' => trim((string) $get('meal_breakfast')),
+			'lunch'     => trim((string) $get('meal_lunch')),
+			'dinner'    => trim((string) $get('meal_dinner')),
+		);
+
+		// Scenic highlights — parallel name/description rows; keep a name-only row,
+		// drop a row only when BOTH cells are blank.
+		$names = $arr('scenic_name');
+		$descs = $arr('scenic_desc');
+		$scenic = array();
+		for ($i = 0, $n = max(count($names), count($descs)); $i < $n; $i++) {
+			$name = trim((string) (isset($names[$i]) ? $names[$i] : ''));
+			$desc = trim((string) (isset($descs[$i]) ? $descs[$i] : ''));
+			if ($name === '' && $desc === '') { continue; }
+			$scenic[] = array('name' => $name, 'description' => $desc);
+		}
+		$details['scenic_highlights'] = $scenic;
+
+		// Shopping stops — stored as "point — justification" strings so they read back
+		// through competitor_split_point_justification(). Drop rows with no point.
+		$points = $arr('shopping_point');
+		$justs  = $arr('shopping_just');
+		$shopping = array();
+		for ($i = 0, $n = max(count($points), count($justs)); $i < $n; $i++) {
+			$point = trim((string) (isset($points[$i]) ? $points[$i] : ''));
+			$just  = trim((string) (isset($justs[$i]) ? $justs[$i] : ''));
+			if ($point === '' && $just === '') { continue; }
+			$shopping[] = ($point !== '' && $just !== '') ? ($point . ' — ' . $just) : ($point !== '' ? $point : $just);
+		}
+		$details['shopping_stops'] = $shopping;
+
+		// Itinerary — parallel day/title/description rows; drop fully-empty rows.
+		$days   = $arr('itin_day');
+		$titles = $arr('itin_title');
+		$idescs = $arr('itin_desc');
+		$itin   = array();
+		for ($i = 0, $n = max(count($days), count($titles), count($idescs)); $i < $n; $i++) {
+			$day   = trim((string) (isset($days[$i]) ? $days[$i] : ''));
+			$title = trim((string) (isset($titles[$i]) ? $titles[$i] : ''));
+			$desc  = trim((string) (isset($idescs[$i]) ? $idescs[$i] : ''));
+			if ($day === '' && $title === '' && $desc === '') { continue; }
+			$itin[] = array('day' => $day, 'title' => $title, 'description' => $desc);
+		}
+		$details['itinerary'] = $itin;
+
+		return array('columns' => $columns, 'details' => $details);
 	}
 }
