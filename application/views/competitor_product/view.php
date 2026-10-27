@@ -53,6 +53,11 @@ $base_code = competitor_product_code((int) $a->id, $feature);
                         <a href="javascript:;" id="ca_lang_cn"
                            class="btn btn-sm font-weight-bold <?php echo $lang === 'cn' ? 'btn-primary' : 'btn-light-primary'; ?>">中文</a>
                     </div>
+                    <?php if( ! $is_crawl && $lang === 'en') { ?>
+                        <a href="javascript:;" id="ca_ti_edit_btn" class="btn btn-light-warning font-weight-bold mr-2" data-toggle="tooltip" title="Edit the Tour Information">
+                            <i class="la la-edit"></i> Edit
+                        </a>
+                    <?php } ?>
                     <a href="<?php echo base_url('Competitor_Product/Download_Pdf?' . $pdf_qs); ?>" class="btn btn-light-danger font-weight-bold mr-2" data-toggle="tooltip" title="Download this analysis as a PDF">
                         <i class="la la-file-pdf"></i> <?php echo htmlspecialchars($L('download_pdf', 'Download PDF')); ?>
                     </a>
@@ -132,6 +137,7 @@ $base_code = competitor_product_code((int) $a->id, $feature);
                     // details_json onto $a) — shared mapping so it lives in one place.
                     $p = competitor_row_to_product($a);
                     $show_product_source = false;
+                    $editable = ($lang === 'en');   // edit the stored original only
                     include __DIR__ . '/_product.php';
                 } ?>
 
@@ -226,5 +232,50 @@ $base_code = competitor_product_code((int) $a->id, $feature);
                 poll(job);
             }
         }
+    })();
+
+    // Tour Information inline edit (single analysis, English view only). The Edit
+    // button flips the Tour Information tab from the read-only #ca_ti_view to the
+    // #ca_ti_edit form; Save posts to Save_Tour_Info and reloads so the read-only
+    // view (and the derived price range / itinerary) re-render from the saved data.
+    (function () {
+        var $btn = $('#ca_ti_edit_btn');
+        if ( ! $btn.length) { return; }
+        var SAVE_URL = '<?php echo base_url('Competitor_Product/Save_Tour_Info'); ?>';
+
+        function showEdit(on) {
+            $('#ca_ti_view').toggle( ! on);
+            $('#ca_ti_edit').toggle(on);
+            $btn.toggleClass('btn-light-warning', ! on).toggleClass('btn-warning', on);
+        }
+
+        $btn.on('click', function () {
+            // Make sure the Tour Information tab is the active one before editing.
+            var $tab = $('a.nav-link[href="#<?php echo isset($tab_info) ? $tab_info : ''; ?>"]');
+            if ($tab.length) { $tab.tab('show'); }
+            showEdit(true);
+            $('html, body').animate({ scrollTop: $('#ca_ti_edit').offset().top - 90 }, 250);
+        });
+
+        $(document).on('click', '#ca_ti_cancel', function () { showEdit(false); });
+
+        $(document).on('click', '#ca_ti_save', function () {
+            var $save = $(this).prop('disabled', true).html('<i class="la la-spinner la-spin"></i> Saving…');
+            $.ajax({
+                url: SAVE_URL,
+                type: 'post',
+                dataType: 'json',
+                data: $('#ca_ti_form').serialize(),
+                success: function (res) {
+                    if (res && res.success) { window.location.reload(); return; }
+                    $save.prop('disabled', false).html('<i class="la la-save"></i> Save');
+                    Swal.fire({ icon: 'error', title: 'Could not save', text: (res && res.message) ? res.message : 'Please try again.' });
+                },
+                error: function () {
+                    $save.prop('disabled', false).html('<i class="la la-save"></i> Save');
+                    Swal.fire({ icon: 'error', title: 'Could not save', text: 'Please try again.' });
+                }
+            });
+        });
     })();
 </script>

@@ -161,6 +161,8 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
 <!-- ===================== TAB: Tour Information (extracted facts) ===================== -->
 <div class="tab-pane fade show active" id="<?php echo $tab_info; ?>" role="tabpanel">
 
+<div id="ca_ti_view">
+
 <!-- Headline facts -->
 <div class="row mb-3">
     <?php
@@ -314,6 +316,10 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
         </div>
     </div>
 <?php } ?>
+
+</div><!-- /#ca_ti_view -->
+
+<?php if ( ! empty($editable)) { include __DIR__ . '/_tour_info_edit.php'; } ?>
 
 </div><!-- /tab-pane Tour Information -->
 

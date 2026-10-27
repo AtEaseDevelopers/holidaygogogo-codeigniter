@@ -8,14 +8,13 @@ class Costing extends MY_Controller
         $this->load->model('Costing_Model');
     }
 
-    public function index()
+    /**
+     * The package-listing filter set, read identically by the on-screen listing
+     * and the Excel export so both scope to the exact same records.
+     */
+    private function Package_List_Filters()
     {
-        $titles = array(
-            'tab_title' => 'HolidayGoGoGo | Costing Packages',
-            'breadcrumb_title' => 'Setting >> Costing >> Packages',
-        );
-
-        $filters = array(
+        return array(
             'search' => trim((string) $this->input->get('search')),
             'tour_code' => trim((string) $this->input->get('tour_code')),
             'status' => trim((string) $this->input->get('status')),
@@ -24,6 +23,16 @@ class Costing extends MY_Controller
             'customer_email' => trim((string) $this->input->get('customer_email')),
             'sales_admin_id' => (int) $this->input->get('sales_admin_id'),
         );
+    }
+
+    public function index()
+    {
+        $titles = array(
+            'tab_title' => 'HolidayGoGoGo | Costing Packages',
+            'breadcrumb_title' => 'Setting >> Costing >> Packages',
+        );
+
+        $filters = $this->Package_List_Filters();
 
         $array = $this->Costing_Model->Read_Packages_Dashboard($filters);
         $array['filters'] = $filters;
@@ -32,6 +41,263 @@ class Costing extends MY_Controller
         $this->load->view('layout/header', $titles);
         $this->load->view('costing/index', $array);
         $this->load->view('layout/footer');
+    }
+
+    /**
+     * Stream the whole (filtered) package listing to a multi-sheet .xlsx:
+     * Packages summary + Cost Items + Hotels + Flights + Combinations.
+     */
+    public function Export_Packages()
+    {
+        $this->load->helper('costing_packages_export');
+        $data = $this->Costing_Model->Read_Packages_For_Export($this->Package_List_Filters());
+        costing_packages_export_stream($data, 'COSTING_PACKAGES_' . date('Ymd') . '.xlsx');
+    }
+
+    /**
+     * The lookup lists the import template + parser need: currency codes/map,
+     * active category codes (code => canonical) + a display map, and sales-person
+     * names. Built once so Import_Template and Import stay in sync.
+     */
+    private function Import_Lookups()
+    {
+        $this->load->model('Costing_Category_Model');
+
+        $currencies = $this->Costing_Model->Read_Currency_List();
+        $currency_by_code = array();
+        $currency_codes = array();
+        foreach ($currencies as $cur) {
+            $code = strtoupper(trim((string) $cur['code']));
+            if ($code === '') { continue; }
+            $currency_by_code[$code] = (int) $cur['id'];
+            $currency_codes[] = $code;
+        }
+
+        // code => name display map, and a lowercased code => canonical-code lookup
+        // the parser validates against.
+        $category_map = $this->Costing_Category_Model->Read_Category_Map();
+        $category_codes = array();
+        foreach ($category_map as $code => $name) {
+            $category_codes[strtolower((string) $code)] = (string) $code;
+        }
+
+        $sales_by_name = array();
+        $sales_names = array();
+        foreach ($this->Costing_Model->Read_Sales_Agents() as $agent) {
+            $name = trim((string) $agent['Name']);
+            if ($name === '') { continue; }
+            $sales_by_name[strtolower($name)] = (int) $agent['AdminID'];
+            $sales_names[] = $name;
+        }
+
+        return array(
+            'currency_by_code' => $currency_by_code,
+            'currency_codes'   => $currency_codes,
+            'category_codes'   => $category_codes,
+            'category_map'     => $category_map,
+            'sales_by_name'    => $sales_by_name,
+            'sales_names'      => $sales_names,
+        );
+    }
+
+    /**
+     * Download the multi-sheet Costing Package import template (Packages / Cost
+     * Items / Combinations / Hotels / Flights + an Instructions sheet listing the
+     * valid category/currency codes and sales-person names).
+     */
+    public function Import_Template()
+    {
+        $this->load->helper('costing_packages_import');
+        costing_packages_import_template_stream(
+            $this->Import_Lookups(),
+            'COSTING_PKG_IMPORT_TEMPLATE_' . date('Ymd') . '.xlsx'
+        );
+    }
+
+    /**
+     * Bulk-create costing packages from an uploaded template. Each sheet is parsed
+     * into records, assembled (pure) into per-package save payloads, then handed to
+     * Costing_Model::Import_Package which reuses the exact wizard save paths
+     * (Save_Package -> Generate_Booking_Snapshot -> Save_Quote_Details ->
+     * Save_Itinerary_Days). Import is a TWO-step flow:
+     *   Import()        validates + previews (shows a confirmation with per-package
+     *                   counts + every error/warning) — creates NOTHING;
+     *   Import_Commit() re-reads the same saved file and actually creates the
+     *                   packages the user confirmed, one transaction each.
+     */
+
+    /** Backup dir for uploaded import files (kept to re-read on confirm). */
+    private function Import_Dir()
+    {
+        $dir = FCPATH . 'assets/upload/costing_package_import/';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        return $dir;
+    }
+
+    /**
+     * Parse one saved import workbook into the assembled per-package payloads.
+     * Returns null when the file cannot be read as a spreadsheet.
+     */
+    private function Import_Assemble_From_File($dest)
+    {
+        require_once FCPATH . 'vendor/autoload.php';
+        try {
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($dest);
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        $parsed = array();
+        foreach (costing_import_sheets_meta() as $meta) {
+            list($key, $title, $columns) = $meta;
+            $ws = $spreadsheet->getSheetByName($title);
+            $rows = $ws ? $ws->toArray(null, true, true, false) : array();
+            $parsed[$key] = costing_import_sheet_to_records($rows, $columns);
+        }
+
+        return costing_import_assemble_packages($parsed, $this->Import_Lookups());
+    }
+
+    /**
+     * Step 1 — upload, validate and PREVIEW. Saves the workbook (newest 3 kept),
+     * assembles it, and renders the confirmation screen listing what will be
+     * created and every error/warning. Creates nothing.
+     */
+    public function Import()
+    {
+        $this->load->helper('costing_packages_import');
+
+        if ($this->input->server('REQUEST_METHOD') !== 'POST' || empty($_FILES['import_file']['name'])) {
+            redirect('Costing');
+            return;
+        }
+
+        $file = $_FILES['import_file'];
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            $this->session->set_flashdata('message_error', 'Upload failed. Please try again.');
+            redirect('Costing');
+            return;
+        }
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, array('xlsx', 'xls'), true)) {
+            $this->session->set_flashdata('message_error', 'Please upload an Excel file (.xlsx or .xls).');
+            redirect('Costing');
+            return;
+        }
+        if ($file['size'] > 10 * 1024 * 1024) {
+            $this->session->set_flashdata('message_error', 'File too large. Maximum size is 10MB.');
+            redirect('Costing');
+            return;
+        }
+
+        $dir = $this->Import_Dir();
+        $basename = 'costing_package_import_' . time() . '.' . $ext;
+        $dest = $dir . $basename;
+        if (!move_uploaded_file($file['tmp_name'], $dest)) {
+            $this->session->set_flashdata('message_error', 'Could not save the uploaded file.');
+            redirect('Costing');
+            return;
+        }
+        // Keep only the newest 3 uploads as backups.
+        $stamped = array();
+        foreach (glob($dir . 'costing_package_import_*') as $path) {
+            $stamped[$path] = filemtime($path);
+        }
+        arsort($stamped);
+        foreach (array_slice(array_keys($stamped), 3) as $old) {
+            @unlink($old);
+        }
+
+        $assembled = $this->Import_Assemble_From_File($dest);
+        if ($assembled === null) {
+            @unlink($dest);
+            $this->session->set_flashdata('message_error', 'Could not read the Excel file. Please use the downloaded template.');
+            redirect('Costing');
+            return;
+        }
+
+        $summary = costing_import_preview_summary($assembled);
+        if ($summary['total'] === 0 && empty($summary['global_errors'])) {
+            @unlink($dest);
+            $this->session->set_flashdata('message_error', 'No package rows found in the file. Nothing to import.');
+            redirect('Costing');
+            return;
+        }
+
+        $titles = array(
+            'tab_title' => 'HolidayGoGoGo | Confirm Costing Import',
+            'breadcrumb_title' => 'Setting >> Costing >> Import Preview',
+        );
+        $this->load->view('layout/header', $titles);
+        $this->load->view('costing/import_preview', array(
+            'summary' => $summary,
+            'import_token' => $basename, // re-read this exact file on confirm
+        ));
+        $this->load->view('layout/footer');
+    }
+
+    /**
+     * Step 2 — CONFIRM. Re-reads the previewed workbook (by its basename token),
+     * re-assembles, and creates every package with no blocking errors. Reports the
+     * result; warnings never block a package.
+     */
+    public function Import_Commit()
+    {
+        $this->load->helper('costing_packages_import');
+
+        $token = (string) $this->input->post('import_token');
+        $base = basename($token); // strip any path components
+        if ($base === '' || !preg_match('/^costing_package_import_\d+\.(xlsx|xls)$/', $base)) {
+            $this->session->set_flashdata('message_error', 'Import session expired. Please upload the file again.');
+            redirect('Costing');
+            return;
+        }
+        $dest = $this->Import_Dir() . $base;
+        if (!is_file($dest)) {
+            $this->session->set_flashdata('message_error', 'The uploaded file is no longer available. Please upload it again.');
+            redirect('Costing');
+            return;
+        }
+
+        $assembled = $this->Import_Assemble_From_File($dest);
+        if ($assembled === null) {
+            $this->session->set_flashdata('message_error', 'Could not read the Excel file. Please upload it again.');
+            redirect('Costing');
+            return;
+        }
+
+        $created = 0;
+        $lines = array();
+        foreach ($assembled['global_errors'] as $err) {
+            $lines[] = $err;
+        }
+        foreach ($assembled['packages'] as $pkg) {
+            if (!empty($pkg['errors'])) {
+                $lines[] = 'Skipped "' . $pkg['name'] . '": ' . implode(' ', $pkg['errors']);
+                continue;
+            }
+            $result = $this->Costing_Model->Import_Package($pkg);
+            if (!empty($result['ok'])) {
+                $created++;
+                foreach ((array) $pkg['warnings'] as $w) {
+                    $lines[] = 'Imported "' . $pkg['name'] . '" with a note: ' . $w;
+                }
+            } else {
+                $lines[] = 'Failed to save "' . $pkg['name'] . '".';
+            }
+        }
+
+        if ($created > 0) {
+            $this->session->set_flashdata('message_success', $created . ' costing package(s) imported.');
+        } elseif (empty($lines)) {
+            $this->session->set_flashdata('message_error', 'Nothing was imported.');
+        }
+        if (!empty($lines)) {
+            $this->session->set_flashdata('import_result', $lines);
+        }
+        redirect('Costing');
     }
 
     public function Create()

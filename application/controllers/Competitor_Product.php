@@ -1267,6 +1267,31 @@ class Competitor_Product extends MY_Controller
 		$this->load->view('layout/footer');
 	}
 
+	/**
+	 * AJAX: save an edit of the Tour Information tab for one single (non-crawl)
+	 * analysis. The pure parser splits the POST into top-level columns + details_json
+	 * keys; the model merges the details so untouched (AI-analysis / crawl) keys
+	 * survive and clears the cached translation. Owner-only via the constructor gate.
+	 */
+	function Save_Tour_Info()
+	{
+		if ( ! $this->input->is_ajax_request()) {
+			redirect(base_url('Competitor_Product'));
+			return;
+		}
+		$this->output->set_content_type('application/json');
+
+		$id       = (int) $this->input->post('id');
+		$analysis = $this->Competitor_Analysis_Model->Read_One($id);
+		if ( ! $analysis) {
+			echo json_encode(array('success' => false, 'message' => 'Analysis not found.'));
+			return;
+		}
+		$parsed = competitor_tour_info_from_post($this->input->post());
+		$this->Competitor_Analysis_Model->Update_Tour_Info($id, $parsed['columns'], $parsed['details']);
+		echo json_encode(array('success' => true));
+	}
+
 	/** Download the original PDF/image, using the same Owner-only access gate. */
 	function Download_Source()
 	{
