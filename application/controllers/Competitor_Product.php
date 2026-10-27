@@ -1489,6 +1489,25 @@ class Competitor_Product extends MY_Controller
 		$this->stream_excel($book, substr($name, 0, -4) . '.xlsx');
 	}
 
+	/**
+	 * Download a saved analysis as the split-table workbook (summary sheet + a sheet
+	 * each for itinerary / scenic / selling points / inclusion / exclusion /
+	 * accommodation), following the language currently being viewed.
+	 */
+	function Download_Excel_Tables()
+	{
+		@set_time_limit(120);
+		$id = (int) $this->input->get('id');
+		$analysis = $this->Competitor_Analysis_Model->Read_One($id);
+		if ( ! $analysis) { show_404(); return; }
+		$lang = competitor_normalize_lang($this->input->get('lang'));
+		if ($lang !== 'en') { $analysis = $this->apply_language($analysis, $id, $lang); }
+		$this->load->library('CompetitorExcelExport');
+		$book = $this->competitorexcelexport->analysis_tables(array($analysis), $lang);
+		$name = competitor_pdf_filename($analysis->product_name ?: $analysis->page_title, $analysis->id);
+		$this->stream_excel($book, substr($name, 0, -4) . '-tables.xlsx');
+	}
+
 	/** All crawl products (GET), or only the checked product indices (POST). */
 	function Download_Crawl_Excel()
 	{

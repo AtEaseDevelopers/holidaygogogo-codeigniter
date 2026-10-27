@@ -16,6 +16,61 @@ class CompetitorExcelExport
         return $this->finish();
     }
 
+    /**
+     * A compact, split-table workbook (one requested layout): a single-row-per-product
+     * summary sheet (Tour Code / Analysis ID / Destination / Duration / Departure City /
+     * Summary / Cities) plus one dedicated sheet each for Daily Itinerary, Scenic
+     * Highlights, Main Selling Point, Unique Selling Points, Inclusion, Exclusion and
+     * Accommodation. Every detail sheet repeats Tour Code / Analysis ID / Product Name
+     * so rows can be joined back to the summary. Content follows the already-applied
+     * language of $analyses.
+     */
+    public function analysis_tables($analyses, $lang = 'en')
+    {
+        $this->start();
+        $ref_columns = array('Tour Code', 'Analysis ID', 'Product Name');
+        $summary = array(); $itinerary = array(); $scenic = array();
+        $main_usp = array(); $usp = array(); $inclusions = array(); $exclusions = array(); $hotels = array();
+        foreach ($analyses as $a) {
+            $plist = competitor_display_products($a);
+            $ptotal = count($plist);
+            foreach ($plist as $pidx => $p) {
+                $tour_code = $this->text(isset($p['tour_code']) ? $p['tour_code'] : '');
+                $name = isset($p['product_name']) ? (string) $p['product_name'] : '';
+                $ref = array($tour_code, (int) $a->id, $name);
+                $summary[] = array($tour_code, (int) $a->id,
+                    $this->text(isset($p['destination']) ? $p['destination'] : ''),
+                    $this->text(isset($p['duration']) ? $p['duration'] : ''),
+                    $this->text(isset($p['departure_city']) ? $p['departure_city'] : ''),
+                    $this->text(isset($p['summary']) ? $p['summary'] : ''),
+                    implode("\n", competitor_list_items(isset($p['cities']) ? $p['cities'] : '')));
+                foreach (isset($p['itinerary']) && is_array($p['itinerary']) ? $p['itinerary'] : array() as $day) {
+                    $day = (array) $day;
+                    $itinerary[] = array_merge($ref, array($this->text(isset($day['day']) ? $day['day'] : ''),
+                        $this->text(isset($day['title']) ? $day['title'] : ''), $this->text(isset($day['description']) ? $day['description'] : '')));
+                }
+                foreach (competitor_scenic_items(isset($p['scenic_highlights']) ? $p['scenic_highlights'] : array()) as $place) {
+                    $scenic[] = array_merge($ref, array($place['name'], $place['description']));
+                }
+                $main = $this->text(isset($p['main_usp']) ? $p['main_usp'] : '');
+                if ($main !== '') { $main_usp[] = array_merge($ref, array($main)); }
+                foreach (competitor_list_items(isset($p['usp']) ? $p['usp'] : '') as $line) { $usp[] = array_merge($ref, array($line)); }
+                foreach (competitor_list_items(isset($p['inclusions']) ? $p['inclusions'] : '') as $line) { $inclusions[] = array_merge($ref, array($line)); }
+                foreach (competitor_list_items(isset($p['exclusions']) ? $p['exclusions'] : '') as $line) { $exclusions[] = array_merge($ref, array($line)); }
+                foreach (competitor_list_items(isset($p['hotels']) ? $p['hotels'] : '') as $line) { $hotels[] = array_merge($ref, array($line)); }
+            }
+        }
+        $this->add_sheet('Products', array('Tour Code', 'Analysis ID', 'Destination', 'Duration', 'Departure City', 'Summary', 'Cities'), $summary);
+        $this->add_sheet('Daily Itinerary', array_merge($ref_columns, array('Day', 'Title', 'Description')), $itinerary);
+        $this->add_sheet('Scenic Highlights', array_merge($ref_columns, array('Place', 'Description')), $scenic);
+        $this->add_sheet('Main Selling Point', array_merge($ref_columns, array('Main Selling Point')), $main_usp);
+        $this->add_sheet('Unique Selling Points', array_merge($ref_columns, array('Unique Selling Point')), $usp);
+        $this->add_sheet('Inclusion', array_merge($ref_columns, array('Inclusion')), $inclusions);
+        $this->add_sheet('Exclusion', array_merge($ref_columns, array('Exclusion')), $exclusions);
+        $this->add_sheet('Accommodation', array_merge($ref_columns, array('Accommodation')), $hotels);
+        return $this->finish();
+    }
+
     public function crawl($items, $analysed, $analyses, $job, $source, $selected_only = false, $crawl_summary = null)
     {
         $this->start();

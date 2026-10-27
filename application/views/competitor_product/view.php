@@ -59,6 +59,9 @@ $base_code = competitor_product_code((int) $a->id, $feature);
                     <a href="<?php echo base_url('Competitor_Product/Download_Excel?' . $pdf_qs); ?>" class="btn btn-light-success font-weight-bold mr-2" data-toggle="tooltip" title="Download this analysis as an Excel workbook">
                         <i class="la la-file-excel"></i> <?php echo $lang === 'cn' ? '下载 Excel' : 'Download Excel'; ?>
                     </a>
+                    <a href="<?php echo base_url('Competitor_Product/Download_Excel_Tables?' . $pdf_qs); ?>" class="btn btn-light-success font-weight-bold mr-2" data-toggle="tooltip" title="Export as split tables: summary + itinerary, scenic, selling points, inclusion, exclusion, accommodation">
+                        <i class="la la-table"></i> <?php echo $lang === 'cn' ? '行程资料 Excel' : 'Tour Info'; ?>
+                    </a>
                     <a href="<?php echo base_url('Competitor_Product'); ?>" class="btn btn-light-primary font-weight-bold">
                         <i class="la la-arrow-left"></i> <?php echo htmlspecialchars($L('back', 'Back')); ?>
                     </a>
