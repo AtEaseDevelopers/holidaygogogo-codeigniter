@@ -98,6 +98,10 @@ $cities = array_values($cities);
                     <button type="button" id="mp_download_selected" class="btn btn-light-primary font-weight-bold mr-3 mb-2" disabled>
                         <i class="la la-file-excel"></i> Download Selected (<span id="mp_selected_count">0</span>)
                     </button>
+                    <button type="button" id="mp_download_tour_info" class="btn btn-light-success font-weight-bold mr-3 mb-2" <?php echo empty($records) ? 'disabled' : ''; ?>
+                            title="Split-table layout: summary + itinerary, scenic, selling points, inclusion, exclusion, accommodation">
+                        <i class="la la-table"></i> <span id="mp_download_tour_info_label">Tour Info (Excel)</span>
+                    </button>
                     <span class="text-muted mb-2" style="font-size:12px;">Downloads include records matching the current filters.</span>
                 </div>
                 <form id="mp_export_form" method="post" action="<?php echo base_url('Master_Product/Download_Excel'); ?>" style="display:none;">
@@ -207,6 +211,8 @@ $cities = array_values($cities);
         $('#mp_selected_count').text(count);
         $('#mp_download_selected').prop('disabled', count === 0);
         $('#mp_download_results').prop('disabled', $boxes.length === 0);
+        $('#mp_download_tour_info').prop('disabled', $boxes.length === 0);
+        $('#mp_download_tour_info_label').text(count > 0 ? 'Tour Info — Selected (' + count + ')' : 'Tour Info (Excel)');
         $('#mp_select_all').prop('disabled', $boxes.length === 0)
             .prop('checked', $boxes.length > 0 && count === $boxes.length)
             .prop('indeterminate', count > 0 && count < $boxes.length);
@@ -243,16 +249,25 @@ $cities = array_values($cities);
         mpUpdateSelection();
     });
     $(document).on('change', '.mp-select', mpUpdateSelection);
-    function mpDownloadExcel(selectedOnly) {
+    var MP_EXPORT_WIDE   = '<?php echo base_url('Master_Product/Download_Excel'); ?>';
+    var MP_EXPORT_TABLES = '<?php echo base_url('Master_Product/Download_Excel_Tables'); ?>';
+    function mpDownloadExcel(selectedOnly, action) {
         var $boxes = mpFilteredCheckboxes();
         if(selectedOnly) { $boxes = $boxes.filter(':checked'); }
         var ids = $boxes.map(function() { return this.value; }).get();
         if(!ids.length) { return; }
+        var form = document.getElementById('mp_export_form');
+        form.action = action || MP_EXPORT_WIDE;
         $('#mp_export_ids').val(ids.join(','));
-        document.getElementById('mp_export_form').submit();
+        form.submit();
     }
-    $('#mp_download_results').on('click', function() { mpDownloadExcel(false); });
-    $('#mp_download_selected').on('click', function() { mpDownloadExcel(true); });
+    $('#mp_download_results').on('click', function() { mpDownloadExcel(false, MP_EXPORT_WIDE); });
+    $('#mp_download_selected').on('click', function() { mpDownloadExcel(true, MP_EXPORT_WIDE); });
+    // Tour Info export: selected rows if any are checked, otherwise all filtered rows.
+    $('#mp_download_tour_info').on('click', function() {
+        var hasChecked = mpFilteredCheckboxes().filter(':checked').length > 0;
+        mpDownloadExcel(hasChecked, MP_EXPORT_TABLES);
+    });
     $('#mp_search').on('input', mpApplyFilters);
     $('#mp_source, #mp_status, #mp_dest').on('change', mpApplyFilters);
     $('#mp_reset').on('click', function() {

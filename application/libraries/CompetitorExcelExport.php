@@ -38,7 +38,7 @@ class CompetitorExcelExport
                 $tour_code = $this->text(isset($p['tour_code']) ? $p['tour_code'] : '');
                 $name = isset($p['product_name']) ? (string) $p['product_name'] : '';
                 $ref = array($tour_code, (int) $a->id, $name);
-                $summary[] = array($tour_code, (int) $a->id,
+                $summary[] = array($tour_code, (int) $a->id, $name,
                     $this->text(isset($p['destination']) ? $p['destination'] : ''),
                     $this->text(isset($p['duration']) ? $p['duration'] : ''),
                     $this->text(isset($p['departure_city']) ? $p['departure_city'] : ''),
@@ -60,7 +60,7 @@ class CompetitorExcelExport
                 foreach (competitor_list_items(isset($p['hotels']) ? $p['hotels'] : '') as $line) { $hotels[] = array_merge($ref, array($line)); }
             }
         }
-        $this->add_sheet('Products', array('Tour Code', 'Analysis ID', 'Destination', 'Duration', 'Departure City', 'Summary', 'Cities'), $summary);
+        $this->add_sheet('Products', array('Tour Code', 'Analysis ID', 'Product Name', 'Destination', 'Duration', 'Departure City', 'Summary', 'Cities'), $summary);
         $this->add_sheet('Daily Itinerary', array_merge($ref_columns, array('Day', 'Title', 'Description')), $itinerary);
         $this->add_sheet('Scenic Highlights', array_merge($ref_columns, array('Place', 'Description')), $scenic);
         $this->add_sheet('Main Selling Point', array_merge($ref_columns, array('Main Selling Point')), $main_usp);

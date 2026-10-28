@@ -38,6 +38,22 @@ class Master_Product extends MY_Controller
 	/** One workbook for the selected or filtered rows submitted by the listing. */
 	function Download_Excel()
 	{
+		$this->export_selected('wide');
+	}
+
+	/**
+	 * Same selected/filtered rows, but in the compact split-table "Tour Info" layout
+	 * (summary sheet + a sheet each for itinerary / scenic / selling points / inclusion
+	 * / exclusion / accommodation) — mirrors the per-analysis Tour Info export.
+	 */
+	function Download_Excel_Tables()
+	{
+		$this->export_selected('tables');
+	}
+
+	/** Shared export plumbing for both the wide and split-table workbook layouts. */
+	private function export_selected($layout)
+	{
 		if ($this->input->method() !== 'post') {
 			redirect(base_url('Master_Product'));
 			return;
@@ -55,9 +71,12 @@ class Master_Product extends MY_Controller
 		}
 		$this->load->helper('competitor_analysis');
 		$this->load->library('CompetitorExcelExport');
-		$book = $this->competitorexcelexport->analysis($analyses, 'en', true);
+		$book = $layout === 'tables'
+			? $this->competitorexcelexport->analysis_tables($analyses, 'en')
+			: $this->competitorexcelexport->analysis($analyses, 'en', true);
+		$suffix = $layout === 'tables' ? '-tour-info' : '';
 		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-		header('Content-Disposition: attachment; filename="master-products-' . date('Ymd-His') . '.xlsx"');
+		header('Content-Disposition: attachment; filename="master-products' . $suffix . '-' . date('Ymd-His') . '.xlsx"');
 		header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 		header('Pragma: no-cache');
 		header('Expires: 0');
