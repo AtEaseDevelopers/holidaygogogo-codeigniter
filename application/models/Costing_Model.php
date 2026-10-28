@@ -602,14 +602,16 @@ class Costing_Model extends CI_Model
      */
     public function Import_Package($pkg)
     {
-        // Guard the two conditions under which Generate_Booking_Snapshot bails out
-        // BEFORE opening any transaction, so we never insert a package row that we
-        // would then be unable to cleanly roll back (it bails before its own
-        // trans_start, i.e. without a query error for CI to detect).
+        // Guard the one condition under which Generate_Booking_Snapshot would bail
+        // out BEFORE opening any transaction, so we never insert a package row that
+        // we would then be unable to cleanly roll back (it bails before its own
+        // trans_start, i.e. without a query error for CI to detect). Cost items are
+        // optional for an import: the snapshot payload carries allow_empty_items so
+        // Generate_Booking_Snapshot still creates the booking with an empty cost
+        // list. Pax is still required (it drives the snapshot's per-pax maths).
         $sp = (array) $pkg['snapshot_payload'];
         $has_pax = (max(0, (int) $sp['adult_count']) + max(0, (int) $sp['child_count'])) > 0;
-        $has_items = !empty($sp['rows']) || !empty($sp['combinations']);
-        if (!$has_pax || !$has_items) {
+        if (!$has_pax) {
             return array('ok' => false, 'package_id' => 0);
         }
 
@@ -1009,7 +1011,11 @@ class Costing_Model extends CI_Model
         // combination rows) can still be rejected below.
         $combinations = $this->Prepare_Combinations(isset($payload['combinations']) ? (array) $payload['combinations'] : array());
 
-        if (empty($snapshot_rows) && empty($combinations)) {
+        // Normally an all-empty scenario (no cost rows AND no combinations) is
+        // rejected. The Excel importer sets allow_empty_items so a package with no
+        // cost items is still saved (empty cost list, financials all zero) — only
+        // the information actually given is kept.
+        if (empty($snapshot_rows) && empty($combinations) && empty($payload['allow_empty_items'])) {
             return 0;
         }
 

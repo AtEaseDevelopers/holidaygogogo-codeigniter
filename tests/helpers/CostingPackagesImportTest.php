@@ -259,14 +259,40 @@ check_true('noitems: unknown category error', (function () use ($pkgByName) {
     foreach ($pkgByName['NoItems']['errors'] as $e) { if (strpos($e, 'unknown Category') !== false) return true; }
     return false;
 })());
-check_true('noitems: "no valid cost items" error', (function () use ($pkgByName) {
-    foreach ($pkgByName['NoItems']['errors'] as $e) { if (strpos($e, 'No valid cost items') !== false) return true; }
-    return false;
+// Cost items are optional, but INVALID cost rows still block: NoItems has two bad
+// rows (unknown currency + unknown category), so it stays not-creatable on those
+// per-item errors — NOT on a "no valid cost items" gate (that gate is gone).
+check_true('noitems: still not creatable (bad item rows block)', !$pkgByName['NoItems']['creatable']);
+check_true('noitems: NO "no valid cost items" error (gate removed)', (function () use ($pkgByName) {
+    foreach ($pkgByName['NoItems']['errors'] as $e) { if (strpos($e, 'No valid cost items') !== false) return false; }
+    return true;
 })());
 check_true('ghost: unknown-package global error', (function () use ($bad) {
     foreach ($bad['global_errors'] as $e) { if (strpos($e, 'unknown Package Name') !== false) return true; }
     return false;
 })());
+
+/* --------------------------------------- Zero cost items is allowed (optional) */
+
+$empty = costing_import_assemble_packages(array(
+    'packages' => array(
+        // valid header + pax, but NO Cost Items rows reference it at all
+        array('name' => 'EmptyCost', 'adult_count' => '3', 'child_count' => '1', 'status' => 'active',
+              'duration_days' => '7', 'duration_nights' => '6', 'travel_date' => '2027-05-01'),
+    ),
+    // itinerary still attaches even with no cost items
+    'itinerary' => array(
+        array('package_name' => 'EmptyCost', 'day_number' => '1', 'title' => 'Arrival',
+              'description' => 'Check in.', 'meal_plan' => ''),
+    ),
+), $lookups)['packages'][0];
+
+check_true('empty: creatable with zero cost items', $empty['creatable']);
+check('empty: no blocking errors', array(), $empty['errors']);
+check('empty: snapshot has no cost rows', array(), $empty['snapshot_payload']['rows']);
+check('empty: snapshot has no combinations', array(), $empty['snapshot_payload']['combinations']);
+check_true('empty: snapshot flags allow_empty_items', !empty($empty['snapshot_payload']['allow_empty_items']));
+check('empty: itinerary still carried', 1, count($empty['itinerary']));
 
 /* ----------------------------------------------------- Field warnings (non-blocking) */
 

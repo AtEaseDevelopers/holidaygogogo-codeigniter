@@ -428,9 +428,11 @@ if (!function_exists('costing_import_assemble_packages')) {
             if (($adult + $child) <= 0) {
                 $errors[] = 'Total pax is zero — set Adult Pax and/or Child Pax.';
             }
-            if (empty($top_rows) && empty($combinations)) {
-                $errors[] = 'No valid cost items — add at least one Cost Items row for this package.';
-            }
+            // Cost items are OPTIONAL: a package with no (valid) Cost Items rows is
+            // still imported with an empty cost list — only the information actually
+            // given is saved. Invalid cost rows (unknown category/currency, missing
+            // name/price) still raise per-item errors in costing_import_build_cost_row
+            // above, so a half-filled row is caught; a genuinely empty sheet is fine.
 
             $snapshot_payload = array(
                 'booking_id'             => 0,
@@ -444,6 +446,10 @@ if (!function_exists('costing_import_assemble_packages')) {
                 'margin_percentage'      => costing_import_num($rec['margin_percentage']),
                 'commissionable_per_pax' => costing_import_num($rec['commissionable_per_pax']),
                 'ad_hoc_per_pax'         => costing_import_num($rec['ad_hoc_per_pax']),
+                // Import allows a package with zero cost items (wizard saves do not);
+                // Generate_Booking_Snapshot honours this flag to still create the
+                // booking snapshot so itinerary/hotels/flights have a home.
+                'allow_empty_items'      => true,
             );
 
             // --- Hotels ---
@@ -842,13 +848,13 @@ if (!function_exists('costing_import_instruction_rows')) {
         $rows[] = array('1.', 'Fill one package per row on the Packages sheet. Package Name must be unique.');
         $rows[] = array('2.', 'On Cost Items / Combinations / Hotels / Flights, put the SAME Package Name to attach rows to a package.');
         $rows[] = array('3.', 'A Cost Item with a COMBINATION joins that customer option; leave it blank for a plain internal cost line.');
-        $rows[] = array('4.', 'Delete the grey sample rows before uploading. A package needs pax > 0 and at least one cost item.');
+        $rows[] = array('4.', 'Delete the grey sample rows before uploading. A package needs pax > 0; cost items are optional (a package with none still imports).');
         $rows[] = array('5.', 'Itinerary: one row per day. Set Day Number to order days; Meal Plan is comma-separated (e.g. Breakfast, Dinner). Package-level notes go in the Packages sheet ITINERARY NOTES column.');
         $rows[] = array('', '');
 
         $rows[] = array('REQUIRED FIELDS', '(blank/invalid = package skipped)');
         $rows[] = array('Packages', 'PACKAGE NAME (unique), TRAVEL DATE, DURATION DAYS (>=1), and ADULT PAX + CHILD PAX summing to 1 or more.');
-        $rows[] = array('Cost Items', 'Each package needs >= 1 item. Per item: ITEM, CATEGORY, UNIT PRICE and CURRENCY are required.');
+        $rows[] = array('Cost Items', 'Optional — a package with no cost items still imports. But if you add a row: ITEM, CATEGORY, UNIT PRICE and CURRENCY are required.');
         $rows[] = array('Optional (nullable)', 'Customer fields, Sales Person, Duration Nights, Description, Travel Date End, Margin %, Commissionable, Ad Hoc, Supplier, Quantity, Unit Count, Pax Type, Multiplier Type, all Hotels/Flights/Itinerary fields, Itinerary Notes.');
         $rows[] = array('', '');
 
