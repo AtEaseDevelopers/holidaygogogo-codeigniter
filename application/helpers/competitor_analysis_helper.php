@@ -4629,6 +4629,173 @@ if ( ! function_exists('competitor_scenic_items'))
 	}
 }
 
+if ( ! function_exists('competitor_flight_parts'))
+{
+	/**
+	 * Best-effort split of a competitor product's free-text outbound flight detail
+	 * (stored in `flight_departure`, e.g. "Kuala Lumpur ? Zhanjiang MH8002
+	 * 11:00-14:55" or "MU858 KUL/LHW 0405-1130 (Stopover in Kunming)") into
+	 * ['departure_airport','arrival_airport','airline']. The stored text is highly
+	 * inconsistent — separators vary and non-Latin source text is often lost to
+	 * "?" — so this is heuristic: it pulls flight-number tokens for the airline
+	 * column, strips times / flight numbers / parentheticals, then reads the first
+	 * and last place names off the remaining route. Falls back to $departure_city
+	 * for the departure airport. Pure.
+	 */
+	function competitor_flight_parts($flight_text, $departure_city = '')
+	{
+		$text     = trim((string) $flight_text);
+		$dep_city = trim((string) $departure_city);
+		$out = array('departure_airport' => $dep_city, 'arrival_airport' => '', 'airline' => '');
+		if ($text === '') { return $out; }
+
+		// Flight numbers / carrier codes: 1-3 letters IMMEDIATELY followed by 2-4
+		// digits (+ optional "/n"). No space between letters and digits, else an
+		// airport code next to a time ("LHW 0405") would be misread as a flight no.
+		if (preg_match_all('/\b[A-Z]{1,3}\d{2,4}(?:\/\d{1,4})?\b/u', $text, $mm)) {
+			$codes = array();
+			foreach ($mm[0] as $c) { $codes[$c] = true; }
+			$out['airline'] = implode(' / ', array_keys($codes));
+		}
+
+		// Strip parentheticals, flight numbers and clock/range times, then split the
+		// remainder on route separators to recover the place names in order.
+		$route = preg_replace('/\([^)]*\)/u', ' ', $text);
+		$route = preg_replace('/\b[A-Z]{1,3}\d{2,4}(?:\/\d{1,4})?\b/u', ' ', $route);
+		$route = preg_replace('/\b\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?\b/u', ' ', $route);
+		$route = preg_replace('/\b\d{3,4}-\d{3,4}\b/u', ' ', $route);
+		$parts = preg_split('/\s*(?:[?→⇒]|-+>|—>|–>|\/|,|\bto\b|\s-\s)\s*/u', $route);
+		$places = array();
+		foreach ((array) $parts as $p) {
+			$p = trim(preg_replace('/\s+/', ' ', (string) $p));
+			if ($p === '' || mb_strlen($p) < 2 || preg_match('/^[?\s\p{P}]+$/u', $p)) { continue; }
+			$places[] = $p;
+		}
+		if ( ! empty($places)) {
+			if ($dep_city === '') { $out['departure_airport'] = $places[0]; }
+			for ($i = count($places) - 1; $i >= 0; $i--) {
+				if (mb_strtolower($places[$i]) !== mb_strtolower($out['departure_airport'])) {
+					$out['arrival_airport'] = $places[$i];
+					break;
+				}
+			}
+		}
+		return $out;
+	}
+}
+
+if ( ! function_exists('competitor_trim_place'))
+{
+	/** Trim surrounding punctuation/whitespace and a dangling trailing joiner word. Pure. */
+	function competitor_trim_place($s)
+	{
+		$s = trim(preg_replace('/\s+/', ' ', (string) $s));
+		$s = trim($s, " \t\n\r,.;:—–-'\"");
+		$s = preg_replace('/^(?:the|a|an)\s+/iu', '', $s);          // drop a leading article
+		$s = preg_replace('/\s+(?:of|the|and|de|del|la)$/iu', '', $s);
+		return trim($s);
+	}
+}
+
+if ( ! function_exists('competitor_itinerary_day_city'))
+{
+	/**
+	 * Best-effort "City / District" for a day: the place named in the first
+	 * "arrive/depart/in/to/at <Capitalized Place>" cue of the title+description.
+	 * Returns '' when no cue is found. Pure.
+	 */
+	function competitor_itinerary_day_city($text)
+	{
+		if (preg_match('/\b(?:arriv\w*\s+in|depart\w*\s+(?:for|to)|in|to|at)\s+([A-Z][\p{L}\'’-]+(?:\s+[A-Z][\p{L}\'’-]+){0,2})/u', (string) $text, $m)) {
+			return competitor_trim_place($m[1]);
+		}
+		return '';
+	}
+}
+
+if ( ! function_exists('competitor_itinerary_place_phrases'))
+{
+	/**
+	 * Best-effort list of stop names from a day's prose description: the proper-noun
+	 * (Capitalized) place phrases, in order, dropping the day's own city,
+	 * sentence-opener verbs/time words, and nationality adjectives, and
+	 * de-duplicating. Heuristic — the stored itinerary is prose, not structured
+	 * stops. Pure.
+	 */
+	function competitor_itinerary_place_phrases($text, $exclude_city = '')
+	{
+		$text = (string) $text;
+		if (trim($text) === '') { return array(); }
+		$stop_words = array('Arrive','Arrival','Depart','Departure','Breakfast','Lunch','Dinner',
+			'Stay','Overnight','Transfer','Visit','Stroll','Explore','Enjoy','Continue','Proceed',
+			'Drive','Travel','Return','Day','Free','After','Then','Later','Next','Afterwards',
+			'Morning','Afternoon','Evening','Night','Today','Upon','Check','Head','Board',
+			'Take','See','Experience','Discover','Admire','Walk','Watch','Ride','Tour','Visit',
+			'Depart','Depart','Arrive','Spend','Meet','Begin','Start','End','Finish','Relax');
+		$adjectives = array('French','Chinese','English','Japanese','Korean','Western','Nanyang',
+			'European','American','Thai','Malay','Indian','Italian','Spanish','German');
+		$stop_map = array_fill_keys($stop_words, true);
+		$adj_map  = array_fill_keys($adjectives, true);
+		$exclude  = mb_strtolower(competitor_trim_place($exclude_city));
+
+		preg_match_all('/[A-Z][\p{L}\'’&-]+(?:\s+(?:of|the|and|de|del|la|von|van)\s+[A-Z][\p{L}\'’&-]+|\s+[A-Z][\p{L}\'’&-]+)*/u', $text, $mm);
+		$out = array(); $seen = array();
+		foreach ($mm[0] as $phrase) {
+			$phrase = competitor_trim_place($phrase);
+			if ($phrase === '') { continue; }
+			$words = preg_split('/\s+/', $phrase);
+			$first = $words[0];
+			if (count($words) === 1) {
+				if (isset($stop_map[$first]) || isset($adj_map[$first]) || mb_strlen($phrase) < 3) { continue; }
+			} elseif (isset($stop_map[$first])) {
+				// "Visit the Guangzhou Bay Folk Museum" -> drop the leading verb.
+				array_shift($words);
+				$phrase = competitor_trim_place(implode(' ', $words));
+				if ($phrase === '') { continue; }
+			}
+			$key = mb_strtolower($phrase);
+			if ($key === $exclude || isset($seen[$key])) { continue; }
+			$seen[$key] = true;
+			$out[] = $phrase;
+		}
+		return $out;
+	}
+}
+
+if ( ! function_exists('competitor_itinerary_stops'))
+{
+	/**
+	 * Best-effort "daily itinerary flow": break each stored day
+	 * ({day,title,description}) into stop rows [{day, stop_order, stop_name, city,
+	 * notes}]. Detects the day's city from an "in/to <Place>" cue, pulls proper-noun
+	 * place phrases as stop names, and leaves notes blank (the prose has no reliably
+	 * separable note field). A day with no detectable stop still yields one row from
+	 * its title/description so it is not silently dropped. Pure.
+	 */
+	function competitor_itinerary_stops($itinerary)
+	{
+		if ( ! is_array($itinerary)) { return array(); }
+		$rows = array();
+		foreach ($itinerary as $entry) {
+			$e     = (array) $entry;
+			$day   = isset($e['day']) ? trim((string) $e['day']) : '';
+			$title = isset($e['title']) ? trim((string) $e['title']) : '';
+			$desc  = isset($e['description']) ? trim((string) $e['description']) : '';
+			$city  = competitor_itinerary_day_city($title . '. ' . $desc);
+			$order = 0;
+			foreach (competitor_itinerary_place_phrases($desc, $city) as $stop) {
+				$rows[] = array('day' => $day, 'stop_order' => ++$order,
+					'stop_name' => $stop, 'city' => $city, 'notes' => '');
+			}
+			if ($order === 0 && ($title !== '' || $desc !== '')) {
+				$rows[] = array('day' => $day, 'stop_order' => 1,
+					'stop_name' => $title !== '' ? $title : $desc, 'city' => $city, 'notes' => '');
+			}
+		}
+		return $rows;
+	}
+}
+
 if ( ! function_exists('competitor_traveller_segment_defs'))
 {
 	/**

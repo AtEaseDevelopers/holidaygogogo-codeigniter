@@ -29,7 +29,7 @@ class CompetitorExcelExport
     {
         $this->start();
         $ref_columns = array('Tour Code', 'Analysis ID', 'Product Name');
-        $summary = array(); $itinerary = array(); $scenic = array();
+        $summary = array(); $itinerary = array(); $flow = array(); $scenic = array();
         $main_usp = array(); $usp = array(); $inclusions = array(); $exclusions = array(); $hotels = array();
         foreach ($analyses as $a) {
             $plist = competitor_display_products($a);
@@ -38,16 +38,20 @@ class CompetitorExcelExport
                 $tour_code = $this->text(isset($p['tour_code']) ? $p['tour_code'] : '');
                 $name = isset($p['product_name']) ? (string) $p['product_name'] : '';
                 $ref = array($tour_code, (int) $a->id, $name);
-                $summary[] = array($tour_code, (int) $a->id, $name,
-                    $this->text(isset($p['destination']) ? $p['destination'] : ''),
-                    $this->text(isset($p['duration']) ? $p['duration'] : ''),
-                    $this->text(isset($p['departure_city']) ? $p['departure_city'] : ''),
-                    $this->text(isset($p['summary']) ? $p['summary'] : ''),
-                    implode("\n", competitor_list_items(isset($p['cities']) ? $p['cities'] : '')));
+                $dep_city = $this->text(isset($p['departure_city']) ? $p['departure_city'] : '');
+                $flight = competitor_flight_parts(isset($p['flight_departure']) ? $p['flight_departure'] : '', $dep_city);
+                $summary[] = array(
+                    isset($a->competitor_name) ? (string) $a->competitor_name : '',
+                    (string) $a->url, (string) $a->created_at,
+                    $flight['departure_airport'], $flight['arrival_airport'], $flight['airline']);
                 foreach (isset($p['itinerary']) && is_array($p['itinerary']) ? $p['itinerary'] : array() as $day) {
                     $day = (array) $day;
                     $itinerary[] = array_merge($ref, array($this->text(isset($day['day']) ? $day['day'] : ''),
                         $this->text(isset($day['title']) ? $day['title'] : ''), $this->text(isset($day['description']) ? $day['description'] : '')));
+                }
+                foreach (competitor_itinerary_stops(isset($p['itinerary']) ? $p['itinerary'] : array()) as $stop) {
+                    $flow[] = array_merge($ref, array($stop['day'], (int) $stop['stop_order'],
+                        $stop['stop_name'], $stop['city'], $stop['notes']));
                 }
                 foreach (competitor_scenic_items(isset($p['scenic_highlights']) ? $p['scenic_highlights'] : array()) as $place) {
                     $scenic[] = array_merge($ref, array($place['name'], $place['description']));
@@ -60,8 +64,9 @@ class CompetitorExcelExport
                 foreach (competitor_list_items(isset($p['hotels']) ? $p['hotels'] : '') as $line) { $hotels[] = array_merge($ref, array($line)); }
             }
         }
-        $this->add_sheet('Products', array('Tour Code', 'Analysis ID', 'Product Name', 'Destination', 'Duration', 'Departure City', 'Summary', 'Cities'), $summary);
+        $this->add_sheet('Products', array('Competitor Name', 'Source URL', 'Analysis Date', 'Departure Airport', 'Arrival Airport', 'Airline'), $summary);
         $this->add_sheet('Daily Itinerary', array_merge($ref_columns, array('Day', 'Title', 'Description')), $itinerary);
+        $this->add_sheet('Daily Itinerary Flow', array_merge($ref_columns, array('Day', 'Stop Order', 'Stop Name', 'City / District', 'Notes')), $flow);
         $this->add_sheet('Scenic Highlights', array_merge($ref_columns, array('Place', 'Description')), $scenic);
         $this->add_sheet('Main Selling Point', array_merge($ref_columns, array('Main Selling Point')), $main_usp);
         $this->add_sheet('Unique Selling Points', array_merge($ref_columns, array('Unique Selling Point')), $usp);
