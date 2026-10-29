@@ -122,25 +122,17 @@ class Travel_Voucher extends CI_Controller
 
                 // Inline locally-uploaded images so DomPDF doesn't have to fetch
                 // them back over HTTP (loopback often fails on Herd / self-signed).
-                // $strip_font=true: drop inline font-family so Chinese in the
-                // user-editable footer/contacts/remarks isn't pinned to a non-CJK
-                // font (DomPDF 1.0.2 has no per-glyph fallback) and inherits the CJK
-                // body font instead.
                 $this->load->helper('voucher_image');
-                $array['TravelVoucherFooter']         = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherFooter']) ? $array['TravelVoucherFooter'] : '', false, true));
-                $array['TravelVoucherKeyContacts']    = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherKeyContacts']) ? $array['TravelVoucherKeyContacts'] : '', false, true));
-                $array['TravelVoucherSpecialRemarks'] = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherSpecialRemarks']) ? $array['TravelVoucherSpecialRemarks'] : '', false, true));
+                $array['TravelVoucherFooter']         = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherFooter']) ? $array['TravelVoucherFooter'] : ''));
+                $array['TravelVoucherKeyContacts']    = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherKeyContacts']) ? $array['TravelVoucherKeyContacts'] : ''));
+                $array['TravelVoucherSpecialRemarks'] = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherSpecialRemarks']) ? $array['TravelVoucherSpecialRemarks'] : ''));
 
-                // Build DomPDF directly (NOT via the shared Pdf library, which Receipt
-                // / Faq also use) with the CJK font registered so typed Chinese renders.
-                $this->load->helper('pdf_cjk');
-                $array['pdf_font'] = pdf_cjk_font_family('Helvetica');
-
-                $dompdf = pdf_cjk_make_dompdf();
-                $dompdf->loadHtml($this->load->view('booking/travel_voucher', $array, true), 'UTF-8');
-                $dompdf->setPaper('A4', 'potrait');
-                $dompdf->render();
-                $pdfOutput = $dompdf->output();
+                $this->load->library('pdf');
+                $this->dompdf->loadHtml($this->load->view('booking/travel_voucher', $array, true));
+                $this->dompdf->set_option('isRemoteEnabled', true);
+                $this->dompdf->setPaper('A4', 'potrait');
+                $this->dompdf->render();
+                $pdfOutput = $this->dompdf->output();
 
                 if (ob_get_length()) { ob_end_clean(); }
 

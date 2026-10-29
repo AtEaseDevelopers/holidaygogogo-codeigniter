@@ -257,23 +257,17 @@ class Booking_Confirmation extends CI_Controller
                 // Inline locally-uploaded TinyMCE images so DomPDF doesn't have
                 // to fetch them back over HTTP (loopback often fails on Herd /
                 // self-signed HTTPS).
-                // $strip_font=true: drop inline font-family so Chinese in the
-                // user-editable footers isn't pinned to a non-CJK font (DomPDF 1.0.2
-                // has no per-glyph fallback) and inherits the CJK body font instead.
                 $this->load->helper('voucher_image');
-                $array['BookingConfirmationFooter']   = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['BookingConfirmationFooter']) ? $array['BookingConfirmationFooter'] : '', false, true));
-                $array['TravelVoucherFooter']         = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherFooter']) ? $array['TravelVoucherFooter'] : '', false, true));
-                $array['TravelVoucherKeyContacts']    = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherKeyContacts']) ? $array['TravelVoucherKeyContacts'] : '', false, true));
-                $array['TravelVoucherSpecialRemarks'] = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherSpecialRemarks']) ? $array['TravelVoucherSpecialRemarks'] : '', false, true));
+                $array['BookingConfirmationFooter']   = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['BookingConfirmationFooter']) ? $array['BookingConfirmationFooter'] : ''));
+                $array['TravelVoucherFooter']         = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherFooter']) ? $array['TravelVoucherFooter'] : ''));
+                $array['TravelVoucherKeyContacts']    = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherKeyContacts']) ? $array['TravelVoucherKeyContacts'] : ''));
+                $array['TravelVoucherSpecialRemarks'] = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherSpecialRemarks']) ? $array['TravelVoucherSpecialRemarks'] : ''));
 
-                // Register the shared CJK font so typed Chinese renders instead of
-                // empty boxes; $pdf_font prepends the "cjk" family to the view's base.
-                $this->load->helper('pdf_cjk');
-                $array['pdf_font'] = pdf_cjk_font_family('"Segoe UI", Arial, sans-serif');
-
-                $pdf1 = pdf_cjk_make_dompdf();
+                $pdf1 = new Dompdf();
 
                 $pdf1->loadHtml($this->load->view('booking/booking_confirmation', $array, true), 'UTF-8');
+
+                $pdf1->set_option('isRemoteEnabled', true);
 
                 $pdf1->set_option('enable_html5_parser', true);
 
@@ -287,9 +281,11 @@ class Booking_Confirmation extends CI_Controller
 
                 // -- footer -- //
 
-                $pdf2 = pdf_cjk_make_dompdf();
+                $pdf2 = new Dompdf();
 
                 $pdf2->loadHtml($this->load->view('booking/booking_footer', $array, true), 'UTF-8');
+
+                $pdf2->set_option('isRemoteEnabled', true);
 
                 $pdf2->set_option('enable_html5_parser', true);
 
