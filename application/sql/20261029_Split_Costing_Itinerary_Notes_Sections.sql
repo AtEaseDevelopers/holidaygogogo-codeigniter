@@ -2,7 +2,7 @@
 -- independent rich-text sections: Include / Exclude / Important Notes / Terms &
 -- Conditions. These columns ALREADY EXIST on costing_packages from the original
 -- 4-section design (20260909_Add_Costing_Quotation_Feedback added includes /
--- excludes / important_notes; terms_and_conditions came from the earlier Move
+-- excludes / important_notes, and terms_and_conditions came from the earlier Move
 -- migration). This migration just makes sure they exist and re-activates them —
 -- the code now reads/writes these four columns instead of the merged
 -- itinerary_notes column (kept for a split-on-the-fly legacy fallback).
