@@ -263,11 +263,14 @@ class Booking_Confirmation extends CI_Controller
                 $array['TravelVoucherKeyContacts']    = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherKeyContacts']) ? $array['TravelVoucherKeyContacts'] : ''));
                 $array['TravelVoucherSpecialRemarks'] = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherSpecialRemarks']) ? $array['TravelVoucherSpecialRemarks'] : ''));
 
-                $pdf1 = new Dompdf();
+                // Register the shared CJK font and wrap only the Chinese runs in a
+                // cjk-font span so typed Chinese renders while English keeps the
+                // view's original Arial/Segoe font and the pixel-tuned layout stays.
+                $this->load->helper('pdf_cjk');
 
-                $pdf1->loadHtml($this->load->view('booking/booking_confirmation', $array, true), 'UTF-8');
+                $pdf1 = pdf_cjk_make_dompdf();
 
-                $pdf1->set_option('isRemoteEnabled', true);
+                $pdf1->loadHtml(pdf_cjk_wrap_html($this->load->view('booking/booking_confirmation', $array, true)), 'UTF-8');
 
                 $pdf1->set_option('enable_html5_parser', true);
 
@@ -281,11 +284,9 @@ class Booking_Confirmation extends CI_Controller
 
                 // -- footer -- //
 
-                $pdf2 = new Dompdf();
+                $pdf2 = pdf_cjk_make_dompdf();
 
-                $pdf2->loadHtml($this->load->view('booking/booking_footer', $array, true), 'UTF-8');
-
-                $pdf2->set_option('isRemoteEnabled', true);
+                $pdf2->loadHtml(pdf_cjk_wrap_html($this->load->view('booking/booking_footer', $array, true)), 'UTF-8');
 
                 $pdf2->set_option('enable_html5_parser', true);
 

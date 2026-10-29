@@ -53,6 +53,71 @@ if ( ! function_exists('pdf_cjk_font_family')) {
     }
 }
 
+if ( ! function_exists('pdf_cjk_wrap_html')) {
+    /**
+     * Wrap every run of CJK (Chinese / Japanese / fullwidth) characters in the
+     * already-rendered HTML in a <span> that uses the registered "cjk" font, so
+     * ONLY Chinese switches font while the surrounding Latin text keeps the view's
+     * original font (Arial / Segoe UI / Helvetica) and metrics.
+     *
+     * This is how we render Chinese without changing the English look or breaking
+     * the pixel-tuned layouts: DomPDF 1.0.2 resolves a single font per text run and
+     * has no per-glyph fallback, so prepending the CJK font to the whole document
+     * would render ALL text (English too) in the CJK font and grow every line box.
+     * Wrapping just the CJK runs localises the taller font to lines that actually
+     * contain Chinese.
+     *
+     * Only text nodes are touched — tags, attributes and <style>/<script> bodies
+     * are left untouched (CSS/markup never carry CJK we need to render anyway). No-op
+     * when no CJK font is available, or when the HTML has no CJK characters.
+     */
+    function pdf_cjk_wrap_html($html, $family = 'cjk')
+    {
+        if ($html === '' || $html === null || pdf_cjk_font_path() === '') {
+            return (string) $html;
+        }
+
+        // CJK symbols/punctuation, Hiragana, Katakana, CJK Ext-A, CJK Unified,
+        // Compatibility Ideographs, and Fullwidth/Halfwidth forms.
+        $cjk = '/[\x{3000}-\x{303F}\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}\x{FF00}-\x{FFEF}]+/u';
+        if ( ! preg_match($cjk, $html)) {
+            return (string) $html; // English-only — nothing to wrap.
+        }
+
+        // Split into tags (captured) and the text between them so we only ever
+        // rewrite text nodes, never tag/attribute contents.
+        $parts   = preg_split('/(<[^>]*>)/u', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $in_skip = false;
+        foreach ($parts as &$part) {
+            if ($part === '') {
+                continue;
+            }
+            if ($part[0] === '<') {
+                if (preg_match('/^<\s*(style|script)\b/i', $part)) {
+                    $in_skip = true;
+                } elseif (preg_match('/^<\s*\/\s*(style|script)\s*>/i', $part)) {
+                    $in_skip = false;
+                }
+                continue; // never modify a tag
+            }
+            if ($in_skip) {
+                continue; // inside <style>/<script>
+            }
+            $part = preg_replace_callback($cjk, function ($m) use ($family) {
+                // !important is REQUIRED: the PDF views set `font-family: ... !important`
+                // on <body>, and DomPDF lets that author-important rule override a
+                // normal inline style — so a plain inline font-family on this span
+                // loses and the Chinese falls back to the (glyph-less) base font,
+                // rendering as empty boxes. An inline !important wins the cascade.
+                return '<span style="font-family:' . $family . ' !important;">' . $m[0] . '</span>';
+            }, $part);
+        }
+        unset($part);
+
+        return implode('', $parts);
+    }
+}
+
 if ( ! function_exists('pdf_cjk_make_dompdf')) {
     /**
      * Build a \Dompdf\Dompdf with remote + font subsetting enabled and, when a CJK

@@ -127,12 +127,16 @@ class Travel_Voucher extends CI_Controller
                 $array['TravelVoucherKeyContacts']    = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherKeyContacts']) ? $array['TravelVoucherKeyContacts'] : ''));
                 $array['TravelVoucherSpecialRemarks'] = inline_voucher_images_html(sanitize_voucher_content_html(isset($array['TravelVoucherSpecialRemarks']) ? $array['TravelVoucherSpecialRemarks'] : ''));
 
-                $this->load->library('pdf');
-                $this->dompdf->loadHtml($this->load->view('booking/travel_voucher', $array, true));
-                $this->dompdf->set_option('isRemoteEnabled', true);
-                $this->dompdf->setPaper('A4', 'potrait');
-                $this->dompdf->render();
-                $pdfOutput = $this->dompdf->output();
+                // Build DomPDF directly (NOT via the shared Pdf library, which Receipt
+                // / Faq also use) with the CJK font registered, and wrap only the
+                // Chinese runs in a cjk-font span so typed Chinese renders while the
+                // English text keeps the view's original Helvetica font and layout.
+                $this->load->helper('pdf_cjk');
+                $dompdf = pdf_cjk_make_dompdf();
+                $dompdf->loadHtml(pdf_cjk_wrap_html($this->load->view('booking/travel_voucher', $array, true)), 'UTF-8');
+                $dompdf->setPaper('A4', 'potrait');
+                $dompdf->render();
+                $pdfOutput = $dompdf->output();
 
                 if (ob_get_length()) { ob_end_clean(); }
 
