@@ -7,7 +7,7 @@
 -- the code now reads/writes these four columns instead of the merged
 -- itinerary_notes column (kept for a split-on-the-fly legacy fallback).
 --
--- Plain ADD/DROP COLUMN (no IF NOT EXISTS): MySQL 9 rejects that syntax; the
+-- Plain ADD/DROP COLUMN (no IF NOT EXISTS) -- MySQL 9 rejects that syntax, so the
 -- patch runner treats a re-run 1060 (duplicate column) / 1091 (drop missing) as
 -- non-fatal, so these are safe to re-run.
 ALTER TABLE costing_packages ADD COLUMN itinerary_includes TEXT NULL DEFAULT NULL;
