@@ -40,6 +40,12 @@ $PackageName   = isset($package['name']) ? $package['name'] : '-';
 $SalesPerson   = isset($package['sales_person']) && $package['sales_person'] !== '' ? $package['sales_person'] : '-';
 // Sales person's contact number, shown beside their name on the quotation.
 $SalesPersonContact = isset($package['sales_person_contact']) ? trim((string) $package['sales_person_contact']) : '';
+// Quotation validity date ("Valid until"), set on the wizard's step 1. Blank = hidden.
+$ValidUntil = !empty($package['validity_date']) && strtotime($package['validity_date'])
+    ? strtoupper(date('d M Y', strtotime($package['validity_date'])))
+    : '';
+// Step 1 free-text description, shown under the Pricing per person table. Blank = hidden.
+$PackageDescription = isset($package['description']) ? trim((string) $package['description']) : '';
 $DurationDays  = (int) (isset($package['duration_days']) ? $package['duration_days'] : 0);
 $DurationNights = (int) (isset($package['duration_nights']) ? $package['duration_nights'] : 0);
 $TotalPax      = (int) (isset($booking['total_pax']) ? $booking['total_pax'] : 0);
@@ -190,7 +196,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
     <title>Quotation <?php echo html_escape($TourCode); ?></title>
 </head><style type="text/css">
     body {
-        font-family: "Segoe UI", Arial, sans-serif !important;
+        font-family: <?php echo isset($pdf_font) ? $pdf_font : '"Segoe UI", Arial, sans-serif'; ?> !important;
         font-size: 13px;
         padding-left: 10px;
         padding-right: 10px;
@@ -212,6 +218,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
     .note-row td { background: #f7f7f7; font-style: italic; }
     /* Hotel note is rich-text now; drop the editor's <p> margins so it stays a tight note line. */
     .note-row td p { margin: 0; }
+    .pricing-description { margin-top: 6px; font-size: 11px; line-height: 1.4; }
     .footer-notes { margin-top: 14px; }
     .footer-notes p { background: #fff3a3; font-style: italic; font-size: 11px; padding: 2px 4px; margin-bottom: 4px; }
     /* Reserve top/bottom margin on every page for the repeating header/footer. */
@@ -305,6 +312,12 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
                 <td class="k">TOTAL PAX</td>
                 <td><?php echo $PricingBasis !== '' ? html_escape($PricingBasis) : ($TotalPax > 0 ? ($TotalPax . 'pax') : '-'); ?></td>
             </tr>
+            <?php if ($ValidUntil !== '') { ?>
+            <tr>
+                <td class="k">VALID UNTIL</td>
+                <td><?php echo html_escape($ValidUntil); ?></td>
+            </tr>
+            <?php } ?>
         </table>
 
         <!-- Hotel pricing (dynamic columns — 4.2) -->
@@ -343,6 +356,10 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
                 <?php } ?>
             </tbody>
         </table>
+
+        <?php if ($PackageDescription !== '') { ?>
+            <div class="pricing-description"><?php echo nl2br(html_escape($PackageDescription)); ?></div>
+        <?php } ?>
 
         <!-- Flight (mode-driven; multiple airline options — 4.3 / 4.4) -->
         <?php if ($ShowFlight) { $opt_no = 0; foreach ($FlightOptions as $opt) { $opt_no++;
@@ -399,47 +416,66 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
     <div style="page-break-before: always;">
         <h3 class="text-center" style="margin-bottom:5px;"><?php echo html_escape($PackageName); ?> — Itinerary</h3>
         <p class="text-center small-font" style="margin-bottom:8px;"><?php echo $DurationDays; ?> Days / <?php echo $DurationNights; ?> Nights</p>
-        <hr style="margin-bottom:0px;">
-        <table style="width:100%; font-size:13px;">
-            <tr style="font-weight:700;">
-                <td style="width:8%;">Day</td>
-                <td style="width:32%;">Itinerary</td>
-                <td style="width:60%;">Details</td>
-            </tr>
-        </table>
-        <hr style="margin-top:0px;">
-
+        <!-- ONE table for the whole itinerary (header row in <thead> so it repeats
+             on every page). Rendering each day as its OWN table made any day that
+             flowed onto a continuation page recompute its column widths on its own
+             and get them wrong — the Day cell ballooned and shoved the Itinerary /
+             Details columns right, so days on later pages no longer lined up with
+             days on the first. A single fixed-layout table keeps one column model
+             across page breaks; page-break-inside:avoid on each <tr> keeps a day
+             from splitting mid-row. -->
+        <table style="width:100%; table-layout:fixed; border-collapse:collapse;">
+            <thead>
+                <tr style="font-weight:700; font-size:13px;">
+                    <td style="width:8%; border-top:1px solid #000; border-bottom:1px solid #000; padding:4px 5px;">Day</td>
+                    <td style="width:32%; border-top:1px solid #000; border-bottom:1px solid #000; padding:4px 5px;">Itinerary</td>
+                    <td style="width:60%; border-top:1px solid #000; border-bottom:1px solid #000; padding:4px 5px;">Details</td>
+                </tr>
+            </thead>
+            <tbody>
         <?php if (empty($itinerary)) { ?>
-            <table style="width:100%; font-size:11px; border-spacing:5px;">
-                <tr><td style="text-align:center; padding:10px;">Itinerary details to be confirmed.</td></tr>
-            </table>
+                <tr><td colspan="3" style="text-align:center; padding:10px; font-size:11px;">Itinerary details to be confirmed.</td></tr>
         <?php } else {
             $this->load->helper('costing_itinerary');
             foreach ($itinerary as $day) {
                 $meals = costing_meal_plan_labels(isset($day['meal_plan']) ? $day['meal_plan'] : ''); ?>
-                <table style="width:100%; font-size:11px; border-spacing:5px; page-break-inside:avoid;">
-                    <tr style="vertical-align:baseline;">
-                        <td style="width:8%;">Day <?php echo (int) $day['day_number']; ?></td>
-                        <td style="width:32%;"><strong><?php echo html_escape(isset($day['title']) ? $day['title'] : ''); ?></strong></td>
-                        <td style="width:60%;">
-                            <div><?php echo isset($day['description']) ? $day['description'] : ''; ?></div>
-                            <?php if (!empty($meals)) { ?>
-                                <div style="margin-top:4px;"><strong style="color:#2b3a55;">Meal Plan:</strong> <?php echo html_escape(implode(', ', $meals)); ?></div>
-                            <?php } ?>
-                        </td>
-                    </tr>
-                </table>
+                <tr style="vertical-align:baseline; font-size:11px; page-break-inside:avoid;">
+                    <td style="padding:6px 5px;">Day <?php echo (int) $day['day_number']; ?></td>
+                    <td style="padding:6px 5px;"><strong><?php echo html_escape(isset($day['title']) ? $day['title'] : ''); ?></strong></td>
+                    <td style="padding:6px 5px;">
+                        <div><?php echo isset($day['description']) ? $day['description'] : ''; ?></div>
+                        <?php if (!empty($meals)) { ?>
+                            <div style="margin-top:4px;"><strong style="color:#2b3a55;">Meal Plan:</strong> <?php echo html_escape(implode(', ', $meals)); ?></div>
+                        <?php } ?>
+                    </td>
+                </tr>
             <?php } ?>
-        <?php }
+        <?php } ?>
+            </tbody>
+        </table>
+        <?php
 
-        // Itinerary-wide Notes — one merged block (Include / Exclude / Important
-        // Notes / Terms & Conditions) shown once beneath the day-by-day plan. The
-        // content carries its own section headings.
+        // Itinerary-wide Notes & Terms — four separate sections (Include / Exclude
+        // / Important Notes / Terms & Conditions) shown once beneath the day-by-day
+        // plan. Each section supplies its own heading here; only non-blank sections
+        // print.
         $itin_meta = isset($itinerary_meta) ? $itinerary_meta : array();
-        $itin_notes = isset($itin_meta['notes']) ? $itin_meta['notes'] : '';
-        if (trim(strip_tags($itin_notes, '<img>')) !== '' || stripos($itin_notes, '<img') !== false) { ?>
+        $itin_sections = array(
+            'include'         => 'Include',
+            'exclude'         => 'Exclude',
+            'important_notes' => 'Important Notes',
+            'terms'           => 'Terms &amp; Conditions',
+        );
+        $itin_section_rows = array();
+        foreach ($itin_sections as $sec_key => $sec_label) {
+            $sec_html = isset($itin_meta[$sec_key]) ? (string) $itin_meta[$sec_key] : '';
+            if (trim(strip_tags($sec_html, '<img>')) !== '' || stripos($sec_html, '<img') !== false) {
+                $itin_section_rows[] = '<p style="margin:6px 0 2px;"><strong>' . $sec_label . '</strong></p>' . $sec_html;
+            }
+        }
+        if (!empty($itin_section_rows)) { ?>
             <table style="width:100%; font-size:11px; border-spacing:5px; margin-top:8px;">
-                <tr><td><?php echo $itin_notes; ?></td></tr>
+                <tr><td><?php echo implode('', $itin_section_rows); ?></td></tr>
             </table>
         <?php } ?>
     </div>

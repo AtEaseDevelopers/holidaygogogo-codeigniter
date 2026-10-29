@@ -51,7 +51,10 @@ if (!function_exists('costing_import_package_columns')) {
             'HOTEL COLUMNS'          => 'quote_hotel_columns',
             'HOTEL TITLE LABEL'      => 'quote_hotel_title_label',
             'SHOW SINGLE SUPPLEMENT' => 'quote_show_single_supp',
-            'ITINERARY NOTES'        => 'itinerary_notes',
+            'INCLUDE'                => 'itinerary_include',
+            'EXCLUDE'                => 'itinerary_exclude',
+            'IMPORTANT NOTES'        => 'itinerary_important_notes',
+            'TERMS & CONDITIONS'     => 'itinerary_terms',
         );
     }
 }
@@ -158,8 +161,16 @@ if (!function_exists('costing_import_sheet_to_records')) {
     /**
      * Convert one raw sheet (0-indexed cell arrays, as PhpSpreadsheet
      * toArray(null,true,true,false) emits) into a list of associative records
-     * keyed by the column map's record keys. Skips the header row (first cell
-     * matches the first label, case-insensitive) and fully-blank rows. Pure.
+     * keyed by the column map's record keys. Skips header rows (first cell matches
+     * the first label, case-insensitive) and fully-blank rows. Pure.
+     *
+     * HEADER-AWARE: when a header row is found, each known column is located by
+     * matching its LABEL (case-insensitive) in that header, so columns can be
+     * reordered and unrecognised columns are ignored. This is what lets an EXPORT
+     * carry an extra "TOUR CODE" column (see costing_packages_export_helper.php)
+     * yet still re-import cleanly — the parser simply never reads a column whose
+     * header isn't one of this sheet's labels. A sheet with no recognisable header
+     * falls back to the historical positional mapping (column N => Nth key).
      *
      * @param array $sheet   list of 0-indexed cell arrays
      * @param array $columns label => key map (costing_import_*_columns())
@@ -171,26 +182,61 @@ if (!function_exists('costing_import_sheet_to_records')) {
         $keys   = array_values($columns);
         $first_label = isset($labels[0]) ? $labels[0] : '';
 
-        $records = array();
-        foreach ((array) $sheet as $row) {
+        $sheet = (array) $sheet;
+
+        // Locate the header row (first row whose first cell equals the first label).
+        $header = null;
+        foreach ($sheet as $row) {
             if (!is_array($row)) {
                 continue;
             }
+            $first_val = isset($row[0]) ? trim((string) $row[0]) : '';
+            if ($first_label !== '' && strcasecmp($first_val, $first_label) === 0) {
+                $header = $row;
+                break;
+            }
+        }
+
+        // key => sheet column position. Positional by default; when a header exists
+        // each key is re-pointed at the column whose header matches its label (or
+        // null when that label is absent, yielding a blank cell for that key).
+        $pos = array();
+        foreach ($keys as $i => $key) {
+            $pos[$key] = $i;
+        }
+        if (is_array($header)) {
+            $label_to_pos = array();
+            foreach ($header as $ci => $cell) {
+                $label_to_pos[strtolower(trim((string) $cell))] = $ci;
+            }
+            foreach ($columns as $label => $key) {
+                $lk = strtolower(trim((string) $label));
+                $pos[$key] = array_key_exists($lk, $label_to_pos) ? $label_to_pos[$lk] : null;
+            }
+        }
+
+        $records = array();
+        foreach ($sheet as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            // Header row wherever it sits (the located one and any repeats).
+            $first_val = isset($row[0]) ? trim((string) $row[0]) : '';
+            if ($first_label !== '' && strcasecmp($first_val, $first_label) === 0) {
+                continue;
+            }
+
             $record = array();
             $blank  = true;
-            foreach ($keys as $i => $key) {
-                $val = isset($row[$i]) ? trim((string) $row[$i]) : '';
+            foreach ($keys as $key) {
+                $p = $pos[$key];
+                $val = ($p !== null && isset($row[$p])) ? trim((string) $row[$p]) : '';
                 if ($val !== '') {
                     $blank = false;
                 }
                 $record[$key] = $val;
             }
             if ($blank) {
-                continue;
-            }
-            // Header row wherever it sits.
-            $first_val = isset($row[0]) ? trim((string) $row[0]) : '';
-            if ($first_label !== '' && strcasecmp($first_val, $first_label) === 0) {
                 continue;
             }
             $records[] = $record;
@@ -471,7 +517,14 @@ if (!function_exists('costing_import_assemble_packages')) {
             $itinerary = costing_import_order_itinerary(
                 isset($itin_by_pkg[$lk]) ? $itin_by_pkg[$lk] : array()
             );
-            $itinerary_level = array('notes' => trim((string) (isset($rec['itinerary_notes']) ? $rec['itinerary_notes'] : '')));
+            // Four itinerary-wide sections, keyed by section key to match
+            // Save_Itinerary_Days / costing_itinerary_prepare_level.
+            $itinerary_level = array(
+                'include'         => trim((string) (isset($rec['itinerary_include']) ? $rec['itinerary_include'] : '')),
+                'exclude'         => trim((string) (isset($rec['itinerary_exclude']) ? $rec['itinerary_exclude'] : '')),
+                'important_notes' => trim((string) (isset($rec['itinerary_important_notes']) ? $rec['itinerary_important_notes'] : '')),
+                'terms'           => trim((string) (isset($rec['itinerary_terms']) ? $rec['itinerary_terms'] : '')),
+            );
 
             // Flight mode: map the template's labels (No / Include / FIT / GIT) to the
             // stored codes so "No" becomes 'none' rather than defaulting to 'fit'.
@@ -813,7 +866,10 @@ if (!function_exists('costing_import_template_samples')) {
                 '', '6', '5', 'active', 'Sakura season highlights',
                 '2027-04-01', '2027-04-06', '4', '0', '15', '0', '0',
                 'FIT', 'Twin|Triple', 'Hotel', 'Y',
-                'Price includes 5 nights hotel, daily breakfast & tour guide.',
+                "5 nights hotel\nDaily breakfast\nEnglish-speaking tour guide",
+                "Return air ticket\nTravel insurance\nPersonal expenses",
+                "Itinerary subject to last-minute changes due to weather.",
+                "Price quoted per person based on twin sharing.\nAbove quotation is an estimation only.",
             )),
             'cost_items' => array(
                 array('Japan Spring 2027', 'Option A - 4 Star', 'accommodation', '5N Hotel Twin', 'JTB', 'adult', 'per_pax', '1', '5', '1200', 'MYR'),
@@ -849,13 +905,13 @@ if (!function_exists('costing_import_instruction_rows')) {
         $rows[] = array('2.', 'On Cost Items / Combinations / Hotels / Flights, put the SAME Package Name to attach rows to a package.');
         $rows[] = array('3.', 'A Cost Item with a COMBINATION joins that customer option; leave it blank for a plain internal cost line.');
         $rows[] = array('4.', 'Delete the grey sample rows before uploading. A package needs pax > 0; cost items are optional (a package with none still imports).');
-        $rows[] = array('5.', 'Itinerary: one row per day. Set Day Number to order days; Meal Plan is comma-separated (e.g. Breakfast, Dinner). Package-level notes go in the Packages sheet ITINERARY NOTES column.');
+        $rows[] = array('5.', 'Itinerary: one row per day. Set Day Number to order days; Meal Plan is comma-separated (e.g. Breakfast, Dinner). Package-level Notes & Terms go in the Packages sheet INCLUDE / EXCLUDE / IMPORTANT NOTES / TERMS & CONDITIONS columns (one bullet per line).');
         $rows[] = array('', '');
 
         $rows[] = array('REQUIRED FIELDS', '(blank/invalid = package skipped)');
         $rows[] = array('Packages', 'PACKAGE NAME (unique), TRAVEL DATE, DURATION DAYS (>=1), and ADULT PAX + CHILD PAX summing to 1 or more.');
         $rows[] = array('Cost Items', 'Optional — a package with no cost items still imports. But if you add a row: ITEM, CATEGORY, UNIT PRICE and CURRENCY are required.');
-        $rows[] = array('Optional (nullable)', 'Customer fields, Sales Person, Duration Nights, Description, Travel Date End, Margin %, Commissionable, Ad Hoc, Supplier, Quantity, Unit Count, Pax Type, Multiplier Type, all Hotels/Flights/Itinerary fields, Itinerary Notes.');
+        $rows[] = array('Optional (nullable)', 'Customer fields, Sales Person, Duration Nights, Description, Travel Date End, Margin %, Commissionable, Ad Hoc, Supplier, Quantity, Unit Count, Pax Type, Multiplier Type, all Hotels/Flights/Itinerary fields, Include, Exclude, Important Notes, Terms & Conditions.');
         $rows[] = array('', '');
 
         $rows[] = array('VALID CATEGORY CODES', '');

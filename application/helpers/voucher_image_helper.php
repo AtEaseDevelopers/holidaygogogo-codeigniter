@@ -117,13 +117,34 @@ if (!function_exists('sanitize_voucher_content_html')) {
      * @param string|null $html
      * @return string
      */
-    function sanitize_voucher_content_html($html)
+    function sanitize_voucher_content_html($html, $strip_indent = false, $strip_font = false)
     {
         if (empty($html) || stripos($html, 'style') === false) {
             return (string) $html;
         }
 
         $blocked = ['position', 'top', 'left', 'right', 'bottom', 'z-index'];
+
+        // Opt-in (costing quotation itinerary): also drop the horizontal-indent
+        // props TinyMCE's "Indent" button writes onto <p>/<ul> (padding-left:40px,
+        // margin-left, text-indent). Left in, they shift only the days that were
+        // indented in the editor, so the itinerary's Day/Itinerary/Details columns
+        // stop lining up (the day 7 / day 14 drift). Normal bullet indentation
+        // comes from the default <ul> style, not these, so lists are unaffected.
+        // Booking vouchers DON'T pass this flag, so their stored indents are kept
+        // (see VoucherContentSanitizeTest "padding-left kept").
+        if ($strip_indent) {
+            $blocked = array_merge($blocked, ['margin-left', 'padding-left', 'text-indent']);
+        }
+
+        // Opt-in (costing quotation): drop inline font-family. dompdf 1.0.2 has no
+        // per-glyph fallback, so a pasted/TinyMCE `font-family: Arial` pins that run
+        // to a non-CJK font and any Chinese in it renders as empty boxes even when
+        // the body font is CJK-capable. Stripping it lets the text inherit the
+        // CJK-capable body font. Booking vouchers DON'T pass this flag.
+        if ($strip_font) {
+            $blocked = array_merge($blocked, ['font-family', 'font']);
+        }
 
         return preg_replace_callback(
             '/\bstyle\s*=\s*(["\'])(.*?)\1/is',

@@ -61,8 +61,11 @@ class Costing_Quotation extends CI_Controller
             $html_fields = costing_itinerary_html_fields();
             foreach ($data['itinerary'] as &$day) {
                 foreach ($html_fields as $field) {
+                    // $strip_indent=true: drop TinyMCE indent (padding-left/margin-left)
+                    // so every day's content starts at the same left edge and the
+                    // itinerary columns line up (fixes day 7 / day 14 drift).
                     $day[$field] = inline_voucher_images_html(
-                        sanitize_voucher_content_html(isset($day[$field]) ? $day[$field] : '')
+                        sanitize_voucher_content_html(isset($day[$field]) ? $day[$field] : '', true, true)
                     );
                 }
             }
@@ -73,15 +76,20 @@ class Costing_Quotation extends CI_Controller
         if (!empty($data['itinerary_meta']) && is_array($data['itinerary_meta'])) {
             foreach ($data['itinerary_meta'] as $key => $val) {
                 $data['itinerary_meta'][$key] = inline_voucher_images_html(
-                    sanitize_voucher_content_html((string) $val)
+                    sanitize_voucher_content_html((string) $val, false, true)
                 );
             }
         }
 
-        require_once APPPATH . 'libraries/dompdf/autoload.inc.php';
-        $dompdf = new \Dompdf\Dompdf();
+        // DejaVu Sans (DomPDF's default) has no CJK glyphs, so Chinese that a sales
+        // person types into the itinerary / notes / hotels would render as empty
+        // boxes. Build DomPDF with the shared CJK font registered as the document
+        // font (see pdf_cjk_helper) so typed Chinese renders; English is unaffected.
+        $this->load->helper('pdf_cjk');
+        $data['pdf_font'] = pdf_cjk_font_family('"Segoe UI", Arial, sans-serif');
+
+        $dompdf = pdf_cjk_make_dompdf();
         $dompdf->loadHtml($this->load->view('costing/quotation_pdf', $data, true), 'UTF-8');
-        $dompdf->set_option('isRemoteEnabled', true);
         $dompdf->setPaper('A4', 'portrait');
         $dompdf->render();
 

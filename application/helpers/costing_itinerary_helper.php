@@ -111,6 +111,36 @@ if (!function_exists('costing_meal_plan_labels')) {
     }
 }
 
+if (!function_exists('costing_itinerary_section_meta')) {
+    /**
+     * The itinerary-level rich-text sections, in display order. Each applies to
+     * the WHOLE itinerary (one set per package) and is shown once beneath the
+     * day-by-day plan on the Quotation PDF.
+     *
+     * Keyed by the short section key (used everywhere the sections travel as an
+     * array — itinerary_meta, the posted level fields, the import payload). Each
+     * entry is [label, column, post_field]:
+     *   - label      human heading (wizard label + PDF section heading)
+     *   - column     the costing_packages column it is stored in
+     *   - post_field the form field name / Excel-import record key
+     *
+     * @return array<string,array{0:string,1:string,2:string}>
+     */
+    function costing_itinerary_section_meta()
+    {
+        // The storage columns are the ORIGINAL 4-section columns on
+        // costing_packages (created by 20260909_Add_Costing_Quotation_Feedback,
+        // terms by the earlier Move migration) — reused here rather than adding
+        // new ones. post_field is the stable short form-field / Excel-record key.
+        return array(
+            'include'         => array('Include', 'itinerary_includes', 'itinerary_include'),
+            'exclude'         => array('Exclude', 'itinerary_excludes', 'itinerary_exclude'),
+            'important_notes' => array('Important Notes', 'itinerary_important_notes', 'itinerary_important_notes'),
+            'terms'           => array('Terms & Conditions', 'itinerary_terms_and_conditions', 'itinerary_terms'),
+        );
+    }
+}
+
 if (!function_exists('costing_itinerary_level_fields')) {
     /**
      * The itinerary-level rich-text columns on costing_packages, in display
@@ -120,7 +150,68 @@ if (!function_exists('costing_itinerary_level_fields')) {
      */
     function costing_itinerary_level_fields()
     {
-        return array('itinerary_notes');
+        $columns = array();
+        foreach (costing_itinerary_section_meta() as $meta) {
+            $columns[] = $meta[1];
+        }
+        return $columns;
+    }
+}
+
+if (!function_exists('costing_itinerary_section_defaults')) {
+    /**
+     * The standard boilerplate each section opens with for a BRAND-NEW package.
+     * Body only (bullet lists) — the section heading is supplied by the wizard
+     * label and the PDF, not stored inside the content. Include is left as an
+     * empty bullet because inclusions differ per package.
+     *
+     * @return array<string,string> section key => default HTML body
+     */
+    function costing_itinerary_section_defaults()
+    {
+        return array(
+            'include' => '<ul><li></li></ul>',
+            'exclude' =>
+                '<ul>'
+                . '<li>Personal expenses: telephone, fax, mini bar, laundry, etc</li>'
+                . '<li>Additional Tour</li>'
+                . '<li>Meals other than stated</li>'
+                . '<li>Tourism tax</li>'
+                . '<li>Activities &amp; Entrance fee other than stated (if applicable)</li>'
+                . '<li>Services/ Item not mentioned in the program</li>'
+                . '<li><a href="https://www.holidaygogogo.com/travel-insurance-malaysia-domestic-oversea/" target="_blank" rel="noopener">Travel insurance</a> (strongly recommended to purchase)</li>'
+                . '<li>Other expenses not stated in the "Includes" section</li>'
+                . '<li>Super peak and Peak Season Surcharges (if applicable)</li>'
+                . '</ul>',
+            'important_notes' =>
+                '<ul>'
+                . '<li>Rate maybe change with or without prior notice depend on Vietnam new regulations such as petrol fee, entrance fee etc</li>'
+                . '</ul>',
+            'terms' =>
+                '<ul>'
+                . '<li>Price quoted per person in Malaysian Ringgit (MYR) based on Twin sharing (rate subject to change due to fluctuation of currency).</li>'
+                . '<li>The above quotation is an estimation only, a revised quotation will be given upon confirmation.</li>'
+                . '<li>Maximum 10-hour transport usage per day, exceeding the 10 hours usage, an additional charge will be incurred.</li>'
+                . '<li>Any applicable tax not included in the quotation is to be paid upon arrival at the hotel.</li>'
+                . '<li>Payment must be received in net as stated in the quotation.</li>'
+                . '<li>Restaurant locations will be determined once confirmed.</li>'
+                . '<li>Quoted rates may vary depending on the availability of the restaurant.</li>'
+                . '<li>Any transaction fee charges for the foreign transfer must be borne by the buyer.</li>'
+                . '<li>If the rates quoted are other than MYR, the quoted rates may vary from time to time due to currency fluctuations. An updated rate at the time of booking based on the current exchange rates will be provided.</li>'
+                . '<li>Due to the floating diesel price, the rate is quoted based on current pricing and subject to fluctuation from time to time. We will re quote if the price fluctuated during booking made.</li>'
+                . '<li>The rate quoted is subject to change if there are any revisions on the diesel prices.</li>'
+                . '<li>Itinerary and package content is subject to last-minute changes due to weather or operational issues.</li>'
+                . '<li>Hotel surcharge may apply on weekends, school holidays, and Malaysia public holidays. (Rate based on booking)</li>'
+                . '<li>Activity stated (if included) is provided on a complimentary basis, no refund will be made for cancellation of activities due to weather or operational issues.</li>'
+                . '<li>Holidaygogogo reserves the right to change to other accommodation in the same class if the accommodation stated above is not available during the travel date.</li>'
+                . '<li>No changes in room arrangement are allowed after full payment has been made.</li>'
+                . '<li>Other terms and conditions for booking.</li>'
+                . '<li>All pricing is inclusive of related taxes unless stated otherwise.</li>'
+                . '<li>Single Supplement will be charged for any Single Room Occupancy.</li>'
+                . '<li>Service will start when traveller has arrived at the airport to pick up and ends once traveller has been transferred to the airport for flight departure.</li>'
+                . '<li>Service based on a private tour.</li>'
+                . '</ul>',
+        );
     }
 }
 
@@ -194,30 +285,156 @@ if (!function_exists('costing_itinerary_prepare_row')) {
 
 if (!function_exists('costing_itinerary_prepare_level')) {
     /**
-     * Normalise the posted itinerary-level field into a package-update shape. The
-     * Include / Exclude / Important Notes / Terms & Conditions are now kept in one
-     * merged rich-text Notes field. Trimmed and nulled when visually blank. Post
-     * key is the bare name (notes); the returned key is the costing_packages column
-     * (itinerary_notes).
+     * Normalise the posted itinerary-level sections into a package-update shape.
+     * Include / Exclude / Important Notes / Terms & Conditions are four separate
+     * rich-text fields, keyed by their short section key (include / exclude /
+     * important_notes / terms). Each is trimmed and nulled when visually blank;
+     * the returned keys are the costing_packages columns.
      *
-     * @param array $post
-     * @return array {itinerary_notes:?string}
+     * @param array $post section key => posted HTML
+     * @return array {itinerary_includes:?string, itinerary_excludes:?string, itinerary_important_notes:?string, itinerary_terms_and_conditions:?string}
      */
     function costing_itinerary_prepare_level($post)
     {
         $post = (array) $post;
-        // column => posted field name
-        $map = array(
-            'itinerary_notes' => 'notes',
-        );
 
         $out = array();
-        foreach ($map as $column => $key) {
+        foreach (costing_itinerary_section_meta() as $key => $meta) {
+            $column = $meta[1];
             $val = trim((string) (isset($post[$key]) ? $post[$key] : ''));
             if ($val !== '' && costing_itinerary_html_is_blank($val)) {
                 $val = '';
             }
             $out[$column] = $val !== '' ? $val : null;
+        }
+
+        return $out;
+    }
+}
+
+if (!function_exists('costing_itinerary_split_notes')) {
+    /**
+     * Best-effort split of a LEGACY merged Notes block (one editor holding all
+     * four sections, each introduced by a bold heading like
+     * "<p><strong>Include</strong></p>") into the four separate section bodies.
+     * The heading paragraphs are dropped — the body (usually a <ul>) is kept.
+     *
+     * Only used as a fallback for packages saved before the four columns existed,
+     * so it stays lenient: content before the first recognised heading is folded
+     * into Include, and an unrecognised heading keeps its paragraph with the
+     * section currently being filled.
+     *
+     * @param string|null $html
+     * @return array<string,string> section key => HTML body
+     */
+    function costing_itinerary_split_notes($html)
+    {
+        $out = array();
+        foreach (array_keys(costing_itinerary_section_meta()) as $key) {
+            $out[$key] = '';
+        }
+
+        $html = (string) $html;
+        if (trim($html) === '') {
+            return $out;
+        }
+
+        // Normalise a heading's visible text to a section key, or null.
+        $to_key = function ($text) {
+            $t = html_entity_decode(strip_tags((string) $text), ENT_QUOTES);
+            $t = strtolower(trim(preg_replace('/\s+/', ' ', $t)));
+            $t = trim($t, " :\t");
+            switch ($t) {
+                case 'include':
+                case 'includes':
+                case 'inclusion':
+                case 'inclusions':
+                    return 'include';
+                case 'exclude':
+                case 'excludes':
+                case 'exclusion':
+                case 'exclusions':
+                    return 'exclude';
+                case 'important note':
+                case 'important notes':
+                    return 'important_notes';
+                case 'terms':
+                case 'terms & conditions':
+                case 'terms and conditions':
+                case 'terms and condition':
+                case 'terms & condition':
+                    return 'terms';
+            }
+            return null;
+        };
+
+        // Split on heading paragraphs — a <p> (or <h1..6>) whose text is a short
+        // bold label. Capture the label so we know which section follows.
+        $pattern = '/<(p|h[1-6])\b[^>]*>\s*(?:<strong>|<b>)?\s*([^<]{1,40}?)\s*(?:<\/strong>|<\/b>)?\s*<\/\1>/i';
+        $parts = preg_split($pattern, $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+        if ($parts === false) {
+            $out['include'] = $html;
+            return $out;
+        }
+
+        // preg_split with two capture groups yields: [pre, tag1, label1, body1, tag2, label2, body2, ...]
+        $current = 'include';
+        $out['include'] .= isset($parts[0]) ? $parts[0] : '';
+        $count = count($parts);
+        for ($i = 1; $i < $count; $i += 3) {
+            $tag   = $parts[$i];
+            $label = isset($parts[$i + 1]) ? $parts[$i + 1] : '';
+            $body  = isset($parts[$i + 2]) ? $parts[$i + 2] : '';
+            $key   = $to_key($label);
+            if ($key === null) {
+                // Not a section heading — keep the paragraph verbatim in the
+                // section we are currently filling.
+                $out[$current] .= '<' . $tag . '>' . $label . '</' . $tag . '>' . $body;
+            } else {
+                $out[$key] .= $body;
+                $current = $key;
+            }
+        }
+
+        foreach ($out as $key => $val) {
+            $out[$key] = costing_itinerary_html_is_blank($val) ? '' : trim($val);
+        }
+
+        return $out;
+    }
+}
+
+if (!function_exists('costing_itinerary_sections_from_row')) {
+    /**
+     * Resolve the four itinerary sections (include / exclude / important_notes /
+     * terms) for display from a costing_packages (or joined booking) row.
+     *
+     * Prefers the four dedicated columns. When ALL four are blank but the legacy
+     * merged itinerary_notes column has content, it is split on the fly so old
+     * packages keep rendering their notes. Always returns every section key.
+     *
+     * @param array $row
+     * @return array<string,string> section key => HTML
+     */
+    function costing_itinerary_sections_from_row($row)
+    {
+        $row = (array) $row;
+
+        $out = array();
+        $has_any = false;
+        foreach (costing_itinerary_section_meta() as $key => $meta) {
+            $val = isset($row[$meta[1]]) ? (string) $row[$meta[1]] : '';
+            $out[$key] = $val;
+            if (!costing_itinerary_html_is_blank($val)) {
+                $has_any = true;
+            }
+        }
+
+        if (!$has_any) {
+            $legacy = isset($row['itinerary_notes']) ? (string) $row['itinerary_notes'] : '';
+            if (!costing_itinerary_html_is_blank($legacy)) {
+                return costing_itinerary_split_notes($legacy);
+            }
         }
 
         return $out;

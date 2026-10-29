@@ -9,7 +9,7 @@
 	}
 	body {
 		/*display: flex;*/
-		font-family: "Segoe UI", Arial, sans-serif !important;
+		font-family: <?php echo isset($pdf_font) ? $pdf_font : '"Segoe UI", Arial, sans-serif'; ?> !important;
 		font-size: 13px;
 		padding-left: 10px;
 		padding-right: 10px;

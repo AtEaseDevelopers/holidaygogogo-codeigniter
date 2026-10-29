@@ -33,6 +33,9 @@ $booking_status_value = isset($booking['status_value']) ? $booking['status_value
 $margin_percentage = isset($financials['margin_percentage']) ? (float) $financials['margin_percentage'] : 0;
 $sales_agents = isset($sales_agents) ? $sales_agents : array();
 $sales_admin_id = isset($package['sales_admin_id']) ? (int) $package['sales_admin_id'] : 0;
+$sales_admin_mobile = isset($package['sales_admin_mobile']) ? (string) $package['sales_admin_mobile'] : '';
+$op_admin_name = isset($package['op_admin_name']) ? trim((string) $package['op_admin_name']) : '';
+$validity_date = !empty($package['validity_date']) && strtotime($package['validity_date']) ? date('Y-m-d', strtotime($package['validity_date'])) : '';
 
 // Multiplier options for the per-row picker in the cost template. Each row copies
 // its item's default multiplier, but the user may override it here (e.g. a normally
@@ -243,18 +246,59 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <div class="form-group">
                             <label>Sales Person</label>
-                            <select name="sales_admin_id" class="form-control">
+                            <select name="sales_admin_id" id="cw-sales-admin" class="form-control">
                                 <option value="">— Select sales person —</option>
-                                <?php foreach ($sales_agents as $agent) { ?>
-                                    <option value="<?php echo (int) $agent['AdminID']; ?>" <?php echo ($sales_admin_id === (int) $agent['AdminID']) ? 'selected' : ''; ?>><?php echo html_escape($agent['Name']); ?></option>
+                                <?php foreach ($sales_agents as $agent) {
+                                    $agent_contact = trim((string) (isset($agent['CountryCode']) ? $agent['CountryCode'] : '') . (isset($agent['Mobile']) ? $agent['Mobile'] : '')); ?>
+                                    <option value="<?php echo (int) $agent['AdminID']; ?>" data-mobile="<?php echo html_escape($agent_contact); ?>" <?php echo ($sales_admin_id === (int) $agent['AdminID']) ? 'selected' : ''; ?>><?php echo html_escape($agent['Name']); ?></option>
                                 <?php } ?>
                             </select>
                         </div>
                     </div>
+                    <div class="col-md-3">
+                        <div class="form-group">
+                            <label>Sales Person Mobile</label>
+                            <input type="text" name="sales_admin_mobile" id="cw-sales-mobile" class="form-control" value="<?php echo html_escape($sales_admin_mobile); ?>" placeholder="e.g. +60 123456789">
+                            <span class="form-text text-muted" style="font-size:11px;">Auto-filled from the sales person; edit to override. Shown on the quotation.</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-group">
+                            <label>OP Person</label>
+                            <input type="text" class="form-control" value="<?php echo html_escape($op_admin_name); ?>" placeholder="Set to you when saved" readonly style="background:#f3f6f9;">
+                            <span class="form-text text-muted" style="font-size:11px;">Automatically recorded as whoever created this package. Internal use only.</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-group">
+                            <label>Validity Date</label>
+                            <input type="date" name="validity_date" class="form-control" value="<?php echo html_escape($validity_date); ?>">
+                            <span class="form-text text-muted" style="font-size:11px;">Quotation is valid until this date; printed on the PDF.</span>
+                        </div>
+                    </div>
                 </div>
+                <script>
+                // Prefill the Sales Person Mobile from the picked sales person, but
+                // never clobber a number the user typed/overrode themselves: only
+                // overwrite when the field is blank or still holds the last auto value.
+                (function () {
+                    var sel = document.getElementById('cw-sales-admin');
+                    var mob = document.getElementById('cw-sales-mobile');
+                    if (!sel || !mob) { return; }
+                    var lastAuto = mob.value;
+                    sel.addEventListener('change', function () {
+                        var opt = sel.options[sel.selectedIndex];
+                        var contact = opt ? (opt.getAttribute('data-mobile') || '') : '';
+                        if (mob.value === '' || mob.value === lastAuto) {
+                            mob.value = contact;
+                        }
+                        lastAuto = contact;
+                    });
+                })();
+                </script>
                 <div class="row">
                     <div class="col-md-3">
                         <div class="form-group">
@@ -501,50 +545,17 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
         $meal_options = costing_meal_plan_options();
         // Itinerary-wide rich-text blocks (one set for the whole itinerary).
         $itin_meta = isset($itinerary_meta) ? $itinerary_meta : array();
-        // #7 One merged Notes field. A blank field opens with the four sections
-        // (Include / Exclude / Important Notes / Terms & Conditions). Exclude,
-        // Important Notes and Terms & Conditions are pre-filled with the agency's
-        // standard boilerplate; Include stays an empty bullet (inclusions differ
-        // per package).
-        $itin_level_fields = array(
-            'itinerary_notes' => array('Notes', 'notes'),
-        );
-        $itin_notes_default =
-            '<p><strong>Include</strong></p><ul><li></li></ul>'
-            . '<p><strong>Exclude</strong></p><ul>'
-            . '<li>Personal expenses: telephone, fax, mini bar, laundry, etc</li>'
-            . '<li>Additional Tour</li>'
-            . '<li>Meals other than stated</li>'
-            . '<li>Tourism tax</li>'
-            . '<li>Activities &amp; Entrance fee other than stated (if applicable)</li>'
-            . '<li>Services/ Item not mentioned in the program</li>'
-            . '<li><a href="https://www.holidaygogogo.com/travel-insurance-malaysia-domestic-oversea/" target="_blank" rel="noopener">Travel insurance</a> (strongly recommended to purchase)</li>'
-            . '<li>Other expenses not stated in the "Includes" section</li>'
-            . '<li>Super peak and Peak Season Surcharges (if applicable)</li></ul>'
-            . '<p><strong>Important Notes</strong></p><ul>'
-            . '<li>Rate maybe change with or without prior notice depend on Vietnam new regulations such as petrol fee, entrance fee etc</li></ul>'
-            . '<p><strong>Terms &amp; Conditions</strong></p><ul>'
-            . '<li>Price quoted per person in Malaysian Ringgit (MYR) based on Twin sharing (rate subject to change due to fluctuation of currency).</li>'
-            . '<li>The above quotation is an estimation only, a revised quotation will be given upon confirmation.</li>'
-            . '<li>Maximum 10-hour transport usage per day, exceeding the 10 hours usage, an additional charge will be incurred.</li>'
-            . '<li>Any applicable tax not included in the quotation is to be paid upon arrival at the hotel.</li>'
-            . '<li>Payment must be received in net as stated in the quotation.</li>'
-            . '<li>Restaurant locations will be determined once confirmed.</li>'
-            . '<li>Quoted rates may vary depending on the availability of the restaurant.</li>'
-            . '<li>Any transaction fee charges for the foreign transfer must be borne by the buyer.</li>'
-            . '<li>If the rates quoted are other than MYR, the quoted rates may vary from time to time due to currency fluctuations. An updated rate at the time of booking based on the current exchange rates will be provided.</li>'
-            . '<li>Due to the floating diesel price, the rate is quoted based on current pricing and subject to fluctuation from time to time. We will re quote if the price fluctuated during booking made.</li>'
-            . '<li>The rate quoted is subject to change if there are any revisions on the diesel prices.</li>'
-            . '<li>Itinerary and package content is subject to last-minute changes due to weather or operational issues.</li>'
-            . '<li>Hotel surcharge may apply on weekends, school holidays, and Malaysia public holidays. (Rate based on booking)</li>'
-            . '<li>Activity stated (if included) is provided on a complimentary basis, no refund will be made for cancellation of activities due to weather or operational issues.</li>'
-            . '<li>Holidaygogogo reserves the right to change to other accommodation in the same class if the accommodation stated above is not available during the travel date.</li>'
-            . '<li>No changes in room arrangement are allowed after full payment has been made.</li>'
-            . '<li>Other terms and conditions for booking.</li>'
-            . '<li>All pricing is inclusive of related taxes unless stated otherwise.</li>'
-            . '<li>Single Supplement will be charged for any Single Room Occupancy.</li>'
-            . '<li>Service will start when traveller has arrived at the airport to pick up and ends once traveller has been transferred to the airport for flight departure.</li>'
-            . '<li>Service based on a private tour.</li></ul>';
+        // Four separate Notes & Terms sections (Include / Exclude / Important
+        // Notes / Terms & Conditions). Each is its own TinyMCE editor; a blank
+        // field on a brand-new package opens with the agency's standard
+        // boilerplate (Include stays an empty bullet — inclusions differ per
+        // package). [label, section key] keyed by the posted form field name.
+        $itin_level_fields = array();
+        foreach (costing_itinerary_section_meta() as $key => $meta) {
+            // $meta = [label, column, post_field]
+            $itin_level_fields[$meta[2]] = array($meta[0], $key);
+        }
+        $itin_section_defaults = costing_itinerary_section_defaults();
         // Renders one day card. $tpl=true emits the blank JS template with an
         // "__I__" index placeholder (values blank); otherwise a saved/seed row.
         $render_itin_card = function ($i, $day, $tpl = false) use ($itin_fields, $meal_options) {
@@ -611,11 +622,11 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
                 $is_new_itinerary = empty($itinerary_days);
                 foreach ($itin_level_fields as $key => $meta) {
                     list($label, $post_key) = $meta;
-                    // #7 A blank Notes field opens with the four-section template so
-                    // the user fills each bullet in one editor.
+                    // Each section is its own editor. A blank section on a brand-new
+                    // package opens with its standard boilerplate.
                     $meta_val = isset($itin_meta[$post_key]) ? (string) $itin_meta[$post_key] : '';
                     if ($is_new_itinerary && trim(strip_tags($meta_val)) === '' && stripos($meta_val, '<img') === false) {
-                        $meta_val = $itin_notes_default;
+                        $meta_val = isset($itin_section_defaults[$post_key]) ? $itin_section_defaults[$post_key] : '';
                     } ?>
                     <div class="cw-itin-field mb-4">
                         <label class="font-weight-bold mb-1"><?php echo $label; ?></label>

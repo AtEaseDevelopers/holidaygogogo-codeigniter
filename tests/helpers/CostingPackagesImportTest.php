@@ -20,7 +20,10 @@
  *     naming an undeclared combination still forming one;
  *   - flight rows folding into options (incl. a blank-title default option);
  *   - itinerary days ordered by Day Number (unnumbered rows last), meal-plan
- *     labels tokenised, and package-level itinerary notes carried as 'notes';
+ *     labels tokenised, and the four itinerary-wide sections (Include / Exclude /
+ *     Important Notes / Terms) carried on itinerary_level;
+ *   - header-aware parsing: an extra TOUR CODE column is ignored, reordered
+ *     columns map by label, and a header-less sheet falls back to positional;
  *   - that bank_charges_myr / myr_per_unit / total_amount are NOT pre-filled.
  *
  * Runs without a DB or PhpSpreadsheet.
@@ -76,6 +79,40 @@ check('parser maps sales_person', 'Alice Tan', $records[0]['sales_person']);
 check('parser maps adult_count cell', '4', $records[0]['adult_count']);
 check('parser record key set', array_values($pkg_cols), array_keys($records[0]));
 
+/* ------------------------------------------- Header-aware parser (round-trip) */
+
+// An EXPORT carries an extra TOUR CODE column right after PACKAGE NAME. The
+// header-aware parser must map by label and IGNORE the unknown TOUR CODE column,
+// so every value still lands on the right key (not shifted one column over).
+$item_cols = costing_import_item_columns();
+$export_header = array('PACKAGE NAME', 'TOUR CODE', 'COMBINATION', 'CATEGORY', 'ITEM', 'SUPPLIER',
+    'PAX TYPE', 'MULTIPLIER TYPE', 'QUANTITY', 'UNIT COUNT', 'UNIT PRICE', 'CURRENCY');
+$export_row = array('Japan Spring', 'QU-2612-0001', 'Option A', 'accommodation', '5N Hotel', 'JTB',
+    'adult', 'per_pax', '1', '5', '1200', 'MYR');
+$tc = costing_import_sheet_to_records(array($export_header, $export_row), $item_cols);
+check('header-aware: one record', 1, count($tc));
+check_true('header-aware: TOUR CODE not a key', !array_key_exists('tour_code', $tc[0]));
+check('header-aware: package name', 'Japan Spring', $tc[0]['package_name']);
+check('header-aware: combination (not shifted)', 'Option A', $tc[0]['combination']);
+check('header-aware: category', 'accommodation', $tc[0]['category']);
+check('header-aware: currency', 'MYR', $tc[0]['currency']);
+
+// Reordered columns are also matched by label.
+$reordered_header = array('PACKAGE NAME', 'CATEGORY', 'ITEM', 'CURRENCY', 'UNIT PRICE', 'COMBINATION');
+$reordered_row = array('Japan Spring', 'flight', 'Air ticket', 'USD', '2000', 'Option B');
+$ro = costing_import_sheet_to_records(array($reordered_header, $reordered_row), $item_cols);
+check('reordered: category by label', 'flight', $ro[0]['category']);
+check('reordered: currency by label', 'USD', $ro[0]['currency']);
+check('reordered: combination by label', 'Option B', $ro[0]['combination']);
+check('reordered: absent column blank', '', $ro[0]['supplier']);
+
+// No recognisable header -> positional fallback (historical behaviour).
+$positional = costing_import_sheet_to_records(array(
+    array('Japan Spring', 'Option A', 'accommodation', '5N Hotel'),
+), $item_cols);
+check('positional: no header maps by position', 'Japan Spring', $positional[0]['package_name']);
+check('positional: 2nd cell -> combination', 'Option A', $positional[0]['combination']);
+
 /* ----------------------------------------------------- Assemble: happy path */
 
 $parsed = array(
@@ -87,7 +124,8 @@ $parsed = array(
               'child_count' => '0', 'margin_percentage' => '15', 'commissionable_per_pax' => '0',
               'ad_hoc_per_pax' => '0', 'quote_flight_mode' => 'FIT', 'quote_hotel_columns' => 'Twin|Triple',
               'quote_hotel_title_label' => 'Hotel', 'quote_show_single_supp' => 'Y',
-              'itinerary_notes' => 'Includes daily breakfast.'),
+              'itinerary_include' => 'Daily breakfast', 'itinerary_exclude' => 'Personal expenses',
+              'itinerary_important_notes' => 'Bring passport', 'itinerary_terms' => 'No refunds'),
     ),
     'cost_items' => array(
         // combination item
@@ -189,7 +227,10 @@ check('happy: day 1 day_number int', 1, $p['itinerary'][0]['day_number']);
 check('happy: unnumbered day_number 0', 0, $p['itinerary'][2]['day_number']);
 check('happy: meal plan tokens (label->slug)', array('breakfast', 'lunch'), $p['itinerary'][1]['meal_plan']);
 check('happy: multi-word meal label tokenised', array('dinner'), $p['itinerary'][0]['meal_plan']);
-check('happy: itinerary notes carried as notes', 'Includes daily breakfast.', $p['itinerary_level']['notes']);
+check('happy: itinerary Include carried', 'Daily breakfast', $p['itinerary_level']['include']);
+check('happy: itinerary Exclude carried', 'Personal expenses', $p['itinerary_level']['exclude']);
+check('happy: itinerary Important Notes carried', 'Bring passport', $p['itinerary_level']['important_notes']);
+check('happy: itinerary Terms carried', 'No refunds', $p['itinerary_level']['terms']);
 
 /* ----------------------------------------------------- Errors: duplicate name */
 

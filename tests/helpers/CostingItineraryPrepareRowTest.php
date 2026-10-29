@@ -21,7 +21,9 @@ $assertions['one per-day html field']  = $fields === array('description');
 
 // --- costing_itinerary_level_fields (whole itinerary) ----------------------
 $level = costing_itinerary_level_fields();
-$assertions['one merged level field'] = $level === array('itinerary_notes');
+$assertions['four level columns'] = $level === array(
+    'itinerary_includes', 'itinerary_excludes', 'itinerary_important_notes', 'itinerary_terms_and_conditions',
+);
 
 // --- meal plan options + normalise + labels --------------------------------
 $opts = costing_meal_plan_options();
@@ -89,16 +91,28 @@ $assertions['meal-only not empty']    = $mealOnly['is_empty'] === false;
 $assertions['meal-only null title']   = $mealOnly['title'] === null;
 $assertions['meal-only slug kept']    = $mealOnly['meal_plan'] === 'breakfast';
 
-// --- costing_itinerary_prepare_level: merged Notes field -------------------
+// --- costing_itinerary_prepare_level: four separate sections ---------------
+// Posted keyed by section key; returned keyed by the costing_packages columns.
 $lvl = costing_itinerary_prepare_level(array(
-    'notes' => '<p><strong>Include</strong></p><ul><li>Bring walking shoes</li></ul>',
+    'include'         => '<ul><li>Bring walking shoes</li></ul>',
+    'exclude'         => '<ul><li>Return flights</li></ul>',
+    'important_notes' => '<p><br></p>',   // blank TinyMCE markup -> null
+    'terms'           => '<ul><li>Twin sharing</li></ul>',
 ));
-$assertions['level notes kept']       = strpos($lvl['itinerary_notes'], '<li>Bring walking shoes</li>') !== false;
-$assertions['level notes single key']  = (array_keys($lvl) === array('itinerary_notes'));
+$assertions['level include col']   = strpos((string) $lvl['itinerary_includes'], '<li>Bring walking shoes</li>') !== false;
+$assertions['level exclude col']   = strpos((string) $lvl['itinerary_excludes'], '<li>Return flights</li>') !== false;
+$assertions['level blank -> null'] = $lvl['itinerary_important_notes'] === null;
+$assertions['level terms col']     = strpos((string) $lvl['itinerary_terms_and_conditions'], '<li>Twin sharing</li>') !== false;
+$assertions['level four columns']  = array_keys($lvl) === array(
+    'itinerary_includes', 'itinerary_excludes', 'itinerary_important_notes', 'itinerary_terms_and_conditions',
+);
 
-// Blank TinyMCE markup collapses to null.
-$lvlBlank = costing_itinerary_prepare_level(array('notes' => '<p><br></p>'));
-$assertions['level all blank null'] = $lvlBlank['itinerary_notes'] === null;
+// A fully-blank post nulls every column.
+$lvlBlank = costing_itinerary_prepare_level(array('include' => '<p><br></p>'));
+$assertions['level all blank null'] = $lvlBlank['itinerary_includes'] === null
+    && $lvlBlank['itinerary_excludes'] === null
+    && $lvlBlank['itinerary_important_notes'] === null
+    && $lvlBlank['itinerary_terms_and_conditions'] === null;
 
 $failed = 0;
 foreach ($assertions as $label => $ok) {

@@ -69,6 +69,12 @@ class Costing_Model extends CI_Model
             $where[] = "cp.sales_admin_id = " . $sales_admin_id;
         }
 
+        // Filter by the OP person who created the quotation (admin user).
+        $op_admin_id = isset($filters['op_admin_id']) ? (int) $filters['op_admin_id'] : 0;
+        if ($op_admin_id > 0) {
+            $where[] = "cp.op_admin_id = " . $op_admin_id;
+        }
+
         return !empty($where) ? ('WHERE ' . implode(' AND ', $where)) : '';
     }
 
@@ -85,6 +91,8 @@ class Costing_Model extends CI_Model
                 cp.customer_email,
                 cp.sales_admin_id,
                 sales_admin.Name AS sales_admin_name,
+                cp.op_admin_id,
+                op_admin.Name AS op_admin_name,
                 cp.tour_code,
                 cp.revision_root_id,
                 cp.revision_number,
@@ -110,6 +118,7 @@ class Costing_Model extends CI_Model
                 cb.quotation_token AS latest_quotation_token
             FROM costing_packages cp
             LEFT JOIN admin sales_admin ON sales_admin.AdminID = cp.sales_admin_id
+            LEFT JOIN admin op_admin ON op_admin.AdminID = cp.op_admin_id
             LEFT JOIN costing_bookings cb ON cb.id = (
                 SELECT cb_latest.id
                 FROM costing_bookings cb_latest
@@ -187,6 +196,16 @@ class Costing_Model extends CI_Model
      *
      * @return array {packages, items, hotels, flights, combinations}
      */
+    /**
+     * Read the (filtered) package listing for the Excel export in the SAME shape
+     * the Import template uses, so an export can be edited and re-imported
+     * (round-trip). Returns one bucket per import sheet — packages / cost_items /
+     * combinations / hotels / flights / itinerary — with every detail row stamped
+     * with its owning package's name + tour_code. Detail (items/combinations) come
+     * from each package's LATEST booking snapshot; hotels/flights/itinerary are
+     * per-package. The export helper (costing_packages_export_helper.php) formats
+     * these into the import-keyed, round-trip-safe cells.
+     */
     public function Read_Packages_For_Export($filters = array())
     {
         $where_sql = $this->Build_Package_Filter_Where($filters);
@@ -204,12 +223,27 @@ class Costing_Model extends CI_Model
                 cp.duration_days,
                 cp.duration_nights,
                 cp.status,
+                cp.description,
+                cp.itinerary_notes,
+                cp.itinerary_includes,
+                cp.itinerary_excludes,
+                cp.itinerary_important_notes,
+                cp.itinerary_terms_and_conditions,
+                cp.quote_flight_mode,
+                cp.quote_hotel_columns,
+                cp.quote_hotel_title_label,
+                cp.quote_show_single_supp,
                 cp.updated_at,
                 cb.id AS latest_booking_id,
                 cb.travel_date AS latest_travel_date,
+                cb.travel_date_end AS latest_travel_date_end,
+                cb.adult_count AS latest_adult_count,
+                cb.child_count AS latest_child_count,
                 cb.total_pax AS latest_total_pax,
                 cb.status AS latest_booking_status,
                 cbf.margin_percentage,
+                cbf.commissionable_per_pax,
+                cbf.ad_hoc_per_pax,
                 cbf.selling_price_per_pax,
                 cbf.total_revenue,
                 cbf.total_cost,
@@ -255,17 +289,20 @@ class Costing_Model extends CI_Model
 
         return array(
             'packages' => $packages,
-            'items' => $this->Read_Export_Booking_Items($booking_ids, $booking_to_package, $package_meta),
+            'cost_items' => $this->Read_Export_Booking_Items($booking_ids, $booking_to_package, $package_meta),
             'combinations' => $this->Read_Export_Combinations($booking_ids, $booking_to_package, $package_meta),
             'hotels' => $this->Read_Export_Package_Rows('costing_quote_hotels', $package_ids, $package_meta),
-            'flights' => $this->Read_Export_Package_Rows('costing_quote_flights', $package_ids, $package_meta),
+            'flights' => $this->Read_Export_Flights($package_ids, $package_meta),
+            'itinerary' => $this->Read_Export_Itinerary($package_ids, $package_meta),
         );
     }
 
     /**
      * Batch-read the cost line items of a set of booking snapshots, stamping each
-     * row with its owning package's name + tour_code for the standalone export
-     * sheet. Ordered by booking, then the manual sort order, then id.
+     * row with its owning package's name + tour_code for the export sheet. Carries
+     * the owning combination's NAME (blank for a top-level row) plus the fields the
+     * import needs (multiplier_type / unit_count). Ordered by booking, then the
+     * manual sort order, then id.
      */
     private function Read_Export_Booking_Items($booking_ids, $booking_to_package, $package_meta)
     {
@@ -276,17 +313,21 @@ class Costing_Model extends CI_Model
         $rows = $this->db
             ->select('
                 costing_booking_items.booking_id,
+                costing_combinations.name AS combination,
                 costing_booking_items.category,
                 costing_booking_items.name,
                 costing_booking_items.supplier,
                 costing_booking_items.pax_type,
+                costing_booking_items.multiplier_type,
                 costing_booking_items.quantity,
+                costing_booking_items.unit_count,
                 costing_booking_items.unit_price,
                 costing_booking_items.total_amount,
                 costing_booking_items.myr_per_unit,
                 costing_currencies.code AS currency
             ')
             ->join('costing_currencies', 'costing_currencies.id = costing_booking_items.currency_id', 'left')
+            ->join('costing_combinations', 'costing_combinations.id = costing_booking_items.combination_id', 'left')
             ->where_in('costing_booking_items.booking_id', $booking_ids)
             ->order_by('costing_booking_items.booking_id', 'ASC')
             ->order_by('costing_booking_items.sort_order', 'ASC')
@@ -299,7 +340,7 @@ class Costing_Model extends CI_Model
 
     /**
      * Batch-read the customer-facing combinations of a set of booking snapshots,
-     * stamped with package name + tour_code.
+     * stamped with package name + tour_code (incl. is_general for round-trip).
      */
     private function Read_Export_Combinations($booking_ids, $booking_to_package, $package_meta)
     {
@@ -308,7 +349,7 @@ class Costing_Model extends CI_Model
         }
 
         $rows = $this->db
-            ->select('costing_booking_id, name, selling_price_per_pax')
+            ->select('costing_booking_id, name, is_general, selling_price_per_pax')
             ->where_in('costing_booking_id', $booking_ids)
             ->order_by('costing_booking_id', 'ASC')
             ->order_by('sort_order', 'ASC')
@@ -317,6 +358,112 @@ class Costing_Model extends CI_Model
             ->result_array();
 
         return $this->Stamp_Export_Package_Meta($rows, $booking_to_package, $package_meta, 'costing_booking_id');
+    }
+
+    /**
+     * Batch-read per-package flight OPTIONS flattened into one row per schedule
+     * leg (each leg carries its option's title/airline/price so the import can
+     * regroup them). An option with no legs still emits one blank-leg row so its
+     * pricing round-trips; legs whose option is missing (legacy rows) emit with a
+     * blank option. Stamped with package name + tour_code.
+     */
+    private function Read_Export_Flights($package_ids, $package_meta)
+    {
+        if (empty($package_ids)) {
+            return array();
+        }
+
+        $options = $this->db
+            ->where_in('package_id', $package_ids)
+            ->order_by('package_id', 'ASC')
+            ->order_by('sort_order', 'ASC')
+            ->order_by('id', 'ASC')
+            ->get('costing_quote_flight_options')
+            ->result_array();
+
+        $legs = $this->db
+            ->where_in('package_id', $package_ids)
+            ->order_by('package_id', 'ASC')
+            ->order_by('sort_order', 'ASC')
+            ->order_by('id', 'ASC')
+            ->get('costing_quote_flights')
+            ->result_array();
+
+        $legs_by_option = array();
+        foreach ($legs as $leg) {
+            $legs_by_option[(int) (isset($leg['option_id']) ? $leg['option_id'] : 0)][] = $leg;
+        }
+
+        $leg_row = function ($package_id, $option, $leg) {
+            return array(
+                'package_id'   => (int) $package_id,
+                'option_title' => (string) (isset($option['title']) ? $option['title'] : ''),
+                'airline'      => (string) (isset($option['airline']) ? $option['airline'] : ''),
+                'option_price' => isset($option['price']) ? $option['price'] : '',
+                'travel_date'  => (string) (isset($leg['travel_date']) ? $leg['travel_date'] : ''),
+                'sector'       => (string) (isset($leg['sector']) ? $leg['sector'] : ''),
+                'flight_no'    => (string) (isset($leg['flight_no']) ? $leg['flight_no'] : ''),
+                'timing'       => (string) (isset($leg['timing']) ? $leg['timing'] : ''),
+                'duration'     => (string) (isset($leg['duration']) ? $leg['duration'] : ''),
+            );
+        };
+
+        $rows = array();
+        $known_option_ids = array();
+        foreach ($options as $option) {
+            $oid = (int) $option['id'];
+            $known_option_ids[$oid] = true;
+            $option_legs = isset($legs_by_option[$oid]) ? $legs_by_option[$oid] : array();
+            if (empty($option_legs)) {
+                $rows[] = $leg_row((int) $option['package_id'], $option, array());
+                continue;
+            }
+            foreach ($option_legs as $leg) {
+                $rows[] = $leg_row((int) $option['package_id'], $option, $leg);
+            }
+        }
+        // Orphan legs (no matching option row) — carry a blank option.
+        foreach ($legs as $leg) {
+            $oid = (int) (isset($leg['option_id']) ? $leg['option_id'] : 0);
+            if (!isset($known_option_ids[$oid])) {
+                $rows[] = $leg_row((int) $leg['package_id'], array(), $leg);
+            }
+        }
+
+        $map = array();
+        foreach ($package_ids as $pid) {
+            $map[(int) $pid] = (int) $pid;
+        }
+
+        return $this->Stamp_Export_Package_Meta($rows, $map, $package_meta, 'package_id');
+    }
+
+    /**
+     * Batch-read per-package itinerary day rows (day number / title / description /
+     * meal plan), stamped with package name + tour_code. meal_plan is the stored
+     * comma-separated slug string, which the import parser reads back verbatim.
+     */
+    private function Read_Export_Itinerary($package_ids, $package_meta)
+    {
+        if (empty($package_ids)) {
+            return array();
+        }
+
+        $rows = $this->db
+            ->select('package_id, day_number, title, description, meal_plan')
+            ->where_in('package_id', $package_ids)
+            ->order_by('package_id', 'ASC')
+            ->order_by('day_number', 'ASC')
+            ->order_by('id', 'ASC')
+            ->get('costing_itinerary_days')
+            ->result_array();
+
+        $map = array();
+        foreach ($package_ids as $pid) {
+            $map[(int) $pid] = (int) $pid;
+        }
+
+        return $this->Stamp_Export_Package_Meta($rows, $map, $package_meta, 'package_id');
     }
 
     /**
@@ -367,6 +514,7 @@ class Costing_Model extends CI_Model
 
     public function Read_Package_Workspace_Data($package_id, $booking_id = null, $base_currency_code = 'MYR', $force_new_snapshot = false)
     {
+        $this->load->helper('costing_itinerary');
         $base_currency = $this->Read_Base_Currency($base_currency_code);
         if (!$base_currency) {
             $base_currency = array('id' => 0, 'code' => $base_currency_code);
@@ -402,6 +550,10 @@ class Costing_Model extends CI_Model
                 'customer_contact' => isset($package['customer_contact']) ? $package['customer_contact'] : '',
                 'customer_email' => isset($package['customer_email']) ? $package['customer_email'] : '',
                 'sales_admin_id' => isset($package['sales_admin_id']) ? (int) $package['sales_admin_id'] : 0,
+                'sales_admin_mobile' => isset($package['sales_admin_mobile']) ? (string) $package['sales_admin_mobile'] : '',
+                'op_admin_id' => isset($package['op_admin_id']) ? (int) $package['op_admin_id'] : 0,
+                'op_admin_name' => isset($package['op_admin_name']) ? (string) $package['op_admin_name'] : '',
+                'validity_date' => isset($package['validity_date']) ? (string) $package['validity_date'] : '',
                 'tour_code' => isset($package['tour_code']) ? $package['tour_code'] : '',
                 'duration_days' => (int) $package['duration_days'],
                 'duration_nights' => (int) $package['duration_nights'],
@@ -435,11 +587,10 @@ class Costing_Model extends CI_Model
             'latest_exchange_rates' => $this->Read_Latest_Exchange_Rates(),
             'snapshot_panel' => $booking ? $this->Read_Snapshot_Panel((int) $booking['id']) : array(),
             'itinerary_days' => $this->Read_Itinerary_Days((int) $package['id']),
-            // Itinerary-wide Notes — one merged rich-text block per package holding
-            // Include / Exclude / Important Notes / Terms & Conditions.
-            'itinerary_meta' => array(
-                'notes' => isset($package['itinerary_notes']) ? $package['itinerary_notes'] : '',
-            ),
+            // Itinerary-wide sections — four separate rich-text blocks per package
+            // (Include / Exclude / Important Notes / Terms & Conditions), with a
+            // split-on-the-fly fallback for legacy merged notes.
+            'itinerary_meta' => costing_itinerary_sections_from_row($package),
             // Hotel-pricing + flight-schedule tables and their quote-level free-text,
             // shown on the customer Quotation PDF and edited on the wizard's
             // "Hotel & Flights" step.
@@ -547,12 +698,20 @@ class Costing_Model extends CI_Model
     public function Save_Package($package)
     {
         $sales_admin_id = (int) (isset($package['sales_admin_id']) ? $package['sales_admin_id'] : 0);
+        $sales_admin_mobile = trim((string) (isset($package['sales_admin_mobile']) ? $package['sales_admin_mobile'] : ''));
+        $op_admin_id = (int) (isset($package['op_admin_id']) ? $package['op_admin_id'] : 0);
+        $validity_date = trim((string) (isset($package['validity_date']) ? $package['validity_date'] : ''));
         $data = array(
             'name' => trim((string) $package['name']),
             'customer_name' => trim((string) $package['customer_name']),
             'customer_contact' => trim((string) $package['customer_contact']),
             'customer_email' => trim((string) $package['customer_email']),
             'sales_admin_id' => $sales_admin_id > 0 ? $sales_admin_id : null,
+            // Per-package override of the sales person's contact number (prefilled
+            // from admin.Mobile on the form, but editable). NULL when left blank.
+            'sales_admin_mobile' => $sales_admin_mobile !== '' ? $sales_admin_mobile : null,
+            // Quotation "valid until" date; stored as Y-m-d, NULL when left blank.
+            'validity_date' => ($validity_date !== '' && strtotime($validity_date)) ? date('Y-m-d', strtotime($validity_date)) : null,
             'duration_days' => max(1, (int) $package['duration_days']),
             'duration_nights' => max(0, (int) $package['duration_nights']),
             'description' => trim((string) $package['description']),
@@ -566,10 +725,14 @@ class Costing_Model extends CI_Model
         // Tour code is fully auto: assigned once on create (QU-YYMM-XXXX), never
         // touched on edit (there is no tour_code field on the form anymore).
         if (!empty($package['id'])) {
+            // Edit: never overwrite the creator (op_admin_id) — it is set once, at
+            // creation. All other header fields are saved.
             $this->db->where('id', (int) $package['id'])->update('costing_packages', $data);
             return (int) $package['id'];
         }
 
+        // Create: stamp the OP person = the admin creating this package.
+        $data['op_admin_id'] = $op_admin_id > 0 ? $op_admin_id : null;
         $data['tour_code'] = $this->Next_Tour_Code();
         $this->db->insert('costing_packages', $data);
         return (int) $this->db->insert_id();
@@ -598,9 +761,11 @@ class Costing_Model extends CI_Model
      * ['ok'=>bool, 'package_id'=>int].
      *
      * @param array $pkg {save_package, snapshot_payload, hotels, flight_options, quote_level}
+     * @param int $op_admin_id The admin running the import; stamped as the OP person
+     *                         (creator) on the new package. 0 leaves it unset (NULL).
      * @return array
      */
-    public function Import_Package($pkg)
+    public function Import_Package($pkg, $op_admin_id = 0)
     {
         // Guard the one condition under which Generate_Booking_Snapshot would bail
         // out BEFORE opening any transaction, so we never insert a package row that
@@ -617,7 +782,11 @@ class Costing_Model extends CI_Model
 
         $this->db->trans_start();
 
-        $package_id = $this->Save_Package($pkg['save_package']);
+        // Imported packages are "created" by whoever ran the import — stamp them as
+        // the OP person (Save_Package only applies this on insert, which an import is).
+        $save_package = (array) $pkg['save_package'];
+        $save_package['op_admin_id'] = (int) $op_admin_id;
+        $package_id = $this->Save_Package($save_package);
         if ($package_id > 0) {
             $this->Generate_Booking_Snapshot($package_id, $pkg['snapshot_payload']);
             $this->Save_Quote_Details(
@@ -648,10 +817,33 @@ class Costing_Model extends CI_Model
      */
     public function Read_Sales_Agents()
     {
+        // Mobile + country code come along so the package form can auto-prefill the
+        // sales person's contact when one is picked (editable override thereafter).
+        return $this->db
+            ->select('a.AdminID, a.Name, a.Mobile, cc.CountryCode AS CountryCode')
+            ->from('admin a')
+            ->join('country_code cc', 'cc.CountryCodeID = a.CountryCodeID', 'left')
+            ->where('a.AdminID !=', 8)
+            ->where_in('a.Status', array('Y', 'D'))
+            ->order_by('a.Name', 'ASC')
+            ->get()
+            ->result_array();
+    }
+
+    /**
+     * Only currently-active (Status = 'Y') admins — deactivated ('D') and deleted
+     * ('N') users are excluded. Used for the listing's Sales Person filter so it
+     * lists live sales people only; the package form keeps Read_Sales_Agents so an
+     * existing package assigned to a since-deactivated person still shows them.
+     *
+     * @return array list of ['AdminID','Name']
+     */
+    public function Read_Active_Sales_Agents()
+    {
         return $this->db
             ->select('AdminID, Name')
             ->where('AdminID !=', 8)
-            ->where_in('Status', array('Y', 'D'))
+            ->where('Status', 'Y')
             ->order_by('Name', 'ASC')
             ->get('admin')
             ->result_array();
@@ -726,7 +918,7 @@ class Costing_Model extends CI_Model
      * (costing_quotation_files) are deliberately NOT copied — the uploaded files
      * are physical, uploader-owned references to the original package.
      */
-    public function Duplicate_Package($package_id)
+    public function Duplicate_Package($package_id, $op_admin_id = 0)
     {
         $package_id = (int) $package_id;
         $source = $package_id > 0 ? $this->Read_Package($package_id) : null;
@@ -737,12 +929,17 @@ class Costing_Model extends CI_Model
         // A plain duplicate is a brand-new, independent package: fresh monthly tour
         // code, "(Copy)" name, and its own revision family (reset the revision columns
         // so it does not inherit the source's lineage).
-        return $this->Deep_Copy_Package($source, array(
+        $overrides = array(
             'name' => trim((string) $source['name']) . ' (Copy)',
             'tour_code' => $this->Next_Tour_Code(),
             'revision_root_id' => null,
             'revision_number' => 0,
-        ));
+        );
+        // The duplicate is created by whoever clicked Duplicate — re-stamp the OP person.
+        if ((int) $op_admin_id > 0) {
+            $overrides['op_admin_id'] = (int) $op_admin_id;
+        }
+        return $this->Deep_Copy_Package($source, $overrides);
     }
 
     /**
@@ -753,7 +950,7 @@ class Costing_Model extends CI_Model
      * history), regardless of which member was passed in. Returns the new package id
      * (0 on failure).
      */
-    public function Create_Revision($package_id)
+    public function Create_Revision($package_id, $op_admin_id = 0)
     {
         $this->load->helper('costing_tour_code');
 
@@ -801,13 +998,18 @@ class Costing_Model extends CI_Model
 
         $next = costing_tour_code_next_revision($existing_codes, $base_code);
 
-        return $this->Deep_Copy_Package($copy_source, array(
+        $overrides = array(
             // Keep the base package name — a revision is the same quote, not a copy.
             'name' => trim((string) $root['name']),
             'tour_code' => costing_tour_code_revision($base_code, $next),
             'revision_root_id' => $root_id,
             'revision_number' => $next,
-        ));
+        );
+        // The revision is created by whoever clicked Create Revision — re-stamp the OP person.
+        if ((int) $op_admin_id > 0) {
+            $overrides['op_admin_id'] = (int) $op_admin_id;
+        }
+        return $this->Deep_Copy_Package($copy_source, $overrides);
     }
 
     /**
@@ -830,7 +1032,9 @@ class Costing_Model extends CI_Model
         //    else (customer, sales person, itinerary notes, quote-level fields) carries
         //    over verbatim.
         $package_data = $source;
-        unset($package_data['id'], $package_data['created_at'], $package_data['updated_at']);
+        // op_admin_name is a joined display column (see Read_Package), not a real
+        // costing_packages column — drop it so the insert stays valid.
+        unset($package_data['id'], $package_data['created_at'], $package_data['updated_at'], $package_data['op_admin_name']);
         foreach ($header_overrides as $column => $value) {
             $package_data[$column] = $value;
         }
@@ -1718,13 +1922,14 @@ class Costing_Model extends CI_Model
      */
     public function Read_Quotation_By_Token($token)
     {
+        $this->load->helper('costing_itinerary');
         $token = trim((string) $token);
         if ($token === '') {
             return null;
         }
 
         $booking = $this->db
-            ->select('cb.*, cp.name AS package_name, cp.status AS package_status, cp.tour_code, cp.customer_name, cp.sales_admin_id, sales_admin.Name AS sales_admin_name, sales_admin.Mobile AS sales_admin_mobile, sales_cc.CountryCode AS sales_admin_country_code, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns, cp.quote_hotel_title_label, cp.quote_show_single_supp')
+            ->select('cb.*, cp.name AS package_name, cp.status AS package_status, cp.tour_code, cp.customer_name, cp.description AS package_description, cp.sales_admin_id, cp.sales_admin_mobile AS package_sales_mobile, cp.validity_date, sales_admin.Name AS sales_admin_name, sales_admin.Mobile AS sales_admin_mobile, sales_cc.CountryCode AS sales_admin_country_code, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.itinerary_includes, cp.itinerary_excludes, cp.itinerary_important_notes, cp.itinerary_terms_and_conditions, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns, cp.quote_hotel_title_label, cp.quote_show_single_supp')
             ->from('costing_bookings cb')
             ->join('costing_packages cp', 'cp.id = cb.package_id')
             ->join('admin sales_admin', 'sales_admin.AdminID = cp.sales_admin_id', 'left')
@@ -1796,20 +2001,26 @@ class Costing_Model extends CI_Model
                 'name'            => $booking['package_name'],
                 'tour_code'       => isset($booking['tour_code']) ? $booking['tour_code'] : '',
                 'customer_name'   => isset($booking['customer_name']) ? (string) $booking['customer_name'] : '',
+                // Step 1 free-text description, shown under the Pricing per person section.
+                'description'     => isset($booking['package_description']) ? (string) $booking['package_description'] : '',
                 'sales_person'    => isset($booking['sales_admin_name']) ? (string) $booking['sales_admin_name'] : '',
-                // Sales person's contact (country code + mobile), shown beside the
-                // name on the quotation so the customer can reach them directly.
-                'sales_person_contact' => trim(
-                    (isset($booking['sales_admin_country_code']) ? (string) $booking['sales_admin_country_code'] : '')
-                    . (isset($booking['sales_admin_mobile']) ? (string) $booking['sales_admin_mobile'] : '')
-                ),
+                // Sales person's contact shown beside the name on the quotation so
+                // the customer can reach them directly. The per-package override
+                // (Step 1) wins when set; otherwise fall back to the admin record's
+                // country code + mobile.
+                'sales_person_contact' => trim((string) $booking['package_sales_mobile']) !== ''
+                    ? trim((string) $booking['package_sales_mobile'])
+                    : trim(
+                        (isset($booking['sales_admin_country_code']) ? (string) $booking['sales_admin_country_code'] : '')
+                        . (isset($booking['sales_admin_mobile']) ? (string) $booking['sales_admin_mobile'] : '')
+                    ),
+                // Quotation "valid until" date (Y-m-d or '' when not set).
+                'validity_date'   => isset($booking['validity_date']) ? (string) $booking['validity_date'] : '',
                 'duration_days'   => (int) $booking['duration_days'],
                 'duration_nights' => (int) $booking['duration_nights'],
             ),
             'itinerary'     => $this->Read_Itinerary_Days((int) $booking['package_id']),
-            'itinerary_meta' => array(
-                'notes' => isset($booking['itinerary_notes']) ? $booking['itinerary_notes'] : '',
-            ),
+            'itinerary_meta' => costing_itinerary_sections_from_row($booking),
             // Hotel-pricing + flight-schedule tables and quote-level free-text —
             // the customer Quotation PDF's primary content (screenshot layout).
             'quote_hotels'  => $this->Read_Quote_Hotels((int) $booking['package_id']),
@@ -1943,7 +2154,15 @@ class Costing_Model extends CI_Model
 
     private function Read_Package($package_id)
     {
-        return $this->db->where('id', (int) $package_id)->get('costing_packages')->row_array();
+        // op_admin_name (the creator's display name) is joined for read-only display
+        // on the wizard. Deep_Copy_Package strips it before re-inserting the row.
+        return $this->db
+            ->select('cp.*, op_admin.Name AS op_admin_name')
+            ->from('costing_packages cp')
+            ->join('admin op_admin', 'op_admin.AdminID = cp.op_admin_id', 'left')
+            ->where('cp.id', (int) $package_id)
+            ->get()
+            ->row_array();
     }
 
     /**
@@ -2789,6 +3008,10 @@ class Costing_Model extends CI_Model
                 'id' => 0,
                 'name' => '',
                 'sales_admin_id' => 0,
+                'sales_admin_mobile' => '',
+                'op_admin_id' => 0,
+                'op_admin_name' => '',
+                'validity_date' => '',
                 'duration_days' => 1,
                 'duration_nights' => 0,
                 'description' => '',

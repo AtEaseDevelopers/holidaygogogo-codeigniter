@@ -72,6 +72,48 @@ $op = sanitize_voucher_content_html($onlypos);
 $assertions['emptied style has no position'] = stripos($op, 'position') === false;
 $assertions['emptied style has no top']      = stripos($op, 'top:') === false;
 
+// --- $strip_indent flag (costing quotation itinerary) -------------------------
+// Default keeps indent (booking-voucher contract, asserted above). With the flag
+// on, TinyMCE's Indent props are dropped so itinerary days line up, while
+// unrelated props survive and the default-indent lookalikes (padding-top /
+// background-position) are untouched.
+$indented = '<p style="padding-left: 40px; margin-left:20px; text-indent:30px; color:#333; padding-top:3px;">Breakfast</p>';
+$stripped = sanitize_voucher_content_html($indented, true);
+$assertions['strip_indent: padding-left gone'] = stripos($stripped, 'padding-left') === false;
+$assertions['strip_indent: margin-left gone']  = stripos($stripped, 'margin-left') === false;
+$assertions['strip_indent: text-indent gone']  = stripos($stripped, 'text-indent') === false;
+$assertions['strip_indent: color kept']        = stripos($stripped, 'color:#333') !== false;
+$assertions['strip_indent: padding-top kept']   = stripos($stripped, 'padding-top:3px') !== false;
+// Default (flag off) still keeps them — unchanged contract for booking vouchers.
+$kept = sanitize_voucher_content_html($indented);
+$assertions['default keeps padding-left'] = stripos($kept, 'padding-left: 40px') !== false;
+$assertions['default keeps margin-left']  = stripos($kept, 'margin-left:20px') !== false;
+
+// --- $strip_font flag (costing quotation, Chinese support) --------------------
+// dompdf 1.0.2 has no per-glyph fallback, so a pasted/TinyMCE inline font-family
+// pins that run to a non-CJK font and any Chinese in it renders as empty boxes.
+// With the flag on, inline font-family / font shorthand are dropped so the text
+// inherits the CJK-capable body font; other props survive. Booking vouchers DON'T
+// pass the flag, so their inline fonts are kept (unchanged contract).
+$fonted = '<span style="font-family: Arial; color:#222; font-size:12pt;">你好 World</span>';
+$fontstripped = sanitize_voucher_content_html($fonted, false, true);
+$assertions['strip_font: font-family gone']     = stripos($fontstripped, 'font-family') === false;
+$assertions['strip_font: color kept']           = stripos($fontstripped, 'color:#222') !== false;
+$assertions['strip_font: font-size kept']        = stripos($fontstripped, 'font-size:12pt') !== false;
+$font_shorthand = '<p style="font: italic 12px Arial; margin-top:2px;">x</p>';
+$fsc = sanitize_voucher_content_html($font_shorthand, false, true);
+$assertions['strip_font: font shorthand gone']  = stripos($fsc, 'font:') === false;
+$assertions['strip_font: margin-top kept']       = stripos($fsc, 'margin-top:2px') !== false;
+// Default (flag off) keeps font-family — unchanged contract for booking vouchers.
+$keptfont = sanitize_voucher_content_html($fonted);
+$assertions['default keeps font-family'] = stripos($keptfont, 'font-family: Arial') !== false;
+// strip_indent and strip_font compose.
+$both = '<p style="padding-left:40px; font-family:Arial; color:#111;">文字</p>';
+$bothc = sanitize_voucher_content_html($both, true, true);
+$assertions['strip both: padding-left gone'] = stripos($bothc, 'padding-left') === false;
+$assertions['strip both: font-family gone']  = stripos($bothc, 'font-family') === false;
+$assertions['strip both: color kept']        = stripos($bothc, 'color:#111') !== false;
+
 // No style attribute -> returned unchanged.
 $plain = '<p>Hello <b>world</b></p>';
 $assertions['no-style unchanged'] = sanitize_voucher_content_html($plain) === $plain;

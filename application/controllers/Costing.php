@@ -22,6 +22,7 @@ class Costing extends MY_Controller
             'customer_contact' => trim((string) $this->input->get('customer_contact')),
             'customer_email' => trim((string) $this->input->get('customer_email')),
             'sales_admin_id' => (int) $this->input->get('sales_admin_id'),
+            'op_admin_id' => (int) $this->input->get('op_admin_id'),
         );
     }
 
@@ -36,7 +37,8 @@ class Costing extends MY_Controller
 
         $array = $this->Costing_Model->Read_Packages_Dashboard($filters);
         $array['filters'] = $filters;
-        $array['sales_agents'] = $this->Costing_Model->Read_Sales_Agents();
+        // Listing filter lists only currently-active sales people.
+        $array['sales_agents'] = $this->Costing_Model->Read_Active_Sales_Agents();
 
         $this->load->view('layout/header', $titles);
         $this->load->view('costing/index', $array);
@@ -44,12 +46,17 @@ class Costing extends MY_Controller
     }
 
     /**
-     * Stream the whole (filtered) package listing to a multi-sheet .xlsx:
-     * Packages summary + Cost Items + Hotels + Flights + Combinations.
+     * Stream the whole (filtered) package listing to a multi-sheet .xlsx in the
+     * SAME layout as the Import template (Packages / Cost Items / Combinations /
+     * Hotels / Flights / Itinerary), plus a Tour Code column on every sheet, so an
+     * export can be edited and re-uploaded through Import. The export helper reuses
+     * the import column maps, so both are loaded.
      */
     public function Export_Packages()
     {
+        $this->load->helper('costing_packages_import');
         $this->load->helper('costing_packages_export');
+        $this->load->helper('costing_itinerary');
         $data = $this->Costing_Model->Read_Packages_For_Export($this->Package_List_Filters());
         costing_packages_export_stream($data, 'COSTING_PACKAGES_' . date('Ymd') . '.xlsx');
     }
@@ -278,7 +285,7 @@ class Costing extends MY_Controller
                 $lines[] = 'Skipped "' . $pkg['name'] . '": ' . implode(' ', $pkg['errors']);
                 continue;
             }
-            $result = $this->Costing_Model->Import_Package($pkg);
+            $result = $this->Costing_Model->Import_Package($pkg, (int) $this->session->userdata('admin_id'));
             if (!empty($result['ok'])) {
                 $created++;
                 foreach ((array) $pkg['warnings'] as $w) {
@@ -388,6 +395,11 @@ class Costing extends MY_Controller
             'customer_contact' => $this->input->post('customer_contact'),
             'customer_email' => $this->input->post('customer_email'),
             'sales_admin_id' => $this->input->post('sales_admin_id'),
+            'sales_admin_mobile' => $this->input->post('sales_admin_mobile'),
+            // OP person = whoever creates the package. Stamped from the logged-in
+            // admin on insert only; the model preserves it untouched on edit.
+            'op_admin_id' => (int) $this->session->userdata('admin_id'),
+            'validity_date' => $this->input->post('validity_date'),
             'duration_days' => $this->input->post('duration_days'),
             'duration_nights' => $this->input->post('duration_nights'),
             'description' => $this->input->post('description'),
@@ -412,7 +424,7 @@ class Costing extends MY_Controller
     {
         $package_id = (int) $this->input->post('package_id');
         if ($package_id > 0) {
-            $new_package_id = $this->Costing_Model->Duplicate_Package($package_id);
+            $new_package_id = $this->Costing_Model->Duplicate_Package($package_id, (int) $this->session->userdata('admin_id'));
             if ($new_package_id > 0) {
                 $this->session->set_flashdata('message_success', 'Package duplicated successfully.');
                 redirect('Costing/Package/' . $new_package_id . '?step=details');
@@ -428,7 +440,7 @@ class Costing extends MY_Controller
     {
         $package_id = (int) $this->input->post('package_id');
         if ($package_id > 0) {
-            $new_package_id = $this->Costing_Model->Create_Revision($package_id);
+            $new_package_id = $this->Costing_Model->Create_Revision($package_id, (int) $this->session->userdata('admin_id'));
             if ($new_package_id > 0) {
                 $this->session->set_flashdata('message_success', 'Revision created successfully.');
                 redirect('Costing/Package/' . $new_package_id . '?step=details');
@@ -493,8 +505,12 @@ class Costing extends MY_Controller
     public function Save_Itinerary()
     {
         $package_id = (int) $this->input->post('package_id');
+        // Four separate itinerary-wide rich-text sections, keyed by section key.
         $level_fields = array(
-            'notes' => $this->input->post('itinerary_notes'),
+            'include'         => $this->input->post('itinerary_include'),
+            'exclude'         => $this->input->post('itinerary_exclude'),
+            'important_notes' => $this->input->post('itinerary_important_notes'),
+            'terms'           => $this->input->post('itinerary_terms'),
         );
         if ($package_id > 0 && $this->Costing_Model->Save_Itinerary_Days($package_id, (array) $this->input->post('itinerary'), $level_fields)) {
             $this->session->set_flashdata('message_success', 'Itinerary saved.');

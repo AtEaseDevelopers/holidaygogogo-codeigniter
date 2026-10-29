@@ -160,6 +160,11 @@ if ( ! function_exists('nav_legacy_access'))
 				$edit = $view;
 				break;
 			case 'footer':
+				// Footer is open to all admin levels incl. SALES AGENT (20) and
+				// MARKETING (60) so the Booking footer content prefills for them.
+				$view = true;
+				$edit = true;
+				break;
 			case 'category':
 				$view = $not_sales_or_mkt;
 				$edit = $view;

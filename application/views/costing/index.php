@@ -8,8 +8,9 @@ $filter_customer_name = isset($filters['customer_name']) ? $filters['customer_na
 $filter_customer_contact = isset($filters['customer_contact']) ? $filters['customer_contact'] : '';
 $filter_customer_email = isset($filters['customer_email']) ? $filters['customer_email'] : '';
 $filter_sales_admin_id = isset($filters['sales_admin_id']) ? (int) $filters['sales_admin_id'] : 0;
+$filter_op_admin_id = isset($filters['op_admin_id']) ? (int) $filters['op_admin_id'] : 0;
 $sales_agents = isset($sales_agents) ? $sales_agents : array();
-$has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0);
+$has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0 || $filter_op_admin_id > 0);
 
 // Carry the active listing filters onto the Excel export link so the download
 // mirrors exactly what is on screen.
@@ -21,6 +22,7 @@ $export_params = array_filter(array(
     'customer_contact' => $filter_customer_contact,
     'customer_email' => $filter_customer_email,
     'sales_admin_id' => $filter_sales_admin_id > 0 ? $filter_sales_admin_id : '',
+    'op_admin_id' => $filter_op_admin_id > 0 ? $filter_op_admin_id : '',
 ), function ($value) { return $value !== '' && $value !== null; });
 $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) : '';
 ?>
@@ -92,7 +94,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             <label class="font-weight-bold">Tour Code</label>
                                             <input type="text" name="tour_code" value="<?php echo html_escape($filter_tour_code); ?>" class="form-control" placeholder="Tour code">
                                         </div>
-                                        <div class="col-md-3">
+                                        <div class="col-md-2">
                                             <label class="font-weight-bold">Status</label>
                                             <select name="status" class="form-control">
                                                 <option value="">All</option>
@@ -100,12 +102,21 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                 <option value="inactive" <?php echo ($filter_status === 'inactive') ? 'selected' : ''; ?>>Inactive</option>
                                             </select>
                                         </div>
-                                        <div class="col-md-3">
+                                        <div class="col-md-2">
                                             <label class="font-weight-bold">Sales Person</label>
                                             <select name="sales_admin_id" class="form-control">
                                                 <option value="">All</option>
                                                 <?php foreach ($sales_agents as $agent) { ?>
                                                     <option value="<?php echo (int) $agent['AdminID']; ?>" <?php echo ($filter_sales_admin_id === (int) $agent['AdminID']) ? 'selected' : ''; ?>><?php echo html_escape($agent['Name']); ?></option>
+                                                <?php } ?>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="font-weight-bold">OP Person</label>
+                                            <select name="op_admin_id" class="form-control">
+                                                <option value="">All</option>
+                                                <?php foreach ($sales_agents as $agent) { ?>
+                                                    <option value="<?php echo (int) $agent['AdminID']; ?>" <?php echo ($filter_op_admin_id === (int) $agent['AdminID']) ? 'selected' : ''; ?>><?php echo html_escape($agent['Name']); ?></option>
                                                 <?php } ?>
                                             </select>
                                         </div>
@@ -150,6 +161,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                 <th style="text-align:center;">Contact Number</th>
                                 <th style="text-align:center;">Email Address</th>
                                 <th style="text-align:center;">Sales Person</th>
+                                <th style="text-align:center;">OP Person</th>
                                 <th style="text-align:center;">Tour Code</th>
                                 <th style="text-align:center;">Duration</th>
                                 <th style="text-align:center;">Status</th>
@@ -160,7 +172,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                         <tbody>
                             <?php if (empty($packages)) { ?>
                                 <tr>
-                                    <td colspan="11" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
+                                    <td colspan="12" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
                                 </tr>
                             <?php } else { ?>
                                 <?php $count = 1; ?>
@@ -175,6 +187,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                         <td style="text-align:center;"><?php echo !empty($package['customer_contact']) ? html_escape($package['customer_contact']) : '-'; ?></td>
                                         <td><?php echo !empty($package['customer_email']) ? html_escape($package['customer_email']) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['sales_admin_name']) ? html_escape($package['sales_admin_name']) : '-'; ?></td>
+                                        <td style="text-align:center;"><?php echo !empty($package['op_admin_name']) ? html_escape($package['op_admin_name']) : '-'; ?></td>
                                         <td style="text-align:center;">
                                             <?php echo !empty($package['tour_code']) ? html_escape($package['tour_code']) : '-'; ?>
                                             <?php if (!empty($package['revision_number'])) { ?>

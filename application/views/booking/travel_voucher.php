@@ -9,7 +9,7 @@
 <style type="text/css">
 	body {
 		display: block;
-		font-family: Helvetica;
+		font-family: <?php echo isset($pdf_font) ? $pdf_font : 'Helvetica'; ?>;
 		font-size: 13px;
 		padding-left: 10px;
 		padding-right: 10px;
