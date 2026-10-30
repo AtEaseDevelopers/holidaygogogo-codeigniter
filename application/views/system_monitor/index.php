@@ -257,32 +257,6 @@ $disk_meta = is_array($host_disk)
 			<div class="tile"><div class="k">Tables</div><div class="v" id="db_tables"><?php echo $sql ? number_format($sql['tables']) : '—'; ?></div></div>
 			<div class="tile"><div class="k">Connections</div><div class="v" id="db_conn"><?php echo $sql ? $sql['connections'] : '—'; ?></div></div>
 		</div>
-
-		<div class="qh">Recent query history · this database</div>
-		<div class="tbl-scroll">
-			<table class="q">
-				<thead><tr><th>Query</th><th style="text-align:right;">Count</th><th style="text-align:right;">Avg</th><th style="text-align:right;">Max</th><th style="text-align:right;">Rows&nbsp;Exam.</th><th>Last&nbsp;Seen</th></tr></thead>
-				<tbody id="db_hist">
-					<?php
-					$hist = ($sql && ! empty($sql['history'])) ? $sql['history'] : array();
-					if (empty($hist)) {
-						echo '<tr><td colspan="6" class="empty">No query history. (performance_schema disabled, not permitted, or no activity on this schema.)</td></tr>';
-					} else {
-						foreach ($hist as $h) {
-							echo '<tr>';
-							echo '<td><code>' . htmlspecialchars(mb_substr($h['query'], 0, 220)) . '</code></td>';
-							echo '<td class="t">' . number_format($h['count']) . '</td>';
-							echo '<td class="t">' . htmlspecialchars(system_monitor_format_ps_time($h['avg_ps'])) . '</td>';
-							echo '<td class="t">' . htmlspecialchars(system_monitor_format_ps_time($h['max_ps'])) . '</td>';
-							echo '<td class="t">' . number_format($h['rows_examined']) . '</td>';
-							echo '<td style="white-space:nowrap;font-size:11.5px;" title="' . htmlspecialchars($h['last_seen']) . '">' . htmlspecialchars(isset($h['last_seen_ago']) ? $h['last_seen_ago'] : $h['last_seen']) . '</td>';
-							echo '</tr>';
-						}
-					}
-					?>
-				</tbody>
-			</table>
-		</div>
 	</div>
 
 	<div class="note">
@@ -310,15 +284,6 @@ $disk_meta = is_array($host_disk)
 	function fmtUptime(s){ s=Math.max(0,parseInt(s,10)||0);
 		var d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60),p=[];
 		if(d)p.push(d+'d'); if(h)p.push(h+'h'); p.push(m+'m'); return p.join(' '); }
-	function fmtDur(sec){ sec=Math.max(0,parseInt(sec,10)||0); if(sec<=0) return '0s';
-		var d=Math.floor(sec/86400),h=Math.floor((sec%86400)/3600),m=Math.floor((sec%3600)/60),s=sec%60;
-		if(d>0)return d+'d '+h+'h'; if(h>0)return h+'h '+m+'m'; if(m>0)return m+'m '+s+'s'; return s+'s'; }
-	function fmtPs(ps){ ps=Number(ps)||0; if(ps<=0) return '0';
-		if(ps<1e6) return Math.round(ps/1e3)+' ns';
-		if(ps<1e9) return (ps/1e6).toFixed(1)+' µs';
-		if(ps<1e12) return (ps/1e9).toFixed(1)+' ms';
-		return (ps/1e12).toFixed(2)+' s'; }
-	function esc(s){ return $('<div/>').text(s==null?'':s).html(); }
 
 	function setPill(id, status){
 		var el=$('#'+id).removeClass('pill-ok pill-warn pill-crit');
@@ -369,21 +334,6 @@ $disk_meta = is_array($host_disk)
 		$('#db_size').text(fmtBytes(sql.size_bytes));
 		$('#db_tables').text(Number(sql.tables).toLocaleString());
 		$('#db_conn').text(sql.connections);
-
-		var hist=sql.history||[];
-		if(!hist.length){ $('#db_hist').html('<tr><td colspan="6" class="empty">No query history. (performance_schema disabled, not permitted, or no activity on this schema.)</td></tr>'); }
-		else {
-			var hh='';
-			hist.forEach(function(h){
-				hh+='<tr><td><code>'+esc(String(h.query).slice(0,220))+'</code></td>'
-					+'<td class="t">'+Number(h.count).toLocaleString()+'</td>'
-					+'<td class="t">'+esc(fmtPs(h.avg_ps))+'</td>'
-					+'<td class="t">'+esc(fmtPs(h.max_ps))+'</td>'
-					+'<td class="t">'+Number(h.rows_examined).toLocaleString()+'</td>'
-					+'<td style="white-space:nowrap;font-size:11.5px;" title="'+esc(h.last_seen)+'">'+esc(h.last_seen_ago||h.last_seen)+'</td></tr>';
-			});
-			$('#db_hist').html(hh);
-		}
 	}
 
 	function poll(){ $.getJSON(STATS_URL).done(render); }

@@ -134,14 +134,6 @@ check('uptime minutes only', '5m', system_monitor_format_uptime(5 * 60));
 check('uptime hours+mins', '2h 5m', system_monitor_format_uptime(2 * 3600 + 5 * 60));
 check('uptime days+hours+mins', '3d 4h 12m', system_monitor_format_uptime(3 * 86400 + 4 * 3600 + 12 * 60));
 
-// ---- human-readable duration (processlist Time column) ----
-check('duration zero', '0s', system_monitor_format_duration(0));
-check('duration seconds', '5s', system_monitor_format_duration(5));
-check('duration under a minute stays seconds', '59s', system_monitor_format_duration(59));
-check('duration minutes+seconds', '2m 5s', system_monitor_format_duration(125));
-check('duration hours+mins', '1h 1m', system_monitor_format_duration(3665));
-check('duration days+hours', '6d 0h', system_monitor_format_duration(520371));
-
 // ---- SQL: SHOW GLOBAL STATUS pairs -> map ----
 $pairs = array(
     array('Variable_name' => 'Uptime', 'Value' => '3600'),
@@ -192,10 +184,6 @@ check('processlist sleeping sorts last', '1', $norm[2]['id']);
 check('processlist null info -> empty string', '', $norm[2]['info']);
 check('processlist non-array -> empty', array(), system_monitor_processlist_rows('x'));
 
-// ---- active count ----
-check('active count ignores Sleep', 2, system_monitor_sql_active_count($norm));
-check('active count empty', 0, system_monitor_sql_active_count(array()));
-
 // ---- per-project: processlist filtered to this DB ----
 $byDb = system_monitor_filter_processlist_by_db($norm, 'HOL'); // case-insensitive
 check('filter by db keeps matching rows', 3, count($byDb));
@@ -244,44 +232,6 @@ check('project cpu status', 'ok', $pcpu['status']);
 check('project cpu null when no processes', null, system_monitor_project_cpu(16.0, 8, 0));
 $pcpuBusy = system_monitor_project_cpu(720.0, 8, 10); // 720/8 = 90%
 check('project cpu critical', 'critical', $pcpuBusy['status']);
-
-// ---- query history: picosecond latency formatting ----
-check('ps zero', '0', system_monitor_format_ps_time(0));
-check('ps nanoseconds', '500 ns', system_monitor_format_ps_time(500000));       // 5e5 ps = 500 ns
-check('ps microseconds', '1.5 µs', system_monitor_format_ps_time(1500000));     // 1.5e6 ps
-check('ps milliseconds', '2.5 ms', system_monitor_format_ps_time(2500000000));  // 2.5e9 ps
-check('ps seconds', '1.25 s', system_monitor_format_ps_time(1250000000000));    // 1.25e12 ps
-
-// ---- relative "time ago" ----
-check('ago just now', 'just now', system_monitor_time_ago(3));
-check('ago seconds', '42s ago', system_monitor_time_ago(42));
-check('ago minutes', '5m ago', system_monitor_time_ago(5 * 60 + 30));
-check('ago hours', '3h ago', system_monitor_time_ago(3 * 3600 + 120));
-check('ago days', '2d ago', system_monitor_time_ago(2 * 86400 + 3600));
-check('ago weeks', '2w ago', system_monitor_time_ago(15 * 86400));
-check('ago negative clamps to just now', 'just now', system_monitor_time_ago(-50));
-
-$now = strtotime('2026-10-30 15:45:00');
-check('relative from datetime', '2m ago', system_monitor_relative_time('2026-10-30 15:43:00', $now));
-check('relative strips fractional seconds', '1m ago', system_monitor_relative_time('2026-10-30 15:44:00.554719', $now));
-check('relative blank -> empty', '', system_monitor_relative_time('', $now));
-check('relative unparseable -> raw', 'not-a-date', system_monitor_relative_time('not-a-date', $now));
-
-// ---- query history normalisation + sort ----
-$histRaw = array(
-    array('DIGEST_TEXT' => 'SELECT * FROM `booking`', 'COUNT_STAR' => '120', 'AVG_TIMER_WAIT' => '2500000000',
-          'MAX_TIMER_WAIT' => '9000000000', 'SUM_ROWS_EXAMINED' => '4000', 'SUM_ROWS_SENT' => '120', 'LAST_SEEN' => '2026-10-30 09:00:00'),
-    array('DIGEST_TEXT' => 'UPDATE `payment` SET ...', 'COUNT_STAR' => '5', 'AVG_TIMER_WAIT' => '1200000',
-          'MAX_TIMER_WAIT' => '3000000', 'SUM_ROWS_EXAMINED' => '5', 'SUM_ROWS_SENT' => '0', 'LAST_SEEN' => '2026-10-30 11:30:00'),
-);
-$hist = system_monitor_query_history_rows($histRaw);
-check('history most-recent first', 'UPDATE `payment` SET ...', $hist[0]['query']);
-check('history count cast', 120, $hist[1]['count']);
-check('history avg_ps cast', 2500000000.0, $hist[1]['avg_ps']);
-check('history rows_examined', 4000, $hist[1]['rows_examined']);
-check('history case-insensitive cols', 1, count(system_monitor_query_history_rows(
-    array(array('digest_text' => 'SELECT 1', 'count_star' => '1', 'last_seen' => '2026-01-01 00:00:00')))));
-check('history non-array -> empty', array(), system_monitor_query_history_rows('x'));
 
 // ---- per-project: du parsing ----
 check('du kb -> bytes', 560668.0 * 1024, system_monitor_parse_du_kb("560668\t/path/to/project"));

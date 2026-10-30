@@ -274,32 +274,12 @@ class System_Monitor extends CI_Controller
 				$db
 			);
 
-			// Query history for this DB — per-statement-pattern stats that MySQL
-			// keeps in performance_schema (needs it enabled + SELECT granted).
-			$history = system_monitor_query_history_rows($this->safe_rows(
-				'SELECT DIGEST_TEXT, COUNT_STAR, AVG_TIMER_WAIT, MAX_TIMER_WAIT,
-				        SUM_ROWS_EXAMINED, SUM_ROWS_SENT, LAST_SEEN
-				 FROM performance_schema.events_statements_summary_by_digest
-				 WHERE SCHEMA_NAME = ? AND DIGEST_TEXT IS NOT NULL
-				 ORDER BY LAST_SEEN DESC LIMIT 25',
-				array($db)
-			));
-
-			// Relative "ago" label, computed server-side so it's timezone-safe
-			// and refreshes with every poll.
-			$now = time();
-			foreach ($history as &$h) {
-				$h['last_seen_ago'] = system_monitor_relative_time($h['last_seen'], $now);
-			}
-			unset($h);
-
 			$result = array(
 				'database'       => $db,
 				'server_version' => $this->db->version(),
 				'size_bytes'     => $size['bytes'],
 				'tables'         => $size['tables'],
 				'connections'    => count($plist),
-				'history'        => array_slice($history, 0, 25),
 			);
 		} catch (Throwable $e) {
 			$result = null;
