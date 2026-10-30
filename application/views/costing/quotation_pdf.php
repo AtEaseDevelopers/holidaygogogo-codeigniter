@@ -483,10 +483,13 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
                 $itin_section_rows[] = '<p style="margin:6px 0 2px;"><strong>' . $sec_label . '</strong></p>' . $sec_html;
             }
         }
+        // Render as plain block divs, NOT a single-row table. A one-<tr> table holding
+        // all four sections is an unbreakable unit to DomPDF: when the notes are taller
+        // than a page it keeps advancing to the next page trying to fit the whole row,
+        // leaving blank pages behind before finally splitting it. Block divs flow and
+        // page-break naturally.
         if (!empty($itin_section_rows)) { ?>
-            <table style="width:100%; font-size:11px; border-spacing:5px; margin-top:8px;">
-                <tr><td><?php echo implode('', $itin_section_rows); ?></td></tr>
-            </table>
+            <div style="font-size:11px; margin-top:8px;"><?php echo implode('', $itin_section_rows); ?></div>
         <?php } ?>
     </div>
 </body></html>

@@ -205,6 +205,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                 <th style="text-align:center;">Tour Code</th>
                                 <th style="text-align:center;">Duration</th>
                                 <th style="text-align:center;">Status</th>
+                                <th style="text-align:center;">Validity</th>
                                 <th style="text-align:center;">Created At</th>
                                 <th style="text-align:center;">Updated At</th>
                                 <th class="action" style="text-align:center;">Action</th>
@@ -213,7 +214,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                         <tbody>
                             <?php if (empty($packages)) { ?>
                                 <tr>
-                                    <td colspan="13" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
+                                    <td colspan="14" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
                                 </tr>
                             <?php } else { ?>
                                 <?php $count = 1; ?>
@@ -266,6 +267,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                         <td style="text-align:center;">
                                             <span class="label label-lg label-light-primary label-inline"><?php echo html_escape($package['status_label']); ?></span>
                                         </td>
+                                        <td style="text-align:center;"><?php echo !empty($package['validity_date']) ? date('d/m/Y', strtotime($package['validity_date'])) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['created_at']) ? date('d/m/Y H:i', strtotime($package['created_at'])) : 'N/A'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['updated_at']) ? date('d/m/Y H:i', strtotime($package['updated_at'])) : 'N/A'; ?></td>
                                         <td>

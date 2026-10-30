@@ -123,6 +123,7 @@ class Costing_Model extends CI_Model
                 cp.duration_nights,
                 cp.description,
                 cp.status,
+                cp.validity_date,
                 cp.created_at,
                 cp.updated_at,
                 (
