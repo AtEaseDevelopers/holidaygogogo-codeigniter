@@ -103,6 +103,26 @@ $assertions['row legacy terms split']   = $fromLegacy['terms'] === '<ul><li>Twin
 $fromEmpty = costing_itinerary_sections_from_row(array());
 $assertions['row empty all blank'] = $fromEmpty['include'] === '' && $fromEmpty['terms'] === '';
 
+// --- Excel "one bullet per line" <-> <ul><li> round-trip -------------------
+// html_from_lines: each non-blank line becomes one <li>, in order.
+$assertions['lines->html single']   = costing_itinerary_html_from_lines('Daily breakfast') === '<ul><li>Daily breakfast</li></ul>';
+$assertions['lines->html multi']    = costing_itinerary_html_from_lines("Hotel\n5 nights\nGuide") === '<ul><li>Hotel</li><li>5 nights</li><li>Guide</li></ul>';
+$assertions['lines->html crlf/blank'] = costing_itinerary_html_from_lines("A\r\n\r\nB\n ") === '<ul><li>A</li><li>B</li></ul>';
+$assertions['lines->html escapes']  = costing_itinerary_html_from_lines('Tea & scones <x>') === '<ul><li>Tea &amp; scones &lt;x&gt;</li></ul>';
+$assertions['lines->html empty']    = costing_itinerary_html_from_lines("\n  \n") === '';
+// Already-HTML cells (old export / pasted markup) pass through untouched.
+$assertions['lines->html passthru'] = costing_itinerary_html_from_lines('<ul><li>Kept</li></ul>') === '<ul><li>Kept</li></ul>';
+
+// lines_from_html: one <li> per line; entities decoded, tags/whitespace cleaned.
+$assertions['html->lines list']     = costing_itinerary_lines_from_html('<ul><li>Hotel</li><li>Return transfers</li></ul>') === "Hotel\nReturn transfers";
+$assertions['html->lines entities'] = costing_itinerary_lines_from_html('<ul><li>Tea &amp; scones</li></ul>') === 'Tea & scones';
+$assertions['html->lines paras']    = costing_itinerary_lines_from_html('<p>One</p><p>Two</p>') === "One\nTwo";
+$assertions['html->lines plain']    = costing_itinerary_lines_from_html('No markup here') === 'No markup here';
+$assertions['html->lines empty']    = costing_itinerary_lines_from_html('') === '';
+// Full cycle: stored HTML -> export cell -> re-import HTML is stable.
+$cycle = costing_itinerary_html_from_lines(costing_itinerary_lines_from_html('<ul><li>Hotel</li><li>Guide</li></ul>'));
+$assertions['round-trip stable']    = $cycle === '<ul><li>Hotel</li><li>Guide</li></ul>';
+
 $failed = 0;
 foreach ($assertions as $label => $ok) {
     echo ($ok ? '  PASS  ' : '  FAIL  ') . $label . PHP_EOL;

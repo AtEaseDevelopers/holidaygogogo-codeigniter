@@ -35,6 +35,7 @@ if (!defined('BASEPATH')) {
 if (!defined('FCPATH')) {
     define('FCPATH', __DIR__ . '/../../');
 }
+require_once __DIR__ . '/../../application/helpers/costing_itinerary_helper.php';
 require_once __DIR__ . '/../../application/helpers/costing_packages_import_helper.php';
 
 $failures = 0;
@@ -69,7 +70,7 @@ $pkg_labels = array_keys($pkg_cols);
 $raw = array(
     $pkg_labels,                                   // header row -> skipped
     array('', '', '', '', '', '', '', '', '', ''), // blank row -> skipped
-    array('Japan Spring', 'Tan Family', '+60 12', 't@e.com', 'Alice Tan', '6', '5', 'active', 'desc',
+    array('Japan Spring', 'Tan Family', '+60 12', 't@e.com', 'Alice Tan', '6', '5', 'active', '2027-03-15', 'desc',
           '2027-04-01', '2027-04-06', '4', '0', '15', '0', '0', 'FIT', 'Twin|Triple', 'Hotel', 'Y'),
 );
 $records = costing_import_sheet_to_records($raw, $pkg_cols);
@@ -119,13 +120,14 @@ $parsed = array(
     'packages' => array(
         array('name' => 'Japan Spring', 'customer_name' => 'Tan Family', 'customer_contact' => '+60 12',
               'customer_email' => 't@e.com', 'sales_person' => 'Alice Tan', 'duration_days' => '6',
-              'duration_nights' => '5', 'status' => 'active', 'description' => 'desc',
+              'duration_nights' => '5', 'status' => 'active', 'validity_date' => '2027-03-15', 'description' => 'desc',
               'travel_date' => '2027-04-01', 'travel_date_end' => '2027-04-06', 'adult_count' => '4',
               'child_count' => '0', 'margin_percentage' => '15', 'commissionable_per_pax' => '0',
               'ad_hoc_per_pax' => '0', 'quote_flight_mode' => 'FIT', 'quote_hotel_columns' => 'Twin|Triple',
               'quote_hotel_title_label' => 'Hotel', 'quote_show_single_supp' => 'Y',
-              'itinerary_include' => 'Daily breakfast', 'itinerary_exclude' => 'Personal expenses',
-              'itinerary_important_notes' => 'Bring passport', 'itinerary_terms' => 'No refunds'),
+              'itinerary_include' => "Daily breakfast\n5 nights hotel", 'itinerary_exclude' => 'Personal expenses',
+              'itinerary_important_notes' => 'Bring passport', 'itinerary_terms' => 'No refunds',
+              'itinerary_tour_intro' => 'Welcome to Japan'),
     ),
     'cost_items' => array(
         // combination item
@@ -176,6 +178,7 @@ check('happy: flight mode FIT -> fit', 'fit', $p['quote_level']['quote_flight_mo
 check('happy: save_package name', 'Japan Spring', $p['save_package']['name']);
 check('happy: sales resolved to AdminID', 10, $p['save_package']['sales_admin_id']);
 check('happy: duration coerced to int', 6, $p['save_package']['duration_days']);
+check('happy: validity_date carried to save_package', '2027-03-15', $p['save_package']['validity_date']);
 
 // Snapshot payload
 $sp = $p['snapshot_payload'];
@@ -227,10 +230,14 @@ check('happy: day 1 day_number int', 1, $p['itinerary'][0]['day_number']);
 check('happy: unnumbered day_number 0', 0, $p['itinerary'][2]['day_number']);
 check('happy: meal plan tokens (label->slug)', array('breakfast', 'lunch'), $p['itinerary'][1]['meal_plan']);
 check('happy: multi-word meal label tokenised', array('dinner'), $p['itinerary'][0]['meal_plan']);
-check('happy: itinerary Include carried', 'Daily breakfast', $p['itinerary_level']['include']);
-check('happy: itinerary Exclude carried', 'Personal expenses', $p['itinerary_level']['exclude']);
-check('happy: itinerary Important Notes carried', 'Bring passport', $p['itinerary_level']['important_notes']);
-check('happy: itinerary Terms carried', 'No refunds', $p['itinerary_level']['terms']);
+// The four note cells are "one bullet per line": each line becomes an <li>.
+check('happy: itinerary Include = one bullet per line', '<ul><li>Daily breakfast</li><li>5 nights hotel</li></ul>', $p['itinerary_level']['include']);
+check('happy: itinerary Exclude carried', '<ul><li>Personal expenses</li></ul>', $p['itinerary_level']['exclude']);
+check('happy: itinerary Important Notes carried', '<ul><li>Bring passport</li></ul>', $p['itinerary_level']['important_notes']);
+check('happy: itinerary Terms carried', '<ul><li>No refunds</li></ul>', $p['itinerary_level']['terms']);
+// Standalone Tour Intro header — assembled separately from the four section-meta
+// fields, same one-line-per-bullet -> <ul><li> conversion.
+check('happy: itinerary Tour Intro carried', '<ul><li>Welcome to Japan</li></ul>', $p['itinerary_tour_intro']);
 
 /* ----------------------------------------------------- Errors: duplicate name */
 

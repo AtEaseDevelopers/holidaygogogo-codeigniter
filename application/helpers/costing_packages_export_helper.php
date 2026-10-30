@@ -184,6 +184,9 @@ if (!function_exists('costing_packages_export_package_record')) {
             'duration_days'          => (string) (int) $get('duration_days'),
             'duration_nights'        => (string) (int) $get('duration_nights'),
             'status'                 => (string) $get('status'),
+            // Quotation "valid until" date — package-level (not booking-derived), so
+            // it exports regardless of whether the package has a booking yet.
+            'validity_date'          => costing_packages_export_ymd($get('validity_date')),
             'description'            => (string) $get('description'),
             'travel_date'            => $has_booking ? costing_packages_export_ymd($get('latest_travel_date')) : '',
             'travel_date_end'        => $has_booking ? costing_packages_export_ymd($get('latest_travel_date_end')) : '',
@@ -199,9 +202,15 @@ if (!function_exists('costing_packages_export_package_record')) {
                 array_key_exists('quote_show_single_supp', $pkg) ? $pkg['quote_show_single_supp'] : null
             ),
             // The four itinerary-wide sections, with the legacy merged-notes split
-            // fallback so old packages still export their content. Exported HTML
-            // re-imports verbatim (full round-trip).
-        ) + costing_packages_export_itinerary_section_cells($pkg);
+            // fallback so old packages still export their content. Each section is
+            // emitted as "one bullet per line" plain text (one <li> => one line)
+            // and re-imports via costing_itinerary_html_from_lines().
+        ) + costing_packages_export_itinerary_section_cells($pkg) + array(
+            // Standalone Tour Intro header — last itinerary column, after the four
+            // sections, to match the import column map order. Flattened "one line
+            // per paragraph/bullet" so it re-imports via html_from_lines().
+            'itinerary_tour_intro' => costing_itinerary_lines_from_html((string) $get('itinerary_tour_intro')),
+        );
     }
 }
 
@@ -218,8 +227,11 @@ if (!function_exists('costing_packages_export_itinerary_section_cells')) {
         $cells = array();
         foreach (costing_itinerary_section_meta() as $key => $meta) {
             // Key by the import RECORD key (post_field) so the exported cell lines
-            // up with the Packages-sheet column and re-imports verbatim.
-            $cells[$meta[2]] = isset($sections[$key]) ? (string) $sections[$key] : '';
+            // up with the Packages-sheet column. Stored <ul><li> HTML is flattened
+            // to one bullet per line so the cell is readable and re-imports cleanly.
+            $cells[$meta[2]] = costing_itinerary_lines_from_html(
+                isset($sections[$key]) ? (string) $sections[$key] : ''
+            );
         }
         return $cells;
     }

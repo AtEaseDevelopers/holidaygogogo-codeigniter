@@ -135,6 +135,8 @@ class Competitor_Product_Job extends CI_Controller
 			$this->run_upload($job, $write);
 		} elseif ($mode === 'translate') {
 			$this->run_translate($job, $write);
+		} elseif ($mode === 'extract_flow') {
+			$this->run_extract_flow($job, $write);
 		} else {
 			$this->run_crawl($job, $write);
 		}
@@ -249,6 +251,66 @@ class Competitor_Product_Job extends CI_Controller
 			$write(array('state' => 'done', 'phase' => 'translating', 'done' => 1, 'total' => 1, 'analysis_id' => $id));
 		} catch (Exception $e) {
 			log_message('error', 'Competitor_Product_Job translate failed: ' . $e->getMessage());
+			$write(array('state' => 'error', 'message' => $e->getMessage()));
+		}
+	}
+
+	/**
+	 * AI-extract the "Daily Itinerary Flow" for every UNCACHED product across the
+	 * posted analysis ids, in the BACKGROUND, so the Tour Info export never blocks the
+	 * browser on a long run of OpenAI calls. Each product is extracted and committed
+	 * to competitor_analyses.itinerary_flow_json one at a time (via the service's
+	 * cached_itinerary_flow) — so a kill mid-run keeps everything done so far and a
+	 * re-run only picks up the remaining misses. Progress is written as done/total
+	 * (total = uncached count) so the view can show "Generating k/N". A single
+	 * product's failure caches nothing for it and is skipped; the job still finishes.
+	 */
+	private function run_extract_flow($job, $write)
+	{
+		@set_time_limit(0);
+		$ids  = array_values(array_filter(array_map('intval', explode(',', (string) (isset($job['ids']) ? $job['ids'] : '')))));
+		$lang = competitor_normalize_lang(isset($job['lang']) ? $job['lang'] : 'en');
+		$write(array('state' => 'running', 'phase' => 'extracting', 'done' => 0, 'total' => 0));
+		$this->load->model('Master_Product_Model');
+		$this->load->model('Competitor_Analysis_Model');
+		try {
+			if (empty($ids)) {
+				throw new Exception('No products to extract.');
+			}
+			$this->competitoranalysisservice->set_usage_feature('Competitor Tour Info Flow');
+			$analyses = $this->Master_Product_Model->Read_For_Export($ids);
+
+			// Build the work list of UNCACHED products only (one row per missing flow).
+			$todo = array();
+			foreach ($analyses as $a) {
+				$aid = (int) $a->id;
+				foreach (competitor_display_products($a) as $pidx => $p) {
+					$itin = (isset($p['itinerary']) && is_array($p['itinerary'])) ? $p['itinerary'] : array();
+					if (empty($itin)) { continue; }
+					$cached = $this->Competitor_Analysis_Model->Read_Itinerary_Flow($aid, $lang, $pidx);
+					if (is_array($cached) && isset($cached['stops'])) { continue; }
+					$todo[] = array('id' => $aid, 'pidx' => $pidx, 'itin' => $itin, 'meta' => array(
+						'product_name' => isset($p['product_name']) ? $p['product_name'] : '',
+						'destination'  => isset($p['destination']) ? $p['destination'] : '',
+					));
+				}
+			}
+
+			$total = count($todo);
+			$write(array('state' => 'running', 'phase' => 'extracting', 'done' => 0, 'total' => $total));
+			$done = 0;
+			foreach ($todo as $t) {
+				try {
+					// Extracts via OpenAI then Save_Itinerary_Flow — committed before the next item.
+					$this->competitoranalysisservice->cached_itinerary_flow($t['id'], $t['pidx'], $t['itin'], $t['meta'], $lang);
+				} catch (Exception $e) {
+					log_message('error', 'Competitor_Product_Job extract_flow product failed (id ' . $t['id'] . ' #' . $t['pidx'] . '): ' . $e->getMessage());
+				}
+				$write(array('state' => 'running', 'phase' => 'extracting', 'done' => ++$done, 'total' => $total));
+			}
+			$write(array('state' => 'done', 'phase' => 'extracting', 'done' => $total, 'total' => $total, 'count' => $total));
+		} catch (Exception $e) {
+			log_message('error', 'Competitor_Product_Job extract_flow failed: ' . $e->getMessage());
 			$write(array('state' => 'error', 'message' => $e->getMessage()));
 		}
 	}

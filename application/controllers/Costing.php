@@ -23,6 +23,10 @@ class Costing extends MY_Controller
             'customer_email' => trim((string) $this->input->get('customer_email')),
             'sales_admin_id' => (int) $this->input->get('sales_admin_id'),
             'op_admin_id' => (int) $this->input->get('op_admin_id'),
+            'created_from' => trim((string) $this->input->get('created_from')),
+            'created_to' => trim((string) $this->input->get('created_to')),
+            'validity_from' => trim((string) $this->input->get('validity_from')),
+            'validity_to' => trim((string) $this->input->get('validity_to')),
         );
     }
 
@@ -90,7 +94,7 @@ class Costing extends MY_Controller
 
         $sales_by_name = array();
         $sales_names = array();
-        foreach ($this->Costing_Model->Read_Sales_Agents() as $agent) {
+        foreach ($this->Costing_Model->Read_Sales_Agents(0, true) as $agent) {
             $name = trim((string) $agent['Name']);
             if ($name === '') { continue; }
             $sales_by_name[strtolower($name)] = (int) $agent['AdminID'];
@@ -150,6 +154,9 @@ class Costing extends MY_Controller
     private function Import_Assemble_From_File($dest)
     {
         require_once FCPATH . 'vendor/autoload.php';
+        // Assembly promotes the four "one bullet per line" note cells into
+        // <ul><li> HTML via costing_itinerary_html_from_lines().
+        $this->load->helper('costing_itinerary');
         try {
             $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($dest);
         } catch (\Exception $e) {
@@ -512,7 +519,9 @@ class Costing extends MY_Controller
             'important_notes' => $this->input->post('itinerary_important_notes'),
             'terms'           => $this->input->post('itinerary_terms'),
         );
-        if ($package_id > 0 && $this->Costing_Model->Save_Itinerary_Days($package_id, (array) $this->input->post('itinerary'), $level_fields)) {
+        // Standalone Tour Intro header (shown at the TOP of the Itinerary on the PDF).
+        $tour_intro = $this->input->post('itinerary_tour_intro');
+        if ($package_id > 0 && $this->Costing_Model->Save_Itinerary_Days($package_id, (array) $this->input->post('itinerary'), $level_fields, $tour_intro)) {
             $this->session->set_flashdata('message_success', 'Itinerary saved.');
         } else {
             $this->session->set_flashdata('message_error', 'Unable to save itinerary.');

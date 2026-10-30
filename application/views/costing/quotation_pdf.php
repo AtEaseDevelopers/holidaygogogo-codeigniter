@@ -252,8 +252,9 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
 
     <table style="width:100%;">
         <tr>
-            <th style="width:65%;"><h3 class="text-right">Tour Quotation</h3></th>
-            <th style="width:35%; font-weight:700; text-align:right;">No : <?php echo html_escape($TourCode); ?></th>
+            <th style="width:30%;"></th>
+            <th style="width:40%;"><h3 class="text-center">Tour Quotation</h3></th>
+            <th style="width:30%; font-weight:700; text-align:right;">No : <?php echo html_escape($TourCode); ?></th>
         </tr>
     </table>
 
@@ -404,6 +405,15 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
             </tbody>
         </table>
         <?php } } ?>
+
+        <?php
+        // Tour Intro header — a standalone rich-text block shown once directly under
+        // the pricing section. Prints only when it carries visible content; an
+        // <img>-only block still counts (matches the Notes & Terms blank check).
+        $tour_intro = isset($itinerary_tour_intro) ? (string) $itinerary_tour_intro : '';
+        if (trim(strip_tags($tour_intro, '<img>')) !== '' || stripos($tour_intro, '<img') !== false) { ?>
+            <div style="font-size:11px; margin-top:8px;"><?php echo $tour_intro; ?></div>
+        <?php } ?>
 
         <!-- Boilerplate footer notes (highlighted) — rich-text HTML -->
         <?php if ($FooterNotesHtml !== '') { ?>

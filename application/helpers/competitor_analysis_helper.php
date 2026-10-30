@@ -4765,6 +4765,14 @@ if ( ! function_exists('competitor_itinerary_place_phrases'))
 if ( ! function_exists('competitor_itinerary_stops'))
 {
 	/**
+	 * DEPRECATED heuristic — superseded by AI extraction (see
+	 * competitor_build_itinerary_flow_agent / CompetitorAnalysisService::
+	 * extract_itinerary_flow). It grabbed every Capitalised phrase from the prose,
+	 * which produced wrong "stops" (random words, cities passed through, split
+	 * attractions) — the exact problem flagged in the 28 Oct 2026 template review.
+	 * The "Tour Info" Excel export no longer calls this; kept (with its test) only
+	 * as a reference/no-AI fallback. Pure.
+	 *
 	 * Best-effort "daily itinerary flow": break each stored day
 	 * ({day,title,description}) into stop rows [{day, stop_order, stop_name, city,
 	 * notes}]. Detects the day's city from an "in/to <Place>" cue, pulls proper-noun
@@ -4793,6 +4801,146 @@ if ( ! function_exists('competitor_itinerary_stops'))
 			}
 		}
 		return $rows;
+	}
+}
+
+if ( ! function_exists('competitor_arrival_airport'))
+{
+	/**
+	 * The "Arrival Airport" for the Products sheet: the arrival city parsed from the
+	 * free-text flight ($flight_arrival), or — when the flight text had none (the
+	 * common case, where the scraper lost the non-Latin arrow) — the product's
+	 * Destination, trimmed to its first segment ("Guangdong, China" -> "Guangdong").
+	 * Fixes the blank-arrival complaint in the 28 Oct 2026 template review. Pure.
+	 */
+	function competitor_arrival_airport($flight_arrival, $destination)
+	{
+		$arrival = trim((string) $flight_arrival);
+		if ($arrival !== '') { return $arrival; }
+		$dest = trim((string) $destination);
+		if ($dest === '') { return ''; }
+		$first = trim((string) preg_split('/\s*[,\/|·–—]\s*/u', $dest)[0]);
+		return $first !== '' ? $first : $dest;
+	}
+}
+
+if ( ! function_exists('competitor_build_itinerary_flow_agent'))
+{
+	/**
+	 * Build the OpenAI Responses-API spec ({instructions, input}) that turns a
+	 * product's stored itinerary days ([{day,title,description}]) into the corrected
+	 * "Daily Itinerary Flow" — one row per place actually visited, with the real
+	 * city/district and a notes field. The instruction block is the exact extraction
+	 * brief from the 28 Oct 2026 template review (verbatim 6 rules), wrapped to emit
+	 * a JSON object. The input embeds the days as JSON and names "json" so the
+	 * Responses API json_object format mode engages. Pure.
+	 */
+	function competitor_build_itinerary_flow_agent($itinerary, $meta = array(), $lang = 'en')
+	{
+		$days = array();
+		foreach ((array) $itinerary as $entry) {
+			$e = (array) $entry;
+			$days[] = array(
+				'day'         => isset($e['day']) ? (string) $e['day'] : '',
+				'title'       => isset($e['title']) ? (string) $e['title'] : '',
+				'description' => isset($e['description']) ? (string) $e['description'] : '',
+			);
+		}
+		$meta = (array) $meta;
+		$destination = isset($meta['destination']) ? trim((string) $meta['destination']) : '';
+		$product     = isset($meta['product_name']) ? trim((string) $meta['product_name']) : '';
+
+		$instructions =
+			"You extract the \"daily itinerary flow\" from a tour's day-by-day descriptions.\n\n"
+			. "From each day's itinerary description, list only the places the group\n"
+			. "actually visits (attractions, parks, old towns, streets, gardens, boat rides,\n"
+			. "shows, activities such as fruit picking).\n\n"
+			. "Rules:\n"
+			. "1. One row per place, in the order visited.\n"
+			. "2. Do NOT include: airports, hotels, meals, cities only passed through, or\n"
+			. "general words.\n"
+			. "3. Do NOT split one attraction into its parts (e.g. lakes or hills inside a\n"
+			. "park, streets inside a heritage area). Mention the parts in Notes instead.\n"
+			. "4. If two places are joined by \"and\", make two rows.\n"
+			. "5. City / District = the actual city or district where THAT place is located,\n"
+			. "not the day's hotel city or departure airport. Use the district if the city\n"
+			. "is large (e.g. Guangzhou - Panyu).\n"
+			. "6. Notes = closures, seasonal conditions, replacements, or special activities\n"
+			. "(e.g. \"boat ride\", \"closed Monday - replaced by Qixingyan Archway Square\").\n\n"
+			. "Return ONLY a JSON object of this exact shape, no commentary or markdown:\n"
+			. "{\"stops\":[{\"day\":<day number as given>,\"stop\":\"<place name>\","
+			. "\"city\":\"<city or city (district)>\",\"notes\":\"<notes or empty string>\"}]}\n"
+			. "Keep the \"day\" value identical to the day it came from. Leave \"notes\" as an "
+			. "empty string when there is nothing to note.";
+
+		if (competitor_normalize_lang($lang) !== 'en') {
+			$target = competitor_lang_label($lang);
+			$instructions .= "\nWrite the stop, city and notes values in {$target} (translate place "
+				. "and district names naturally); keep the JSON keys and structure in English.";
+		}
+
+		$context = '';
+		if ($product !== '')     { $context .= "Tour: {$product}\n"; }
+		if ($destination !== '') { $context .= "Destination: {$destination}\n"; }
+
+		$input = "Extract the daily itinerary flow as a json object from these itinerary days:\n"
+			. $context
+			. json_encode(array('days' => $days), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+		return array('instructions' => $instructions, 'input' => $input);
+	}
+}
+
+if ( ! function_exists('competitor_itinerary_flow_rows'))
+{
+	/**
+	 * Normalise the AI reply ({stops:[{day,stop,city,notes}]}) into the export's row
+	 * shape [{day, stop_order, stop_name, city, notes}], numbering stop_order from 1
+	 * within each day and dropping empty-named rows. Accepts either "stop"/"stop_name"
+	 * so a cached row re-read through here is idempotent. Pure.
+	 */
+	function competitor_itinerary_flow_rows($data)
+	{
+		$stops = (is_array($data) && isset($data['stops']) && is_array($data['stops'])) ? $data['stops'] : array();
+		$rows = array();
+		$order_by_day = array();
+		foreach ($stops as $s) {
+			$s    = (array) $s;
+			$name = isset($s['stop']) ? trim((string) $s['stop'])
+				: (isset($s['stop_name']) ? trim((string) $s['stop_name']) : '');
+			if ($name === '') { continue; }
+			$day   = isset($s['day']) ? trim((string) $s['day']) : '';
+			$city  = isset($s['city']) ? trim((string) $s['city']) : '';
+			$notes = isset($s['notes']) ? trim((string) $s['notes']) : '';
+			$order_by_day[$day] = isset($order_by_day[$day]) ? $order_by_day[$day] + 1 : 1;
+			$rows[] = array('day' => $day, 'stop_order' => $order_by_day[$day],
+				'stop_name' => $name, 'city' => $city, 'notes' => $notes);
+		}
+		return $rows;
+	}
+}
+
+if ( ! function_exists('competitor_flow_badge'))
+{
+	/**
+	 * Listing/view badge state for "has the AI Daily Itinerary Flow already been
+	 * extracted for this record?" — so the user sees at a glance which products won't
+	 * need another AI call. Reads the cached itinerary_flow_json for $lang and compares
+	 * how many products it covers against the record's product_count:
+	 *   'ready'   — every product cached (no AI needed)
+	 *   'partial' — some but not all cached
+	 *   'none'    — nothing cached yet
+	 * Pure. ($product_count < 1 is treated as 1 so a single-product row reads cleanly.)
+	 */
+	function competitor_flow_badge($itinerary_flow_json, $product_count, $lang = 'en')
+	{
+		$all = json_decode((string) $itinerary_flow_json, true);
+		$lang = (string) $lang;
+		$entries = (is_array($all) && isset($all[$lang]) && is_array($all[$lang])) ? $all[$lang] : array();
+		$n = count($entries);
+		if ($n === 0) { return 'none'; }
+		$pc = max(1, (int) $product_count);
+		return $n >= $pc ? 'ready' : 'partial';
 	}
 }
 

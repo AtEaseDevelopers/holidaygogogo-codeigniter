@@ -81,6 +81,13 @@ class Costing_Quotation extends CI_Controller
             }
         }
 
+        // Standalone Tour Intro header — same sanitise/inline pipeline.
+        if (!empty($data['itinerary_tour_intro'])) {
+            $data['itinerary_tour_intro'] = inline_voucher_images_html(
+                sanitize_voucher_content_html((string) $data['itinerary_tour_intro'])
+            );
+        }
+
         // Register the shared CJK font and wrap only the Chinese runs in a cjk-font
         // span so Chinese a sales person types into the itinerary / notes / hotels
         // renders, while English keeps the view's original Arial/Segoe font and the

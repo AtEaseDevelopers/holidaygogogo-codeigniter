@@ -249,6 +249,45 @@ class Competitor_Analysis_Model extends CI_Model
 	}
 
 	/**
+	 * Cached AI-extracted "Daily Itinerary Flow" for one language + product index
+	 * (from CompetitorAnalysisService::extract_itinerary_flow), or null if not
+	 * extracted yet. Stored as {"en":{"0":{"stops":[...]}},...} in itinerary_flow_json.
+	 * Keyed on id only (globally unique) so both the competitor and our-product
+	 * exports can share it regardless of this instance's feature.
+	 */
+	function Read_Itinerary_Flow($id, $lang, $product_index = 0)
+	{
+		$row = $this->db->select('itinerary_flow_json')
+			->get_where('competitor_analyses', array('id' => (int) $id))->row();
+		if ( ! $row) {
+			return null;
+		}
+		$all = json_decode((string) $row->itinerary_flow_json, true);
+		$lang = (string) $lang;
+		$pidx = (string) (int) $product_index;
+		return (is_array($all) && isset($all[$lang][$pidx]) && is_array($all[$lang][$pidx]))
+			? $all[$lang][$pidx] : null;
+	}
+
+	/** Store (upsert) the extracted flow for one language + product index, keeping the rest. */
+	function Save_Itinerary_Flow($id, $lang, $product_index, $data)
+	{
+		$row = $this->db->select('itinerary_flow_json')
+			->get_where('competitor_analyses', array('id' => (int) $id))->row();
+		if ( ! $row) {
+			return false;
+		}
+		$all = json_decode((string) $row->itinerary_flow_json, true);
+		if ( ! is_array($all)) {
+			$all = array();
+		}
+		$all[(string) $lang][(string) (int) $product_index] = $data;
+		$this->db->where('id', (int) $id)
+			->update('competitor_analyses', array('itinerary_flow_json' => json_encode($all, JSON_UNESCAPED_UNICODE)));
+		return true;
+	}
+
+	/**
 	 * Persist a Tour Information edit. $columns are top-level competitor_analyses
 	 * columns (tour_code, destination, inclusions JSON, …); $details are keys to
 	 * merge INTO the existing details_json so every untouched key (AI-analysis
@@ -270,8 +309,10 @@ class Competitor_Analysis_Model extends CI_Model
 		$merged = array_merge($existing, is_array($details) ? $details : array());
 
 		$update = is_array($columns) ? $columns : array();
-		$update['details_json']      = json_encode($merged, JSON_UNESCAPED_UNICODE);
-		$update['translations_json'] = null;
+		$update['details_json']        = json_encode($merged, JSON_UNESCAPED_UNICODE);
+		$update['translations_json']   = null;
+		// English source changed → the AI-extracted itinerary flow is stale too.
+		$update['itinerary_flow_json'] = null;
 
 		$this->db->where('id', (int) $id)->where('feature', $this->feature)
 			->update('competitor_analyses', $update);

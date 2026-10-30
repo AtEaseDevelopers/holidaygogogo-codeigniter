@@ -1521,16 +1521,71 @@ class Competitor_Product extends MY_Controller
 	 */
 	function Download_Excel_Tables()
 	{
-		@set_time_limit(120);
+		// The Daily Itinerary Flow is normally pre-extracted in the background; this
+		// path still runs it synchronously for cn / when spawn is unavailable, so lift
+		// the time limit entirely (no AI-call ceiling) + give it the worker's memory.
+		@set_time_limit(0);
+		@ini_set('memory_limit', '768M');
 		$id = (int) $this->input->get('id');
 		$analysis = $this->Competitor_Analysis_Model->Read_One($id);
 		if ( ! $analysis) { show_404(); return; }
 		$lang = competitor_normalize_lang($this->input->get('lang'));
 		if ($lang !== 'en') { $analysis = $this->apply_language($analysis, $id, $lang); }
+		$this->load->library('CompetitorAnalysisService');
+		$this->competitoranalysisservice->set_usage_feature('Competitor Tour Info Flow');
+		$flow_map = $this->competitoranalysisservice->build_itinerary_flow_map(array($analysis), $lang);
 		$this->load->library('CompetitorExcelExport');
-		$book = $this->competitorexcelexport->analysis_tables(array($analysis), $lang);
+		$book = $this->competitorexcelexport->analysis_tables(array($analysis), $lang, $flow_map);
 		$name = competitor_pdf_filename($analysis->product_name ?: $analysis->page_title, $analysis->id);
 		$this->stream_excel($book, substr($name, 0, -4) . '-tables.xlsx');
+	}
+
+	/**
+	 * AJAX: does the Tour Info export need an AI call? Returns {uncached,total} so the
+	 * view only warns when the Daily Itinerary Flow isn't cached yet for this language.
+	 * Read-only (no OpenAI).
+	 */
+	function Flow_Cache_Status()
+	{
+		$this->output->set_content_type('application/json');
+		$id = (int) $this->input->get('id');
+		$analysis = $this->Competitor_Analysis_Model->Read_One($id);
+		if ( ! $analysis) { echo json_encode(array('uncached' => 0, 'total' => 0)); return; }
+		$lang = competitor_normalize_lang($this->input->get('lang'));
+		$this->load->library('CompetitorAnalysisService');
+		echo json_encode($this->competitoranalysisservice->itinerary_flow_cache_status(array($analysis), $lang));
+	}
+
+	/**
+	 * AJAX: kick off (or short-circuit) the Tour Info AI itinerary-flow extraction for
+	 * THIS analysis in the BACKGROUND so the export button doesn't block.
+	 *   {success:true, done:true}      — already cached, just download
+	 *   {success:true, job:"<id>"}     — queued; poll Job_State then download
+	 *   {success:true, fallback:true}  — no spawn / no AI key, do the normal (blocking) download
+	 */
+	function Extract_Flow()
+	{
+		if ( ! $this->input->is_ajax_request()) { redirect(base_url('Competitor_Product')); return; }
+		$this->output->set_content_type('application/json');
+		$id = (int) $this->input->post('id');
+		$analysis = $this->Competitor_Analysis_Model->Read_One($id);
+		if ( ! $analysis) { echo json_encode(array('success' => false, 'message' => 'Analysis not found.')); return; }
+		$lang = competitor_normalize_lang($this->input->post('lang'));
+		$this->load->library('CompetitorAnalysisService');
+		$status = $this->competitoranalysisservice->itinerary_flow_cache_status(array($analysis), $lang);
+		if ((int) $status['uncached'] === 0) { echo json_encode(array('success' => true, 'done' => true)); return; }
+		// Nothing to extract with → let the browser do the plain download (empty flow rows).
+		if (empty(get_env('OPENAI_API_KEY'))) { echo json_encode(array('success' => true, 'fallback' => true)); return; }
+		$job_id = $this->queue_job(array(
+			'url'         => $analysis->product_name ?: $analysis->page_title,
+			'mode'        => 'extract_flow',
+			'ids'         => (string) $id,
+			'lang'        => $lang,
+			'created_by'  => $this->session->admin_id,
+		));
+		echo json_encode($job_id !== ''
+			? array('success' => true, 'job' => $job_id)
+			: array('success' => true, 'fallback' => true));
 	}
 
 	/** All crawl products (GET), or only the checked product indices (POST). */

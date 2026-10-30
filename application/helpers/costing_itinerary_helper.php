@@ -312,6 +312,100 @@ if (!function_exists('costing_itinerary_prepare_level')) {
     }
 }
 
+if (!function_exists('costing_itinerary_line_text')) {
+    /**
+     * Flatten one HTML fragment (the inside of an <li> or a paragraph) to a single
+     * line of plain text: tags stripped, entities decoded, non-breaking spaces and
+     * runs of whitespace collapsed to one space, trimmed. Shared by the Excel
+     * round-trip so a bullet exports as clean text and re-imports cleanly.
+     *
+     * @param string $fragment
+     * @return string
+     */
+    function costing_itinerary_line_text($fragment)
+    {
+        $text = strip_tags((string) $fragment);
+        $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
+        $text = str_replace(array("\xc2\xa0", "\xa0"), ' ', $text);
+        return trim(preg_replace('/\s+/', ' ', $text));
+    }
+}
+
+if (!function_exists('costing_itinerary_html_from_lines')) {
+    /**
+     * Turn an Excel "one bullet per line" cell into the <ul><li> HTML the four
+     * itinerary-level sections (Include / Exclude / Important Notes / Terms) store
+     * and the Quotation PDF renders. Each non-blank line becomes one bullet, in
+     * order; blank lines are dropped.
+     *
+     * A cell that already carries block HTML (an old export, or markup pasted in
+     * by hand) is kept verbatim so it still round-trips — only plain-text cells
+     * are promoted to a bullet list.
+     *
+     * @param string $text newline-separated bullets (or existing HTML)
+     * @return string <ul>…</ul> HTML, or '' when nothing visible
+     */
+    function costing_itinerary_html_from_lines($text)
+    {
+        $text = (string) $text;
+        if (preg_match('/<(ul|ol|li|p|br|h[1-6])\b/i', $text)) {
+            return trim($text);
+        }
+
+        $items = array();
+        foreach (preg_split('/\r\n|\r|\n/', $text) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            $items[] = '<li>' . htmlspecialchars($line, ENT_QUOTES, 'UTF-8') . '</li>';
+        }
+
+        return empty($items) ? '' : '<ul>' . implode('', $items) . '</ul>';
+    }
+}
+
+if (!function_exists('costing_itinerary_lines_from_html')) {
+    /**
+     * Inverse of costing_itinerary_html_from_lines(): render a stored section's
+     * HTML back to a "one bullet per line" cell for the Excel export. Each <li>
+     * becomes one line; when there are no list items the paragraph / line-break
+     * boundaries are used instead so legacy free-text still exports readably.
+     *
+     * @param string $html stored section HTML
+     * @return string newline-separated bullet text (one bullet per line)
+     */
+    function costing_itinerary_lines_from_html($html)
+    {
+        $html = (string) $html;
+        if (trim($html) === '') {
+            return '';
+        }
+
+        $lines = array();
+        if (preg_match_all('/<li\b[^>]*>(.*?)<\/li>/is', $html, $m)) {
+            foreach ($m[1] as $frag) {
+                $line = costing_itinerary_line_text($frag);
+                if ($line !== '') {
+                    $lines[] = $line;
+                }
+            }
+        }
+
+        if (empty($lines)) {
+            $norm = preg_replace('/<br\s*\/?>|<\/(p|div|li|h[1-6])>/i', "\n", $html);
+            foreach (preg_split('/\r\n|\r|\n/', $norm) as $frag) {
+                $line = costing_itinerary_line_text($frag);
+                if ($line !== '') {
+                    $lines[] = $line;
+                }
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+}
+
 if (!function_exists('costing_itinerary_split_notes')) {
     /**
      * Best-effort split of a LEGACY merged Notes block (one editor holding all

@@ -39,6 +39,7 @@ if (!function_exists('costing_import_package_columns')) {
             'DURATION DAYS'          => 'duration_days',
             'DURATION NIGHTS'        => 'duration_nights',
             'STATUS'                 => 'status',
+            'VALIDITY DATE'          => 'validity_date',
             'DESCRIPTION'            => 'description',
             'TRAVEL DATE'            => 'travel_date',
             'TRAVEL DATE END'        => 'travel_date_end',
@@ -55,6 +56,7 @@ if (!function_exists('costing_import_package_columns')) {
             'EXCLUDE'                => 'itinerary_exclude',
             'IMPORTANT NOTES'        => 'itinerary_important_notes',
             'TERMS & CONDITIONS'     => 'itinerary_terms',
+            'TOUR INTRO'             => 'itinerary_tour_intro',
         );
     }
 }
@@ -414,6 +416,9 @@ if (!function_exists('costing_import_assemble_packages')) {
                 'duration_nights' => (int) costing_import_num($rec['duration_nights']),
                 'description'     => trim((string) $rec['description']),
                 'status'          => $status_raw !== '' ? $status_raw : 'active',
+                // Quotation "valid until" date; Save_Package normalises/validates it
+                // (blank or unparseable => NULL).
+                'validity_date'   => trim((string) (isset($rec['validity_date']) ? $rec['validity_date'] : '')),
             );
 
             // --- Cost rows + combinations ---
@@ -518,12 +523,20 @@ if (!function_exists('costing_import_assemble_packages')) {
                 isset($itin_by_pkg[$lk]) ? $itin_by_pkg[$lk] : array()
             );
             // Four itinerary-wide sections, keyed by section key to match
-            // Save_Itinerary_Days / costing_itinerary_prepare_level.
+            // Save_Itinerary_Days / costing_itinerary_prepare_level. Each Excel
+            // cell is "one bullet per line" — costing_itinerary_html_from_lines()
+            // turns the lines into the <ul><li> HTML the sections store and the
+            // Quotation PDF renders (the export is the matching inverse).
             $itinerary_level = array(
-                'include'         => trim((string) (isset($rec['itinerary_include']) ? $rec['itinerary_include'] : '')),
-                'exclude'         => trim((string) (isset($rec['itinerary_exclude']) ? $rec['itinerary_exclude'] : '')),
-                'important_notes' => trim((string) (isset($rec['itinerary_important_notes']) ? $rec['itinerary_important_notes'] : '')),
-                'terms'           => trim((string) (isset($rec['itinerary_terms']) ? $rec['itinerary_terms'] : '')),
+                'include'         => costing_itinerary_html_from_lines(isset($rec['itinerary_include']) ? $rec['itinerary_include'] : ''),
+                'exclude'         => costing_itinerary_html_from_lines(isset($rec['itinerary_exclude']) ? $rec['itinerary_exclude'] : ''),
+                'important_notes' => costing_itinerary_html_from_lines(isset($rec['itinerary_important_notes']) ? $rec['itinerary_important_notes'] : ''),
+                'terms'           => costing_itinerary_html_from_lines(isset($rec['itinerary_terms']) ? $rec['itinerary_terms'] : ''),
+            );
+            // Standalone Tour Intro header (not one of the four section-meta columns);
+            // shown once at the TOP of the Itinerary section on the Quotation PDF.
+            $itinerary_tour_intro = costing_itinerary_html_from_lines(
+                isset($rec['itinerary_tour_intro']) ? $rec['itinerary_tour_intro'] : ''
             );
 
             // Flight mode: map the template's labels (No / Include / FIT / GIT) to the
@@ -550,6 +563,7 @@ if (!function_exists('costing_import_assemble_packages')) {
                 'flight_options'   => $flight_options,
                 'itinerary'        => $itinerary,
                 'itinerary_level'  => $itinerary_level,
+                'itinerary_tour_intro' => $itinerary_tour_intro,
                 'quote_level'      => $quote_level,
                 'errors'           => $errors,
                 'warnings'         => $warnings,
@@ -863,7 +877,7 @@ if (!function_exists('costing_import_template_samples')) {
         return array(
             'packages' => array(array(
                 'Japan Spring 2027', 'Tan Family', '+60 123456789', 'tan@example.com',
-                '', '6', '5', 'active', 'Sakura season highlights',
+                '', '6', '5', 'active', '2027-03-15', 'Sakura season highlights',
                 '2027-04-01', '2027-04-06', '4', '0', '15', '0', '0',
                 'FIT', 'Twin|Triple', 'Hotel', 'Y',
                 "5 nights hotel\nDaily breakfast\nEnglish-speaking tour guide",
@@ -911,7 +925,7 @@ if (!function_exists('costing_import_instruction_rows')) {
         $rows[] = array('REQUIRED FIELDS', '(blank/invalid = package skipped)');
         $rows[] = array('Packages', 'PACKAGE NAME (unique), TRAVEL DATE, DURATION DAYS (>=1), and ADULT PAX + CHILD PAX summing to 1 or more.');
         $rows[] = array('Cost Items', 'Optional — a package with no cost items still imports. But if you add a row: ITEM, CATEGORY, UNIT PRICE and CURRENCY are required.');
-        $rows[] = array('Optional (nullable)', 'Customer fields, Sales Person, Duration Nights, Description, Travel Date End, Margin %, Commissionable, Ad Hoc, Supplier, Quantity, Unit Count, Pax Type, Multiplier Type, all Hotels/Flights/Itinerary fields, Include, Exclude, Important Notes, Terms & Conditions.');
+        $rows[] = array('Optional (nullable)', 'Customer fields, Sales Person, Duration Nights, Status, Validity Date (quotation "valid until", Y-m-d), Description, Travel Date End, Margin %, Commissionable, Ad Hoc, Supplier, Quantity, Unit Count, Pax Type, Multiplier Type, all Hotels/Flights/Itinerary fields, Include, Exclude, Important Notes, Terms & Conditions.');
         $rows[] = array('', '');
 
         $rows[] = array('VALID CATEGORY CODES', '');

@@ -13,7 +13,7 @@ class Master_Product_Model extends CI_Model
 	/** Every analysed record, newest first (headline columns + feature). */
 	function Read_All()
 	{
-		$this->db->select('id, feature, url, source, competitor_name, page_title, product_name, tour_code, price, currency, destination, duration, cost_usd, product_count, status, created_at, details_json');
+		$this->db->select('id, feature, url, source, competitor_name, page_title, product_name, tour_code, price, currency, destination, duration, cost_usd, product_count, status, created_at, details_json, itinerary_flow_json');
 		$this->db->order_by('id', 'DESC');
 		return $this->db->get('competitor_analyses')->result();
 	}

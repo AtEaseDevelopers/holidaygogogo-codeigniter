@@ -9,8 +9,12 @@ $filter_customer_contact = isset($filters['customer_contact']) ? $filters['custo
 $filter_customer_email = isset($filters['customer_email']) ? $filters['customer_email'] : '';
 $filter_sales_admin_id = isset($filters['sales_admin_id']) ? (int) $filters['sales_admin_id'] : 0;
 $filter_op_admin_id = isset($filters['op_admin_id']) ? (int) $filters['op_admin_id'] : 0;
+$filter_created_from = isset($filters['created_from']) ? $filters['created_from'] : '';
+$filter_created_to = isset($filters['created_to']) ? $filters['created_to'] : '';
+$filter_validity_from = isset($filters['validity_from']) ? $filters['validity_from'] : '';
+$filter_validity_to = isset($filters['validity_to']) ? $filters['validity_to'] : '';
 $sales_agents = isset($sales_agents) ? $sales_agents : array();
-$has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0 || $filter_op_admin_id > 0);
+$has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0 || $filter_op_admin_id > 0 || $filter_created_from !== '' || $filter_created_to !== '' || $filter_validity_from !== '' || $filter_validity_to !== '');
 
 // Carry the active listing filters onto the Excel export link so the download
 // mirrors exactly what is on screen.
@@ -23,6 +27,10 @@ $export_params = array_filter(array(
     'customer_email' => $filter_customer_email,
     'sales_admin_id' => $filter_sales_admin_id > 0 ? $filter_sales_admin_id : '',
     'op_admin_id' => $filter_op_admin_id > 0 ? $filter_op_admin_id : '',
+    'created_from' => $filter_created_from,
+    'created_to' => $filter_created_to,
+    'validity_from' => $filter_validity_from,
+    'validity_to' => $filter_validity_to,
 ), function ($value) { return $value !== '' && $value !== null; });
 $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) : '';
 ?>
@@ -121,7 +129,37 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             </select>
                                         </div>
                                     </div>
-                                    <div class="form-group row align-items-end mb-0">
+                                    <div class="form-group row mb-4">
+                                        <div class="col-md-3">
+                                            <label class="font-weight-bold">Created Date</label>
+                                            <?php
+                                            $created_range_display = '';
+                                            if ($filter_created_from !== '' || $filter_created_to !== '') {
+                                                $from_disp = $filter_created_from !== '' ? date('d/m/Y', strtotime($filter_created_from)) : '';
+                                                $to_disp = $filter_created_to !== '' ? date('d/m/Y', strtotime($filter_created_to)) : $from_disp;
+                                                if ($from_disp === '') { $from_disp = $to_disp; }
+                                                $created_range_display = $from_disp . ' - ' . $to_disp;
+                                            }
+                                            ?>
+                                            <input type="text" id="costing-created-range" class="form-control" placeholder="Select date range" value="<?php echo html_escape($created_range_display); ?>" autocomplete="off" readonly>
+                                            <input type="hidden" id="costing-created-from" name="created_from" value="<?php echo html_escape($filter_created_from); ?>">
+                                            <input type="hidden" id="costing-created-to" name="created_to" value="<?php echo html_escape($filter_created_to); ?>">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="font-weight-bold">Validity Date</label>
+                                            <?php
+                                            $validity_range_display = '';
+                                            if ($filter_validity_from !== '' || $filter_validity_to !== '') {
+                                                $vfrom_disp = $filter_validity_from !== '' ? date('d/m/Y', strtotime($filter_validity_from)) : '';
+                                                $vto_disp = $filter_validity_to !== '' ? date('d/m/Y', strtotime($filter_validity_to)) : $vfrom_disp;
+                                                if ($vfrom_disp === '') { $vfrom_disp = $vto_disp; }
+                                                $validity_range_display = $vfrom_disp . ' - ' . $vto_disp;
+                                            }
+                                            ?>
+                                            <input type="text" id="costing-validity-range" class="form-control" placeholder="Select date range" value="<?php echo html_escape($validity_range_display); ?>" autocomplete="off" readonly>
+                                            <input type="hidden" id="costing-validity-from" name="validity_from" value="<?php echo html_escape($filter_validity_from); ?>">
+                                            <input type="hidden" id="costing-validity-to" name="validity_to" value="<?php echo html_escape($filter_validity_to); ?>">
+                                        </div>
                                         <div class="col-md-3">
                                             <label class="font-weight-bold">Customer Name</label>
                                             <input type="text" name="customer_name" value="<?php echo html_escape($filter_customer_name); ?>" class="form-control" placeholder="Customer name">
@@ -130,11 +168,13 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             <label class="font-weight-bold">Contact Number</label>
                                             <input type="text" name="customer_contact" value="<?php echo html_escape($filter_customer_contact); ?>" class="form-control" placeholder="Contact number">
                                         </div>
-                                        <div class="col-md-3">
+                                        <div class="col-md-3 mt-4">
                                             <label class="font-weight-bold">Email Address</label>
                                             <input type="text" name="customer_email" value="<?php echo html_escape($filter_customer_email); ?>" class="form-control" placeholder="Email address">
                                         </div>
-                                        <div class="col-md-3">
+                                    </div>
+                                    <div class="form-group row align-items-end mb-0">
+                                        <div class="col-md-12">
                                             <button type="submit" class="btn btn-primary font-weight-bold mr-2">
                                                 <i class="la la-search"></i>Filter
                                             </button>
@@ -165,6 +205,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                 <th style="text-align:center;">Tour Code</th>
                                 <th style="text-align:center;">Duration</th>
                                 <th style="text-align:center;">Status</th>
+                                <th style="text-align:center;">Created At</th>
                                 <th style="text-align:center;">Updated At</th>
                                 <th class="action" style="text-align:center;">Action</th>
                             </tr>
@@ -172,7 +213,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                         <tbody>
                             <?php if (empty($packages)) { ?>
                                 <tr>
-                                    <td colspan="12" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
+                                    <td colspan="13" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
                                 </tr>
                             <?php } else { ?>
                                 <?php $count = 1; ?>
@@ -225,6 +266,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                         <td style="text-align:center;">
                                             <span class="label label-lg label-light-primary label-inline"><?php echo html_escape($package['status_label']); ?></span>
                                         </td>
+                                        <td style="text-align:center;"><?php echo !empty($package['created_at']) ? date('d/m/Y H:i', strtotime($package['created_at'])) : 'N/A'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['updated_at']) ? date('d/m/Y H:i', strtotime($package['updated_at'])) : 'N/A'; ?></td>
                                         <td>
                                             <div class="d-flex align-items-center justify-content-start" style="gap:6px;">
@@ -429,5 +471,61 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
     });
     $('#costing_import_form').on('submit', function() {
         $('#costing_import_submit').prop('disabled', true).html('<i class="la la-spinner la-spin"></i>Validating...');
+    });
+
+    // Single "Created Date" field: one daterangepicker feeds two hidden inputs
+    // (created_from / created_to in ISO) that the controller/model still read.
+    jQuery(function () {
+        var $range = jQuery('#costing-created-range');
+        if (!$range.length || !jQuery.fn.daterangepicker) { return; }
+        var fromVal = jQuery('#costing-created-from').val();
+        var toVal = jQuery('#costing-created-to').val();
+        $range.daterangepicker({
+            autoUpdateInput: false,
+            startDate: fromVal ? moment(fromVal, 'YYYY-MM-DD') : moment(),
+            endDate: toVal ? moment(toVal, 'YYYY-MM-DD') : moment(),
+            locale: { format: 'DD/MM/YYYY', cancelLabel: 'Clear' },
+            buttonClasses: ' btn',
+            applyClass: 'btn-primary',
+            cancelClass: 'btn-secondary'
+        });
+        $range.on('apply.daterangepicker', function (ev, picker) {
+            jQuery(this).val(picker.startDate.format('DD/MM/YYYY') + ' - ' + picker.endDate.format('DD/MM/YYYY'));
+            jQuery('#costing-created-from').val(picker.startDate.format('YYYY-MM-DD'));
+            jQuery('#costing-created-to').val(picker.endDate.format('YYYY-MM-DD'));
+        });
+        $range.on('cancel.daterangepicker', function () {
+            jQuery(this).val('');
+            jQuery('#costing-created-from').val('');
+            jQuery('#costing-created-to').val('');
+        });
+    });
+
+    // Validity Date range: same single-field daterangepicker pattern feeding the
+    // validity_from / validity_to hidden inputs (filter on cp.validity_date).
+    jQuery(function () {
+        var $range = jQuery('#costing-validity-range');
+        if (!$range.length || !jQuery.fn.daterangepicker) { return; }
+        var fromVal = jQuery('#costing-validity-from').val();
+        var toVal = jQuery('#costing-validity-to').val();
+        $range.daterangepicker({
+            autoUpdateInput: false,
+            startDate: fromVal ? moment(fromVal, 'YYYY-MM-DD') : moment(),
+            endDate: toVal ? moment(toVal, 'YYYY-MM-DD') : moment(),
+            locale: { format: 'DD/MM/YYYY', cancelLabel: 'Clear' },
+            buttonClasses: ' btn',
+            applyClass: 'btn-primary',
+            cancelClass: 'btn-secondary'
+        });
+        $range.on('apply.daterangepicker', function (ev, picker) {
+            jQuery(this).val(picker.startDate.format('DD/MM/YYYY') + ' - ' + picker.endDate.format('DD/MM/YYYY'));
+            jQuery('#costing-validity-from').val(picker.startDate.format('YYYY-MM-DD'));
+            jQuery('#costing-validity-to').val(picker.endDate.format('YYYY-MM-DD'));
+        });
+        $range.on('cancel.daterangepicker', function () {
+            jQuery(this).val('');
+            jQuery('#costing-validity-from').val('');
+            jQuery('#costing-validity-to').val('');
+        });
     });
 </script>

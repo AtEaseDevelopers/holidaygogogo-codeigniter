@@ -109,11 +109,15 @@ $booked = array(
     'customer_name' => 'John Tan', 'customer_contact' => '+60 123456789',
     'customer_email' => 'john@example.com', 'sales_admin_name' => 'Alice',
     'duration_days' => 5, 'duration_nights' => 4, 'status' => 'active',
-    'description' => 'Island hopping',
+    'validity_date' => '2026-11-30', 'description' => 'Island hopping',
     // Storage is the original plural columns (section_meta $meta[1]); the export
     // reads these and emits them under the short record keys (itinerary_include...).
-    'itinerary_includes' => 'Hotel & breakfast', 'itinerary_excludes' => 'Tips',
+    // Stored as <ul><li> rich text; the export flattens it to one bullet per line.
+    'itinerary_includes' => '<ul><li>Hotel &amp; breakfast</li><li>Return transfers</li></ul>',
+    'itinerary_excludes' => '<ul><li>Tips</li></ul>',
     'itinerary_important_notes' => 'Bring passport', 'itinerary_terms_and_conditions' => 'No refunds',
+    // Standalone Tour Intro header (not one of the four section-meta columns).
+    'itinerary_tour_intro' => '<p>Welcome to Bali</p>',
     'quote_flight_mode' => 'fit', 'quote_hotel_columns' => '["Twin \/ Triple","Extra Bed"]',
     'quote_hotel_title_label' => 'Hotel', 'quote_show_single_supp' => '1',
     'latest_booking_id' => 55, 'latest_travel_date' => '2026-12-01',
@@ -126,9 +130,10 @@ $draft = array(
     'id' => 8, 'name' => 'Draft Package', 'tour_code' => '',
     'customer_name' => '', 'customer_contact' => '', 'customer_email' => '',
     'sales_admin_name' => '', 'duration_days' => 0, 'duration_nights' => 0,
-    'status' => 'inactive', 'description' => '',
+    'status' => 'inactive', 'validity_date' => '2026-10-15', 'description' => '',
     'itinerary_includes' => '', 'itinerary_excludes' => '',
     'itinerary_important_notes' => '', 'itinerary_terms_and_conditions' => '', 'itinerary_notes' => '',
+    'itinerary_tour_intro' => '',
     'quote_flight_mode' => '', 'quote_hotel_columns' => '',
     'quote_hotel_title_label' => '', 'quote_show_single_supp' => null,
     'latest_booking_id' => null,
@@ -149,22 +154,28 @@ check('pkg: flight mode code', 'fit', $rec['quote_flight_mode']);
 check('pkg: hotel columns pipe', 'Twin / Triple|Extra Bed', $rec['quote_hotel_columns']);
 check('pkg: show single supp Y', 'Y', $rec['quote_show_single_supp']);
 check('pkg: status stored value', 'active', $rec['status']);
+check('pkg: validity date ymd', '2026-11-30', $rec['validity_date']);
 // The four itinerary-wide sections export to their own columns (from the new
 // per-section columns; falls back to splitting legacy itinerary_notes).
-check('pkg: itinerary include', 'Hotel & breakfast', $rec['itinerary_include']);
+check('pkg: itinerary include = one bullet per line', "Hotel & breakfast\nReturn transfers", $rec['itinerary_include']);
 check('pkg: itinerary exclude', 'Tips', $rec['itinerary_exclude']);
 check('pkg: itinerary important notes', 'Bring passport', $rec['itinerary_important_notes']);
 check('pkg: itinerary terms', 'No refunds', $rec['itinerary_terms']);
+// Standalone Tour Intro header flattens to one line per paragraph, round-trips via
+// costing_itinerary_html_from_lines on re-import.
+check('pkg: tour intro flattened', 'Welcome to Bali', $rec['itinerary_tour_intro']);
 
 $rec2 = costing_packages_export_package_record($draft);
 check('pkg: no-booking travel date blank', '', $rec2['travel_date']);
 check('pkg: no-booking adult blank', '', $rec2['adult_count']);
+check('pkg: no-booking validity date still exported', '2026-10-15', $rec2['validity_date']);
 check('pkg: no-booking margin blank', '', $rec2['margin_percentage']);
 check('pkg: no-booking commissionable blank', '', $rec2['commissionable_per_pax']);
 check('pkg: blank tour code stays blank (not -)', '', $rec2['tour_code']);
 check('pkg: blank customer stays blank (not -)', '', $rec2['customer_name']);
 check('pkg: blank hotel columns', '', $rec2['quote_hotel_columns']);
 check('pkg: null single supp blank', '', $rec2['quote_show_single_supp']);
+check('pkg: blank tour intro stays blank', '', $rec2['itinerary_tour_intro']);
 
 /* -------------------------------------------------- Cost Items record mapper */
 

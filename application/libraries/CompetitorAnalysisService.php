@@ -3181,6 +3181,112 @@ class CompetitorAnalysisService
 		);
 	}
 
+	/**
+	 * Re-extract the corrected "Daily Itinerary Flow" for ONE product from its stored
+	 * itinerary prose, using the reviewer's extraction brief (one row per place
+	 * actually visited, real city/district, notes for closures/activities). Returns
+	 * {stops:[{day,stop,city,notes}], lang, model, tokens, cost}. Throws on an
+	 * unparseable reply. The token spend is logged to ai_usage_log by request().
+	 */
+	public function extract_itinerary_flow($itinerary, $meta = array(), $lang = 'en')
+	{
+		$this->CI->load->helper('competitor_analysis');
+		$spec = competitor_build_itinerary_flow_agent($itinerary, $meta, $lang);
+		// timeout 0 = no curl ceiling: a big background batch must never be cut off
+		// mid-extraction (the worker runs set_time_limit(0)).
+		$raw  = $this->request($spec['instructions'], $spec['input'], array(), 'itinerary flow ' . $lang, true, 0);
+		$data = competitor_json_object_from_text($raw);
+		if ( ! is_array($data) || ! isset($data['stops']) || ! is_array($data['stops'])) {
+			throw new Exception('The itinerary flow response could not be parsed. Please try again.');
+		}
+		return array(
+			'stops'         => array_values($data['stops']),
+			'lang'          => competitor_normalize_lang($lang),
+			'model'         => $this->model(),
+			'input_tokens'  => $this->last_usage['input_tokens'],
+			'output_tokens' => $this->last_usage['output_tokens'],
+			'cost_usd'      => competitor_estimate_cost(
+				$this->model(), $this->last_usage['input_tokens'], $this->last_usage['output_tokens'], $this->price_rates()
+			),
+		);
+	}
+
+	/**
+	 * The flow rows for one product, served from the itinerary_flow_json cache when
+	 * present and extracted (then cached) on a miss. Returns export-shaped rows
+	 * [{day,stop_order,stop_name,city,notes}]. $meta carries product_name/destination
+	 * as extraction context.
+	 */
+	public function cached_itinerary_flow($analysis_id, $product_index, $itinerary, $meta, $lang)
+	{
+		$this->CI->load->helper('competitor_analysis');
+		$this->CI->load->model('Competitor_Analysis_Model');
+		$cached = $this->CI->Competitor_Analysis_Model->Read_Itinerary_Flow($analysis_id, $lang, $product_index);
+		if (is_array($cached) && isset($cached['stops'])) {
+			return competitor_itinerary_flow_rows($cached);
+		}
+		$result = $this->extract_itinerary_flow($itinerary, $meta, $lang);
+		$store  = array('stops' => $result['stops']);
+		$this->CI->Competitor_Analysis_Model->Save_Itinerary_Flow($analysis_id, $lang, $product_index, $store);
+		return competitor_itinerary_flow_rows($store);
+	}
+
+	/**
+	 * Build the flow map the "Tour Info" Excel export consumes:
+	 * [analysis_id][product_index] => [rows]. One cached/AI extraction per product
+	 * with a non-empty itinerary. A per-product failure (OpenAI unconfigured, parse
+	 * error) yields an empty row set for that product — the Flow sheet then simply
+	 * omits it rather than shipping the old wrong heuristic rows ("wrong data is
+	 * worse than no data", per the template review).
+	 */
+	public function build_itinerary_flow_map($analyses, $lang = 'en')
+	{
+		$this->CI->load->helper('competitor_analysis');
+		$map = array();
+		foreach ((array) $analyses as $a) {
+			$id = (int) $a->id;
+			foreach (competitor_display_products($a) as $pidx => $p) {
+				$itin = (isset($p['itinerary']) && is_array($p['itinerary'])) ? $p['itinerary'] : array();
+				if (empty($itin)) { continue; }
+				$meta = array(
+					'product_name' => isset($p['product_name']) ? $p['product_name'] : '',
+					'destination'  => isset($p['destination']) ? $p['destination'] : '',
+				);
+				try {
+					$map[$id][$pidx] = $this->cached_itinerary_flow($id, $pidx, $itin, $meta, $lang);
+				} catch (Exception $e) {
+					$this->log_ai('flow_error', array('analysis_id' => $id, 'product' => $pidx, 'message' => $e->getMessage()));
+					$map[$id][$pidx] = array();
+				}
+			}
+		}
+		return $map;
+	}
+
+	/**
+	 * AI-FREE cache audit for the "Tour Info" export: how many products (with a
+	 * non-empty itinerary) across $analyses still have NO cached flow for $lang, so
+	 * the UI only warns about an AI call when one will actually happen. Returns
+	 * {total, cached, uncached}. Reads itinerary_flow_json only — never calls OpenAI.
+	 */
+	public function itinerary_flow_cache_status($analyses, $lang = 'en')
+	{
+		$this->CI->load->helper('competitor_analysis');
+		$this->CI->load->model('Competitor_Analysis_Model');
+		$total = 0; $uncached = 0;
+		foreach ((array) $analyses as $a) {
+			$id = (int) $a->id;
+			foreach (competitor_display_products($a) as $pidx => $p) {
+				$itin = (isset($p['itinerary']) && is_array($p['itinerary'])) ? $p['itinerary'] : array();
+				if (empty($itin)) { continue; }
+				$total++;
+				$cached = $this->CI->Competitor_Analysis_Model->Read_Itinerary_Flow($id, $lang, $pidx);
+				if ( ! (is_array($cached) && isset($cached['stops']))) { $uncached++; }
+			}
+		}
+		return array('total' => $total, 'cached' => $total - $uncached, 'uncached' => $uncached);
+	}
+
 	protected function model()
 	{
 		$m = get_env('OPENAI_MODEL');
@@ -3215,7 +3321,7 @@ class CompetitorAnalysisService
 	 * (expected to be a JSON object). $input is either a string or a structured
 	 * message/content array; $tools is the tools list (empty = none).
 	 */
-	protected function request($instructions, $input, $tools = array(), $label = '', $json_object = false)
+	protected function request($instructions, $input, $tools = array(), $label = '', $json_object = false, $timeout = null)
 	{
 		$key = get_env('OPENAI_API_KEY');
 		if (empty($key)) {
@@ -3264,8 +3370,9 @@ class CompetitorAnalysisService
 			CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
 			CURLOPT_CONNECTTIMEOUT => 15,
 			// Browsing / document reading + reasoning can take a while — GPT-5 reasoning
-			// models especially, so allow a longer ceiling.
-			CURLOPT_TIMEOUT        => 300,
+			// models especially, so allow a longer ceiling. Callers may override: 0 =
+			// unlimited (background flow extraction), else the 300s default.
+			CURLOPT_TIMEOUT        => ($timeout === null ? 300 : (int) $timeout),
 			CURLOPT_HTTPHEADER     => array(
 				'Content-Type: application/json',
 				'Authorization: Bearer ' . $key,

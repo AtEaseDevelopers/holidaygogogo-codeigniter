@@ -75,6 +75,29 @@ class Costing_Model extends CI_Model
             $where[] = "cp.op_admin_id = " . $op_admin_id;
         }
 
+        // Filter by the package creation date (cp.created_at, auto-stamped on
+        // insert for both manual wizard creation and Excel import). Dates are an
+        // inclusive day range: >= from 00:00:00 and <= to 23:59:59.
+        $created_from = isset($filters['created_from']) ? trim((string) $filters['created_from']) : '';
+        if ($created_from !== '') {
+            $where[] = "cp.created_at >= '" . $this->db->escape_str($created_from) . " 00:00:00'";
+        }
+        $created_to = isset($filters['created_to']) ? trim((string) $filters['created_to']) : '';
+        if ($created_to !== '') {
+            $where[] = "cp.created_at <= '" . $this->db->escape_str($created_to) . " 23:59:59'";
+        }
+
+        // Filter by the quotation validity date (cp.validity_date, a DATE column).
+        // Inclusive day range; NULL validity dates never match a range filter.
+        $validity_from = isset($filters['validity_from']) ? trim((string) $filters['validity_from']) : '';
+        if ($validity_from !== '') {
+            $where[] = "cp.validity_date >= '" . $this->db->escape_str($validity_from) . "'";
+        }
+        $validity_to = isset($filters['validity_to']) ? trim((string) $filters['validity_to']) : '';
+        if ($validity_to !== '') {
+            $where[] = "cp.validity_date <= '" . $this->db->escape_str($validity_to) . "'";
+        }
+
         return !empty($where) ? ('WHERE ' . implode(' AND ', $where)) : '';
     }
 
@@ -100,6 +123,7 @@ class Costing_Model extends CI_Model
                 cp.duration_nights,
                 cp.description,
                 cp.status,
+                cp.created_at,
                 cp.updated_at,
                 (
                     SELECT COUNT(*)
@@ -223,12 +247,14 @@ class Costing_Model extends CI_Model
                 cp.duration_days,
                 cp.duration_nights,
                 cp.status,
+                cp.validity_date,
                 cp.description,
                 cp.itinerary_notes,
                 cp.itinerary_includes,
                 cp.itinerary_excludes,
                 cp.itinerary_important_notes,
                 cp.itinerary_terms_and_conditions,
+                cp.itinerary_tour_intro,
                 cp.quote_flight_mode,
                 cp.quote_hotel_columns,
                 cp.quote_hotel_title_label,
@@ -591,6 +617,8 @@ class Costing_Model extends CI_Model
             // (Include / Exclude / Important Notes / Terms & Conditions), with a
             // split-on-the-fly fallback for legacy merged notes.
             'itinerary_meta' => costing_itinerary_sections_from_row($package),
+            // Standalone Tour Intro header (separate from the four sections above).
+            'itinerary_tour_intro' => isset($package['itinerary_tour_intro']) ? (string) $package['itinerary_tour_intro'] : '',
             // Hotel-pricing + flight-schedule tables and their quote-level free-text,
             // shown on the customer Quotation PDF and edited on the wizard's
             // "Hotel & Flights" step.
@@ -624,7 +652,7 @@ class Costing_Model extends CI_Model
             'combination_pricing' => $booking
                 ? $this->Combination_Pricing_List((int) $booking['id'], (int) $base_currency['id'], $booking['travel_date'], (float) $financials['margin_percentage'], (int) $booking['total_pax'])
                 : array(),
-            'sales_agents' => $this->Read_Sales_Agents(),
+            'sales_agents' => $this->Read_Sales_Agents(isset($package['sales_admin_id']) ? (int) $package['sales_admin_id'] : 0),
             'quotation_token' => $booking && !empty($booking['quotation_token']) ? $booking['quotation_token'] : '',
             'item_master' => $this->Read_Item_Master(),
             // Feedback 18 Sep 2026 (2.4): the cost step previews (and freezes on save)
@@ -798,7 +826,8 @@ class Costing_Model extends CI_Model
             $this->Save_Itinerary_Days(
                 $package_id,
                 isset($pkg['itinerary']) ? (array) $pkg['itinerary'] : array(),
-                isset($pkg['itinerary_level']) ? (array) $pkg['itinerary_level'] : array()
+                isset($pkg['itinerary_level']) ? (array) $pkg['itinerary_level'] : array(),
+                isset($pkg['itinerary_tour_intro']) ? $pkg['itinerary_tour_intro'] : null
             );
         }
 
@@ -809,22 +838,43 @@ class Costing_Model extends CI_Model
     }
 
     /**
-     * Active admin users for the "Sales Person" dropdown (package form + list
-     * filter + quotation). Mirrors Booking_Model::Read_Admins (excludes the system
-     * account and disabled-only users).
+     * Active admin users for the "Sales Person" dropdown (package form +
+     * quotation). Mirrors Booking_Model::Read_Admins (excludes the system account).
+     * Only currently-active ('Y') admins are listed so deactivated staff don't
+     * clutter the picker. $keep_admin_id lets an EDIT keep the package's already-
+     * assigned sales person visible even if they've since been deactivated, so the
+     * selection isn't silently dropped on save.
      *
-     * @return array list of ['AdminID','Name']
+     * @param int  $keep_admin_id admin to include regardless of status (0 = none)
+     * @param bool $include_deactivated when true, also list deactivated ('D')
+     *             staff — used by the export/import name→id mapping so a round-trip
+     *             of a package assigned to a since-deactivated person still resolves.
+     * @return array list of ['AdminID','Name','Mobile','CountryCode']
      */
-    public function Read_Sales_Agents()
+    public function Read_Sales_Agents($keep_admin_id = 0, $include_deactivated = false)
     {
+        $keep_admin_id = (int) $keep_admin_id;
+
         // Mobile + country code come along so the package form can auto-prefill the
         // sales person's contact when one is picked (editable override thereafter).
-        return $this->db
+        $this->db
             ->select('a.AdminID, a.Name, a.Mobile, cc.CountryCode AS CountryCode')
             ->from('admin a')
             ->join('country_code cc', 'cc.CountryCodeID = a.CountryCodeID', 'left')
-            ->where('a.AdminID !=', 8)
-            ->where_in('a.Status', array('Y', 'D'))
+            ->where('a.AdminID !=', 8);
+
+        if ($include_deactivated) {
+            $this->db->where_in('a.Status', array('Y', 'D'));
+        } elseif ($keep_admin_id > 0) {
+            $this->db->group_start()
+                ->where('a.Status', 'Y')
+                ->or_where('a.AdminID', $keep_admin_id)
+                ->group_end();
+        } else {
+            $this->db->where('a.Status', 'Y');
+        }
+
+        return $this->db
             ->order_by('a.Name', 'ASC')
             ->get()
             ->result_array();
@@ -1690,10 +1740,11 @@ class Costing_Model extends CI_Model
      * meal plan. Include, Exclude, Important Notes and Terms & Conditions apply to
      * the whole itinerary and are stored once on costing_packages via $level_fields.
      *
-     * @param array $rows         list of [day_number, title, description, meal_plan]
-     * @param array $level_fields posted [includes, excludes, important_notes, terms_and_conditions]
+     * @param array  $rows         list of [day_number, title, description, meal_plan]
+     * @param array  $level_fields posted [includes, excludes, important_notes, terms_and_conditions]
+     * @param ?string $tour_intro  standalone Tour Intro header HTML; null = leave column untouched
      */
-    public function Save_Itinerary_Days($package_id, $rows, $level_fields = array())
+    public function Save_Itinerary_Days($package_id, $rows, $level_fields = array(), $tour_intro = null)
     {
         $this->load->helper('costing_itinerary');
         $package_id = (int) $package_id;
@@ -1718,8 +1769,19 @@ class Costing_Model extends CI_Model
         }
 
         // Itinerary-wide notes/special remark/terms live on the package itself.
+        $package_update = costing_itinerary_prepare_level($level_fields);
+        // Standalone Tour Intro header — fold into the same update, nulling empty
+        // TinyMCE markup (matches prepare_level's blank handling). Only touched when
+        // a value is passed, so callers that omit it leave the column untouched.
+        if ($tour_intro !== null) {
+            $intro = trim((string) $tour_intro);
+            if ($intro !== '' && costing_itinerary_html_is_blank($intro)) {
+                $intro = '';
+            }
+            $package_update['itinerary_tour_intro'] = $intro !== '' ? $intro : null;
+        }
         $this->db->where('id', $package_id)
-            ->update('costing_packages', costing_itinerary_prepare_level($level_fields));
+            ->update('costing_packages', $package_update);
 
         $this->db->trans_complete();
         return (bool) $this->db->trans_status();
@@ -1929,7 +1991,7 @@ class Costing_Model extends CI_Model
         }
 
         $booking = $this->db
-            ->select('cb.*, cp.name AS package_name, cp.status AS package_status, cp.tour_code, cp.customer_name, cp.description AS package_description, cp.sales_admin_id, cp.sales_admin_mobile AS package_sales_mobile, cp.validity_date, sales_admin.Name AS sales_admin_name, sales_admin.Mobile AS sales_admin_mobile, sales_cc.CountryCode AS sales_admin_country_code, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.itinerary_includes, cp.itinerary_excludes, cp.itinerary_important_notes, cp.itinerary_terms_and_conditions, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns, cp.quote_hotel_title_label, cp.quote_show_single_supp')
+            ->select('cb.*, cp.name AS package_name, cp.status AS package_status, cp.tour_code, cp.customer_name, cp.description AS package_description, cp.sales_admin_id, cp.sales_admin_mobile AS package_sales_mobile, cp.validity_date, sales_admin.Name AS sales_admin_name, sales_admin.Mobile AS sales_admin_mobile, sales_cc.CountryCode AS sales_admin_country_code, cp.duration_days, cp.duration_nights, cp.itinerary_notes, cp.itinerary_includes, cp.itinerary_excludes, cp.itinerary_important_notes, cp.itinerary_terms_and_conditions, cp.itinerary_tour_intro, cp.quote_pricing_basis, cp.quote_travel_date_note, cp.quote_hotel_note, cp.quote_flight_title, cp.quote_flight_price, cp.quote_flight_fare_note, cp.quote_flight_expiry, cp.quote_footer_notes, cp.quote_flight_mode, cp.quote_hotel_columns, cp.quote_hotel_title_label, cp.quote_show_single_supp')
             ->from('costing_bookings cb')
             ->join('costing_packages cp', 'cp.id = cb.package_id')
             ->join('admin sales_admin', 'sales_admin.AdminID = cp.sales_admin_id', 'left')
@@ -2021,6 +2083,8 @@ class Costing_Model extends CI_Model
             ),
             'itinerary'     => $this->Read_Itinerary_Days((int) $booking['package_id']),
             'itinerary_meta' => costing_itinerary_sections_from_row($booking),
+            // Standalone Tour Intro header (separate from the four sections above).
+            'itinerary_tour_intro' => isset($booking['itinerary_tour_intro']) ? (string) $booking['itinerary_tour_intro'] : '',
             // Hotel-pricing + flight-schedule tables and quote-level free-text —
             // the customer Quotation PDF's primary content (screenshot layout).
             'quote_hotels'  => $this->Read_Quote_Hotels((int) $booking['package_id']),

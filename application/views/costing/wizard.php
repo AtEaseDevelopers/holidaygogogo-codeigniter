@@ -612,6 +612,13 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
             <div class="cw-panel">
                 <button type="button" class="btn btn-light-primary font-weight-bold" id="cw-itin-add"><i class="la la-plus"></i>Add Day</button>
             </div>
+            <div class="cw-panel" id="cw-itin-intro">
+                <div class="cw-panel-title">Tour Intro</div>
+                <div class="cw-panel-sub">Shown once at the TOP of the Itinerary section on the Quotation PDF — a header/intro for the whole tour.</div>
+                <div class="cw-itin-field mb-4">
+                    <textarea id="cw-ed-meta-tour_intro" class="form-control cw-itin-editor" name="itinerary_tour_intro"><?php echo html_escape(isset($itinerary_tour_intro) ? (string) $itinerary_tour_intro : ''); ?></textarea>
+                </div>
+            </div>
             <div class="cw-panel" id="cw-itin-meta">
                 <div class="cw-panel-title">Notes &amp; Terms</div>
                 <div class="cw-panel-sub">Shown once at the bottom of the Quotation PDF — applies to the whole itinerary, not a single day.</div>
@@ -1962,6 +1969,10 @@ jQuery(function () {
     }
 
     initEditors(body);
+
+    // Tour Intro header editor lives outside #cw-itin-body, above Notes & Terms.
+    var intro = document.getElementById('cw-itin-intro');
+    if (intro) { initEditors(intro); }
 
     // Itinerary-wide Notes/Special Remark/Terms editors live outside #cw-itin-body.
     var meta = document.getElementById('cw-itin-meta');

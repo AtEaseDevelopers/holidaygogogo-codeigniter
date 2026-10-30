@@ -25,7 +25,7 @@ class CompetitorExcelExport
      * so rows can be joined back to the summary. Content follows the already-applied
      * language of $analyses.
      */
-    public function analysis_tables($analyses, $lang = 'en')
+    public function analysis_tables($analyses, $lang = 'en', $flow_map = array())
     {
         $this->start();
         $ref_columns = array('Tour Code', 'Analysis ID', 'Product Name');
@@ -38,18 +38,30 @@ class CompetitorExcelExport
                 $tour_code = $this->text(isset($p['tour_code']) ? $p['tour_code'] : '');
                 $name = isset($p['product_name']) ? (string) $p['product_name'] : '';
                 $ref = array($tour_code, (int) $a->id, $name);
+                $destination = $this->text(isset($p['destination']) ? $p['destination'] : '');
+                $duration    = $this->text(isset($p['duration']) ? $p['duration'] : '');
                 $dep_city = $this->text(isset($p['departure_city']) ? $p['departure_city'] : '');
                 $flight = competitor_flight_parts(isset($p['flight_departure']) ? $p['flight_departure'] : '', $dep_city);
+                // Identity/link columns up front + a filled Arrival Airport (falls back
+                // to Destination when the flight text carried no arrival) — the gaps
+                // flagged in the 28 Oct 2026 template review.
                 $summary[] = array(
+                    $tour_code, $name, $destination, $duration,
                     isset($a->competitor_name) ? (string) $a->competitor_name : '',
                     (string) $a->url, (string) $a->created_at,
-                    $flight['departure_airport'], $flight['arrival_airport'], $flight['airline']);
+                    $flight['departure_airport'],
+                    competitor_arrival_airport($flight['arrival_airport'], $destination),
+                    $flight['airline']);
                 foreach (isset($p['itinerary']) && is_array($p['itinerary']) ? $p['itinerary'] : array() as $day) {
                     $day = (array) $day;
                     $itinerary[] = array_merge($ref, array($this->text(isset($day['day']) ? $day['day'] : ''),
                         $this->text(isset($day['title']) ? $day['title'] : ''), $this->text(isset($day['description']) ? $day['description'] : '')));
                 }
-                foreach (competitor_itinerary_stops(isset($p['itinerary']) ? $p['itinerary'] : array()) as $stop) {
+                // AI-extracted flow (keyed analysis_id -> product index). Absent key =
+                // no rows for that product; never the old capitalised-word heuristic.
+                $prod_flow = (isset($flow_map[(int) $a->id][$pidx]) && is_array($flow_map[(int) $a->id][$pidx]))
+                    ? $flow_map[(int) $a->id][$pidx] : array();
+                foreach ($prod_flow as $stop) {
                     $flow[] = array_merge($ref, array($stop['day'], (int) $stop['stop_order'],
                         $stop['stop_name'], $stop['city'], $stop['notes']));
                 }
@@ -64,7 +76,7 @@ class CompetitorExcelExport
                 foreach (competitor_list_items(isset($p['hotels']) ? $p['hotels'] : '') as $line) { $hotels[] = array_merge($ref, array($line)); }
             }
         }
-        $this->add_sheet('Products', array('Competitor Name', 'Source URL', 'Analysis Date', 'Departure Airport', 'Arrival Airport', 'Airline'), $summary);
+        $this->add_sheet('Products', array('Tour Code', 'Product Name', 'Destination', 'Duration', 'Competitor Name', 'Source URL', 'Analysis Date', 'Departure Airport', 'Arrival Airport', 'Airline'), $summary);
         $this->add_sheet('Daily Itinerary', array_merge($ref_columns, array('Day', 'Title', 'Description')), $itinerary);
         $this->add_sheet('Daily Itinerary Flow', array_merge($ref_columns, array('Day', 'Stop Order', 'Stop Name', 'City / District', 'Notes')), $flow);
         $this->add_sheet('Scenic Highlights', array_merge($ref_columns, array('Place', 'Description')), $scenic);
