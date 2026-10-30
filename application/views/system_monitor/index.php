@@ -157,7 +157,7 @@ $disk_meta = is_array($host_disk)
 		.panel::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--emerald);opacity:1;}
 		.phead{display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid var(--line);}
 		.phead .srv{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mut);}
-		.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);}
+		.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);}
 		.tile{background:var(--panel-2);padding:18px 20px;}
 		.tile .k{font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--mut-2);}
 		.tile .v{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;margin-top:7px;color:var(--ink);}
@@ -186,7 +186,6 @@ $disk_meta = is_array($host_disk)
 			<div class="sub"><span class="dot"></span> Live · scoped to this project on a shared host · updated <span id="gen" class="mono"><?php echo htmlspecialchars($m['generated']); ?></span></div>
 		</div>
 		<div class="actions">
-			<button type="button" id="refresh" class="btn"><i class="la la-sync"></i> Refresh</button>
 			<a href="<?php echo base_url('system-monitor/lock'); ?>" class="btn btn-lock" title="Clear the saved code — you'll need to re-enter it"><i class="la la-lock"></i> Lock</a>
 		</div>
 	</div>
@@ -257,28 +256,26 @@ $disk_meta = is_array($host_disk)
 			<div class="tile"><div class="k">DB Size</div><div class="v" id="db_size"><?php echo $sql ? system_monitor_format_bytes($sql['size_bytes']) : '—'; ?></div></div>
 			<div class="tile"><div class="k">Tables</div><div class="v" id="db_tables"><?php echo $sql ? number_format($sql['tables']) : '—'; ?></div></div>
 			<div class="tile"><div class="k">Connections</div><div class="v" id="db_conn"><?php echo $sql ? $sql['connections'] : '—'; ?></div></div>
-			<div class="tile"><div class="k">Active Queries</div><div class="v" id="db_active"><?php echo $sql ? $sql['active_queries'] : '—'; ?></div></div>
 		</div>
-		<div class="qh">Active queries · this database</div>
+
+		<div class="qh">Recent query history · this database</div>
 		<div class="tbl-scroll">
 			<table class="q">
-				<thead><tr><th>ID</th><th>User</th><th>DB</th><th>Command</th><th style="text-align:right;">Time</th><th>State</th><th>Query</th></tr></thead>
-				<tbody id="db_rows">
+				<thead><tr><th>Query</th><th style="text-align:right;">Count</th><th style="text-align:right;">Avg</th><th style="text-align:right;">Max</th><th style="text-align:right;">Rows&nbsp;Exam.</th><th>Last&nbsp;Seen</th></tr></thead>
+				<tbody id="db_hist">
 					<?php
-					$display = ($sql && ! empty($sql['processlist'])) ? $sql['processlist'] : array();
-					if (empty($display)) {
-						echo '<tr><td colspan="7" class="empty">No active queries.</td></tr>';
+					$hist = ($sql && ! empty($sql['history'])) ? $sql['history'] : array();
+					if (empty($hist)) {
+						echo '<tr><td colspan="6" class="empty">No query history. (performance_schema disabled, not permitted, or no activity on this schema.)</td></tr>';
 					} else {
-						foreach ($display as $p) {
-							$sleep = strcasecmp($p['command'], 'Sleep') === 0;
-							echo '<tr' . ($sleep ? ' class="sleep"' : '') . '>';
-							echo '<td class="mono">' . htmlspecialchars($p['id']) . '</td>';
-							echo '<td>' . htmlspecialchars($p['user']) . '</td>';
-							echo '<td>' . htmlspecialchars($p['db']) . '</td>';
-							echo '<td>' . htmlspecialchars($p['command']) . '</td>';
-							echo '<td class="t">' . htmlspecialchars(system_monitor_format_duration($p['time'])) . '</td>';
-							echo '<td>' . htmlspecialchars($p['state']) . '</td>';
-							echo '<td><code>' . htmlspecialchars(mb_substr($p['info'], 0, 300)) . '</code></td>';
+						foreach ($hist as $h) {
+							echo '<tr>';
+							echo '<td><code>' . htmlspecialchars(mb_substr($h['query'], 0, 220)) . '</code></td>';
+							echo '<td class="t">' . number_format($h['count']) . '</td>';
+							echo '<td class="t">' . htmlspecialchars(system_monitor_format_ps_time($h['avg_ps'])) . '</td>';
+							echo '<td class="t">' . htmlspecialchars(system_monitor_format_ps_time($h['max_ps'])) . '</td>';
+							echo '<td class="t">' . number_format($h['rows_examined']) . '</td>';
+							echo '<td style="white-space:nowrap;font-size:11.5px;" title="' . htmlspecialchars($h['last_seen']) . '">' . htmlspecialchars(isset($h['last_seen_ago']) ? $h['last_seen_ago'] : $h['last_seen']) . '</td>';
 							echo '</tr>';
 						}
 					}
@@ -316,6 +313,11 @@ $disk_meta = is_array($host_disk)
 	function fmtDur(sec){ sec=Math.max(0,parseInt(sec,10)||0); if(sec<=0) return '0s';
 		var d=Math.floor(sec/86400),h=Math.floor((sec%86400)/3600),m=Math.floor((sec%3600)/60),s=sec%60;
 		if(d>0)return d+'d '+h+'h'; if(h>0)return h+'h '+m+'m'; if(m>0)return m+'m '+s+'s'; return s+'s'; }
+	function fmtPs(ps){ ps=Number(ps)||0; if(ps<=0) return '0';
+		if(ps<1e6) return Math.round(ps/1e3)+' ns';
+		if(ps<1e9) return (ps/1e6).toFixed(1)+' µs';
+		if(ps<1e12) return (ps/1e9).toFixed(1)+' ms';
+		return (ps/1e12).toFixed(2)+' s'; }
 	function esc(s){ return $('<div/>').text(s==null?'':s).html(); }
 
 	function setPill(id, status){
@@ -367,23 +369,24 @@ $disk_meta = is_array($host_disk)
 		$('#db_size').text(fmtBytes(sql.size_bytes));
 		$('#db_tables').text(Number(sql.tables).toLocaleString());
 		$('#db_conn').text(sql.connections);
-		$('#db_active').text(sql.active_queries);
 
-		var rows=sql.processlist||[];
-		if(!rows.length){ $('#db_rows').html('<tr><td colspan="7" class="empty">No active queries.</td></tr>'); return; }
-		var html='';
-		rows.forEach(function(p){
-			var sleep=String(p.command).toLowerCase()==='sleep';
-			html+='<tr'+(sleep?' class="sleep"':'')+'>'
-				+'<td class="mono">'+esc(p.id)+'</td><td>'+esc(p.user)+'</td><td>'+esc(p.db)+'</td>'
-				+'<td>'+esc(p.command)+'</td><td class="t">'+esc(fmtDur(p.time))+'</td><td>'+esc(p.state)+'</td>'
-				+'<td><code>'+esc(String(p.info).slice(0,300))+'</code></td></tr>';
-		});
-		$('#db_rows').html(html);
+		var hist=sql.history||[];
+		if(!hist.length){ $('#db_hist').html('<tr><td colspan="6" class="empty">No query history. (performance_schema disabled, not permitted, or no activity on this schema.)</td></tr>'); }
+		else {
+			var hh='';
+			hist.forEach(function(h){
+				hh+='<tr><td><code>'+esc(String(h.query).slice(0,220))+'</code></td>'
+					+'<td class="t">'+Number(h.count).toLocaleString()+'</td>'
+					+'<td class="t">'+esc(fmtPs(h.avg_ps))+'</td>'
+					+'<td class="t">'+esc(fmtPs(h.max_ps))+'</td>'
+					+'<td class="t">'+Number(h.rows_examined).toLocaleString()+'</td>'
+					+'<td style="white-space:nowrap;font-size:11.5px;" title="'+esc(h.last_seen)+'">'+esc(h.last_seen_ago||h.last_seen)+'</td></tr>';
+			});
+			$('#db_hist').html(hh);
+		}
 	}
 
 	function poll(){ $.getJSON(STATS_URL).done(render); }
-	$('#refresh').on('click', poll);
 	setInterval(poll, 5000);
 })();
 </script>
