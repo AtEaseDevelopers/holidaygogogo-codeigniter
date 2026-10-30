@@ -80,6 +80,9 @@ $route['ghl-details'] = 'Ghl_Details';
 $route['ghl-custom-field-viewer'] = 'Ghl_Custom_Field_Viewer';
 $route['message-log'] = 'Message_Log';
 $route['message-log-csv'] = 'Message_Log/csv';
+$route['system-monitor'] = 'System_Monitor';
+$route['system-monitor/stats'] = 'System_Monitor/stats';
+$route['system-monitor/lock'] = 'System_Monitor/lock';
 
 // Public, token-gated customer Quotation PDF under the /Costing namespace. Maps to
 // the standalone Costing_Quotation controller (no staff login) — the real Costing
