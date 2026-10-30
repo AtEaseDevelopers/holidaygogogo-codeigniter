@@ -123,6 +123,50 @@ $assertions['html->lines empty']    = costing_itinerary_lines_from_html('') === 
 $cycle = costing_itinerary_html_from_lines(costing_itinerary_lines_from_html('<ul><li>Hotel</li><li>Guide</li></ul>'));
 $assertions['round-trip stable']    = $cycle === '<ul><li>Hotel</li><li>Guide</li></ul>';
 
+// --- DAY description: mixed <p>+<ul><li> <-> readable text round-trip --------
+// This is the bug the export used to dump raw markup into the Excel cell.
+$dayHtml =
+    '<p>Arrive at Kuala Lumpur International Airport. Meet &amp; greet by our local tour guide.</p>'
+    . '<ul><li>Royal Palace – photo stop</li><li>KLCC Aquaria (entrance ticket included)</li></ul>'
+    . '<p>Transfer to hotel and check in. Overnight in Kuala Lumpur.</p>';
+$dayText = costing_itinerary_day_text_from_html($dayHtml);
+$expectedText =
+    "Arrive at Kuala Lumpur International Airport. Meet & greet by our local tour guide.\n"
+    . "- Royal Palace – photo stop\n"
+    . "- KLCC Aquaria (entrance ticket included)\n"
+    . "Transfer to hotel and check in. Overnight in Kuala Lumpur.";
+$assertions['day html->text no tags']   = strpos($dayText, '<') === false;         // no raw coding
+$assertions['day html->text keeps para'] = strpos($dayText, 'Arrive at Kuala') === 0; // intro para kept
+$assertions['day html->text bullets']    = strpos($dayText, "- Royal Palace") !== false;
+$assertions['day html->text entity']     = strpos($dayText, 'Meet & greet') !== false; // &amp; decoded
+$assertions['day html->text exact']       = $dayText === $expectedText;
+
+// text -> HTML: "- " lines fold into one <ul>, other lines become <p>.
+$dayBack = costing_itinerary_day_html_from_text($dayText);
+$expectedBack =
+    '<p>Arrive at Kuala Lumpur International Airport. Meet &amp; greet by our local tour guide.</p>'
+    . '<ul><li>Royal Palace – photo stop</li><li>KLCC Aquaria (entrance ticket included)</li></ul>'
+    . '<p>Transfer to hotel and check in. Overnight in Kuala Lumpur.</p>';
+$assertions['day text->html rebuild'] = $dayBack === $expectedBack;
+// Full cycle is stable (export cell re-imports to the same HTML).
+$assertions['day round-trip stable']  = costing_itinerary_day_html_from_text($dayText) === $expectedBack;
+
+// Bullet-only day.
+$assertions['day bullets only'] = costing_itinerary_day_text_from_html('<ul><li>A</li><li>B</li></ul>') === "- A\n- B";
+$assertions['day bullets only back'] = costing_itinerary_day_html_from_text("- A\n- B") === '<ul><li>A</li><li>B</li></ul>';
+// Paragraph-only day.
+$assertions['day para only'] = costing_itinerary_day_text_from_html('<p>Free day at leisure.</p>') === 'Free day at leisure.';
+$assertions['day para only back'] = costing_itinerary_day_html_from_text('Free day at leisure.') === '<p>Free day at leisure.</p>';
+// Blank in -> blank out.
+$assertions['day blank text'] = costing_itinerary_day_text_from_html('') === '';
+$assertions['day blank html'] = costing_itinerary_day_html_from_text('') === '';
+// Already-HTML cell passes through untouched (hand-pasted / legacy export).
+$assertions['day text->html passthru'] = costing_itinerary_day_html_from_text('<p>Kept</p>') === '<p>Kept</p>';
+// A bare bullet char (•) is also recognised as a bullet.
+$assertions['day unicode bullet'] = costing_itinerary_day_html_from_text("• One") === '<ul><li>One</li></ul>';
+// Loose text with only <br> still flattens readably.
+$assertions['day br fallback'] = costing_itinerary_day_text_from_html('Line one<br>Line two') === "Line one\nLine two";
+
 $failed = 0;
 foreach ($assertions as $label => $ok) {
     echo ($ok ? '  PASS  ' : '  FAIL  ') . $label . PHP_EOL;

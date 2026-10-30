@@ -742,7 +742,10 @@ if (!function_exists('costing_import_order_itinerary')) {
             $row = array(
                 'day_number'  => (int) costing_import_num(isset($rec['day_number']) ? $rec['day_number'] : 0),
                 'title'       => trim((string) (isset($rec['title']) ? $rec['title'] : '')),
-                'description' => trim((string) (isset($rec['description']) ? $rec['description'] : '')),
+                // The Excel day cell is readable text ("- " = bullet, other lines
+                // = paragraphs); promote it back to <p>/<ul> HTML (existing HTML is
+                // kept verbatim) so the day round-trips with the export.
+                'description' => costing_itinerary_day_html_from_text(isset($rec['description']) ? $rec['description'] : ''),
                 'meal_plan'   => costing_import_meal_plan_tokens(isset($rec['meal_plan']) ? $rec['meal_plan'] : ''),
             );
             if ($row['day_number'] > 0) {

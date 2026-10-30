@@ -42,7 +42,7 @@ $SalesPerson   = isset($package['sales_person']) && $package['sales_person'] !==
 $SalesPersonContact = isset($package['sales_person_contact']) ? trim((string) $package['sales_person_contact']) : '';
 // Quotation validity date ("Valid until"), set on the wizard's step 1. Blank = hidden.
 $ValidUntil = !empty($package['validity_date']) && strtotime($package['validity_date'])
-    ? strtoupper(date('d M Y', strtotime($package['validity_date'])))
+    ? date('Y-m-d', strtotime($package['validity_date']))
     : '';
 // Step 1 free-text description, shown under the Pricing per person table. Blank = hidden.
 $PackageDescription = isset($package['description']) ? trim((string) $package['description']) : '';
@@ -480,7 +480,14 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
         foreach ($itin_sections as $sec_key => $sec_label) {
             $sec_html = isset($itin_meta[$sec_key]) ? (string) $itin_meta[$sec_key] : '';
             if (trim(strip_tags($sec_html, '<img>')) !== '' || stripos($sec_html, '<img') !== false) {
-                $itin_section_rows[] = '<p style="margin:6px 0 2px;"><strong>' . $sec_label . '</strong></p>' . $sec_html;
+                // Each section is its OWN page-break-inside:avoid block so its bullet
+                // list is kept whole on a single page instead of spilling across a
+                // page boundary (e.g. "Exclude" splitting mid-list). If a section is
+                // genuinely taller than a page DomPDF still splits it (block divs
+                // flow/split, unlike an unbreakable one-row table), so no blank pages.
+                $itin_section_rows[] = '<div style="page-break-inside:avoid; margin-top:8px;">'
+                    . '<p style="margin:6px 0 2px;"><strong>' . $sec_label . '</strong></p>'
+                    . $sec_html . '</div>';
             }
         }
         // Render as plain block divs, NOT a single-row table. A one-<tr> table holding
@@ -489,7 +496,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
         // leaving blank pages behind before finally splitting it. Block divs flow and
         // page-break naturally.
         if (!empty($itin_section_rows)) { ?>
-            <div style="font-size:11px; margin-top:8px;"><?php echo implode('', $itin_section_rows); ?></div>
+            <div style="font-size:11px;"><?php echo implode('', $itin_section_rows); ?></div>
         <?php } ?>
     </div>
 </body></html>

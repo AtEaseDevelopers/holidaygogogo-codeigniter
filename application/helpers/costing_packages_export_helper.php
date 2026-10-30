@@ -344,7 +344,10 @@ if (!function_exists('costing_packages_export_itinerary_record')) {
             'tour_code'    => (string) $get('tour_code'),
             'day_number'   => (string) (int) $get('day_number'),
             'title'        => (string) $get('title'),
-            'description'  => (string) $get('description'),
+            // Flatten the TinyMCE day HTML to readable text (paragraphs as plain
+            // lines, bullets as "- " lines) so the Excel cell isn't raw markup;
+            // re-imports via costing_itinerary_day_html_from_text().
+            'description'  => costing_itinerary_day_text_from_html((string) $get('description')),
             'meal_plan'    => (string) $get('meal_plan'),
         );
     }

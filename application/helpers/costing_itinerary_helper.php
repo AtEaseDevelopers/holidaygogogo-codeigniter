@@ -406,6 +406,103 @@ if (!function_exists('costing_itinerary_lines_from_html')) {
     }
 }
 
+if (!function_exists('costing_itinerary_day_text_from_html')) {
+    /**
+     * Render a stored itinerary DAY description (TinyMCE HTML that mixes <p>
+     * paragraphs with <ul><li> bullets) back to readable, tag-free text for the
+     * Excel export. Paragraphs become plain lines; bullets become lines prefixed
+     * with "- ", kept in document order. Inverse of
+     * costing_itinerary_day_html_from_text(), so a day exports as clean text and
+     * re-imports to equivalent HTML.
+     *
+     * Unlike costing_itinerary_lines_from_html() (used for the four note sections,
+     * which are bullet-only) this keeps BOTH paragraphs and bullets — a day
+     * description would otherwise lose its intro/outro paragraphs.
+     *
+     * @param string $html stored day description HTML
+     * @return string readable text, paragraphs as plain lines, bullets as "- " lines
+     */
+    function costing_itinerary_day_text_from_html($html)
+    {
+        $html = (string) $html;
+        if (trim($html) === '') {
+            return '';
+        }
+
+        $lines = array();
+        if (preg_match_all('/<li\b[^>]*>(.*?)<\/li>|<(p|div|h[1-6])\b[^>]*>(.*?)<\/\2>/is', $html, $m, PREG_SET_ORDER)) {
+            foreach ($m as $set) {
+                $is_li = (stripos(ltrim($set[0]), '<li') === 0);
+                $frag  = $is_li ? $set[1] : (isset($set[3]) ? $set[3] : '');
+                $line  = costing_itinerary_line_text($frag);
+                if ($line !== '') {
+                    $lines[] = ($is_li ? '- ' : '') . $line;
+                }
+            }
+        }
+
+        // Fallback for loose markup with no <p>/<li> blocks (bare text, <br> only).
+        if (empty($lines)) {
+            $norm = preg_replace('/<br\s*\/?>|<\/(p|div|li|h[1-6])>/i', "\n", $html);
+            foreach (preg_split('/\r\n|\r|\n/', $norm) as $frag) {
+                $line = costing_itinerary_line_text($frag);
+                if ($line !== '') {
+                    $lines[] = $line;
+                }
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+}
+
+if (!function_exists('costing_itinerary_day_html_from_text')) {
+    /**
+     * Inverse of costing_itinerary_day_text_from_html(): turn an Excel day cell
+     * ("- " lines = bullets, other non-blank lines = paragraphs) back into the
+     * <p>/<ul><li> HTML the day description stores and the Quotation PDF renders.
+     * Consecutive bullet lines fold into one <ul>.
+     *
+     * A cell that already carries block HTML (an old export, or markup pasted in
+     * by hand) is kept verbatim so it still round-trips.
+     *
+     * @param string $text newline-separated day text (or existing HTML)
+     * @return string <p>/<ul> HTML, or '' when nothing visible
+     */
+    function costing_itinerary_day_html_from_text($text)
+    {
+        $text = (string) $text;
+        if (preg_match('/<(ul|ol|li|p|br|h[1-6])\b/i', $text)) {
+            return trim($text);
+        }
+
+        $html = '';
+        $bullets = array();
+        $flush = function () use (&$html, &$bullets) {
+            if (!empty($bullets)) {
+                $html .= '<ul>' . implode('', $bullets) . '</ul>';
+                $bullets = array();
+            }
+        };
+
+        foreach (preg_split('/\r\n|\r|\n/', $text) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            if (preg_match('/^(?:-|\x{2022})\s+(.*)$/u', $line, $mm)) {
+                $bullets[] = '<li>' . htmlspecialchars($mm[1], ENT_QUOTES, 'UTF-8') . '</li>';
+            } else {
+                $flush();
+                $html .= '<p>' . htmlspecialchars($line, ENT_QUOTES, 'UTF-8') . '</p>';
+            }
+        }
+        $flush();
+
+        return $html;
+    }
+}
+
 if (!function_exists('costing_itinerary_split_notes')) {
     /**
      * Best-effort split of a LEGACY merged Notes block (one editor holding all
