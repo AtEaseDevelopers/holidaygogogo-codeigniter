@@ -244,50 +244,46 @@ class System_Monitor extends CI_Controller
 	 */
 	private function detect_sql()
 	{
+		if (empty($this->db) || empty($this->db->database)) {
+			return null;
+		}
+
+		// Some of these probes (information_schema, performance_schema, SHOW
+		// PROCESSLIST) need privileges the app's DB user may not have. CI renders
+		// a fatal error page on a failed query whenever db_debug is on (i.e. off
+		// production), so turn it off for the duration: a denied query then
+		// returns FALSE and we just skip that section instead of halting.
+		$prev_debug = $this->db->db_debug;
+		$this->db->db_debug = FALSE;
+
+		$result = null;
 		try {
 			$db = (string) $this->db->database;
 
 			// This database's size + table count.
-			$size = array('bytes' => 0, 'tables' => 0);
-			try {
-				$row = $this->db->query(
-					'SELECT SUM(data_length + index_length) AS bytes, COUNT(*) AS `tables`
-					 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
-					array($db)
-				)->row_array();
-				$size = system_monitor_db_size_from_row($row);
-			} catch (Exception $e) {
-				// information_schema not readable — leave zeros.
-			}
+			$size_rows = $this->safe_rows(
+				'SELECT SUM(data_length + index_length) AS bytes, COUNT(*) AS `tables`
+				 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
+				array($db)
+			);
+			$size = system_monitor_db_size_from_row(isset($size_rows[0]) ? $size_rows[0] : array());
 
-			// Processlist, filtered to this database.
-			$plist = array();
-			try {
-				$all = system_monitor_processlist_rows(
-					$this->db->query('SHOW FULL PROCESSLIST')->result_array()
-				);
-				$plist = system_monitor_filter_processlist_by_db($all, $db);
-			} catch (Exception $e) {
-				$plist = array();
-			}
+			// Connections for this database (filtered from the processlist).
+			$plist = system_monitor_filter_processlist_by_db(
+				system_monitor_processlist_rows($this->safe_rows('SHOW FULL PROCESSLIST')),
+				$db
+			);
 
 			// Query history for this DB — per-statement-pattern stats that MySQL
 			// keeps in performance_schema (needs it enabled + SELECT granted).
-			$history = array();
-			try {
-				$history = system_monitor_query_history_rows(
-					$this->db->query(
-						'SELECT DIGEST_TEXT, COUNT_STAR, AVG_TIMER_WAIT, MAX_TIMER_WAIT,
-						        SUM_ROWS_EXAMINED, SUM_ROWS_SENT, LAST_SEEN
-						 FROM performance_schema.events_statements_summary_by_digest
-						 WHERE SCHEMA_NAME = ? AND DIGEST_TEXT IS NOT NULL
-						 ORDER BY LAST_SEEN DESC LIMIT 25',
-						array($db)
-					)->result_array()
-				);
-			} catch (Exception $e) {
-				$history = array(); // performance_schema off / not permitted
-			}
+			$history = system_monitor_query_history_rows($this->safe_rows(
+				'SELECT DIGEST_TEXT, COUNT_STAR, AVG_TIMER_WAIT, MAX_TIMER_WAIT,
+				        SUM_ROWS_EXAMINED, SUM_ROWS_SENT, LAST_SEEN
+				 FROM performance_schema.events_statements_summary_by_digest
+				 WHERE SCHEMA_NAME = ? AND DIGEST_TEXT IS NOT NULL
+				 ORDER BY LAST_SEEN DESC LIMIT 25',
+				array($db)
+			));
 
 			// Relative "ago" label, computed server-side so it's timezone-safe
 			// and refreshes with every poll.
@@ -297,7 +293,7 @@ class System_Monitor extends CI_Controller
 			}
 			unset($h);
 
-			return array(
+			$result = array(
 				'database'       => $db,
 				'server_version' => $this->db->version(),
 				'size_bytes'     => $size['bytes'],
@@ -305,8 +301,26 @@ class System_Monitor extends CI_Controller
 				'connections'    => count($plist),
 				'history'        => array_slice($history, 0, 25),
 			);
-		} catch (Exception $e) {
-			return null;
+		} catch (Throwable $e) {
+			$result = null;
+		}
+
+		$this->db->db_debug = $prev_debug;
+		return $result;
+	}
+
+	/**
+	 * Run a read query with db_debug already suppressed, returning its rows or an
+	 * empty array when it is denied / fails (CI returns FALSE instead of a result
+	 * object in that case). Never throws a DB error page.
+	 */
+	private function safe_rows($sql, $binds = array())
+	{
+		try {
+			$res = $this->db->query($sql, $binds);
+			return is_object($res) ? $res->result_array() : array();
+		} catch (Throwable $e) {
+			return array();
 		}
 	}
 
