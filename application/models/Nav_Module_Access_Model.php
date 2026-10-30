@@ -84,7 +84,14 @@ class Nav_Module_Access_Model extends CI_Model
 			return false;
 		}
 
-		$posted   = $this->input->post('access');
+		// The grid is posted as a single JSON string (access_json) rather than a
+		// nested array, so a large staff x module matrix can't exceed PHP's
+		// max_input_vars and get silently truncated (which wiped saved access and
+		// left staff with an empty sidebar). Fall back to the legacy array field.
+		$posted = json_decode((string) $this->input->post('access_json'), true);
+		if ( ! is_array($posted)) {
+			$posted = $this->input->post('access');
+		}
 		$admin_id = $this->session->userdata('admin_id');
 		$now      = date('Y-m-d H:i:s');
 		$modules  = array_keys(nav_modules());

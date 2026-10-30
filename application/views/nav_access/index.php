@@ -125,7 +125,11 @@
 		$.ajax({
 			url: '<?php echo base_url('Nav_Access/Save'); ?>',
 			type: 'post',
-			data: { access: access },
+			// Send as a single JSON field, not a nested array: the grid has 45
+			// modules x ~20 staff x 2 (view/edit) = ~1800 fields, which blows past
+			// PHP's max_input_vars (1000) and gets silently truncated — causing
+			// saved access to be dropped and staff to end up with an empty sidebar.
+			data: { access_json: JSON.stringify(access) },
 			success: function(resp) {
 				var ok = (resp === true || resp === 'true' || resp === '1' || resp === 1);
 				try { ok = ok || JSON.parse(resp) === true; } catch (e) {}

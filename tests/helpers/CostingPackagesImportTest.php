@@ -70,13 +70,14 @@ $pkg_labels = array_keys($pkg_cols);
 $raw = array(
     $pkg_labels,                                   // header row -> skipped
     array('', '', '', '', '', '', '', '', '', ''), // blank row -> skipped
-    array('Japan Spring', 'Tan Family', '+60 12', 't@e.com', 'Alice Tan', '6', '5', 'active', '2027-03-15', 'desc',
+    array('Japan Spring', 'Tan Family', '+60 12', 't@e.com', 'Alice Tan', '+60 19 888', '6', '5', 'active', '2027-03-15', 'desc',
           '2027-04-01', '2027-04-06', '4', '0', '15', '0', '0', 'FIT', 'Twin|Triple', 'Hotel', 'Y'),
 );
 $records = costing_import_sheet_to_records($raw, $pkg_cols);
 check('parser keeps only the data row', 1, count($records));
 check('parser maps name', 'Japan Spring', $records[0]['name']);
 check('parser maps sales_person', 'Alice Tan', $records[0]['sales_person']);
+check('parser maps sales_person_mobile', '+60 19 888', $records[0]['sales_person_mobile']);
 check('parser maps adult_count cell', '4', $records[0]['adult_count']);
 check('parser record key set', array_values($pkg_cols), array_keys($records[0]));
 

@@ -284,14 +284,26 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
                 // Prefill the Sales Person Mobile from the picked sales person, but
                 // never clobber a number the user typed/overrode themselves: only
                 // overwrite when the field is blank or still holds the last auto value.
+                // Runs on page LOAD too (not just on change) so an existing package
+                // whose override was never saved shows the same admin mobile the
+                // quotation PDF falls back to — the field no longer looks empty.
                 (function () {
                     var sel = document.getElementById('cw-sales-admin');
                     var mob = document.getElementById('cw-sales-mobile');
                     if (!sel || !mob) { return; }
-                    var lastAuto = mob.value;
-                    sel.addEventListener('change', function () {
+                    function selectedContact() {
                         var opt = sel.options[sel.selectedIndex];
-                        var contact = opt ? (opt.getAttribute('data-mobile') || '') : '';
+                        return opt ? (opt.getAttribute('data-mobile') || '') : '';
+                    }
+                    var lastAuto = mob.value;
+                    // Initial fill: a saved blank means "never overridden", so show the
+                    // picked sales person's admin mobile (what the PDF uses).
+                    if (mob.value === '') {
+                        lastAuto = selectedContact();
+                        mob.value = lastAuto;
+                    }
+                    sel.addEventListener('change', function () {
+                        var contact = selectedContact();
                         if (mob.value === '' || mob.value === lastAuto) {
                             mob.value = contact;
                         }

@@ -244,6 +244,7 @@ class Costing_Model extends CI_Model
                 cp.customer_email,
                 cp.sales_admin_id,
                 sales_admin.Name AS sales_admin_name,
+                cp.sales_admin_mobile,
                 cp.tour_code,
                 cp.duration_days,
                 cp.duration_nights,

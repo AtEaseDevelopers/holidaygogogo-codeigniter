@@ -181,6 +181,7 @@ if (!function_exists('costing_packages_export_package_record')) {
             'customer_contact'       => (string) $get('customer_contact'),
             'customer_email'         => (string) $get('customer_email'),
             'sales_person'           => (string) $get('sales_admin_name'),
+            'sales_person_mobile'    => (string) $get('sales_admin_mobile'),
             'duration_days'          => (string) (int) $get('duration_days'),
             'duration_nights'        => (string) (int) $get('duration_nights'),
             'status'                 => (string) $get('status'),
