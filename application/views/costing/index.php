@@ -56,6 +56,35 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
         overflow: hidden;
         word-break: break-word;
     }
+    /* Keep all action icons on a single row and give the column enough width
+       to hold them so none overflow the cell border. */
+    table.table th.action,
+    table.table td:last-child {
+        min-width: 260px;
+        white-space: nowrap;
+    }
+    .costing-action-buttons {
+        flex-wrap: nowrap;
+    }
+    .costing-action-buttons .btn {
+        flex: 0 0 auto;
+    }
+    .costing-action-buttons form {
+        margin: 0;
+    }
+    /* Keep the full tour code (incl. "-REVnn" revisions) on one line so it is never
+       cropped, and drop the REV badge onto its own line beneath it. */
+    table.table td.costing-tourcode-cell {
+        min-width: 140px;
+        white-space: nowrap;
+    }
+    .costing-tourcode {
+        white-space: nowrap;
+    }
+    .costing-tourcode-rev {
+        display: block;
+        margin-top: 4px;
+    }
 </style>
 
 <div class="d-flex flex-column-fluid">
@@ -214,7 +243,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                     </div>
                 </div>
 
-                <div class="dataTables_wrapper dt-bootstrap4 no-footer" <?php if (empty($packages)) { echo 'style="overflow-x:auto;"'; } ?>>
+                <div class="dataTables_wrapper dt-bootstrap4 no-footer" style="overflow-x:auto;">
                     <table class="table table-bordered table-head-custom table-checkable dataTable no-footer dtr-inline">
                         <thead>
                             <tr>
@@ -255,10 +284,10 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                         <td><?php echo !empty($package['customer_email']) ? html_escape($package['customer_email']) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['sales_admin_name']) ? html_escape($package['sales_admin_name']) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['op_admin_name']) ? html_escape($package['op_admin_name']) : '-'; ?></td>
-                                        <td style="text-align:center;">
-                                            <?php echo !empty($package['tour_code']) ? html_escape($package['tour_code']) : '-'; ?>
+                                        <td class="costing-tourcode-cell" style="text-align:center;">
+                                            <span class="costing-tourcode"><?php echo !empty($package['tour_code']) ? html_escape($package['tour_code']) : '-'; ?></span>
                                             <?php if (!empty($package['revision_number'])) { ?>
-                                                <span class="label label-sm label-light-warning label-inline ml-1">REV<?php echo str_pad((string) (int) $package['revision_number'], 2, '0', STR_PAD_LEFT); ?></span>
+                                                <span class="costing-tourcode-rev"><span class="label label-sm label-light-warning label-inline">REV<?php echo str_pad((string) (int) $package['revision_number'], 2, '0', STR_PAD_LEFT); ?></span></span>
                                             <?php } ?>
                                             <?php if (!empty($package['revisions']) && count($package['revisions']) > 1) { ?>
                                                 <div class="mt-2">
@@ -296,7 +325,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                         <td style="text-align:center;"><?php echo !empty($package['created_at']) ? date('d/m/Y H:i', strtotime($package['created_at'])) : 'N/A'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['updated_at']) ? date('d/m/Y H:i', strtotime($package['updated_at'])) : 'N/A'; ?></td>
                                         <td>
-                                            <div class="d-flex align-items-center justify-content-start" style="gap:6px;">
+                                            <div class="d-flex align-items-center justify-content-center costing-action-buttons" style="gap:6px;">
                                             <a href="<?php echo base_url('Costing/Package/' . (int) $package['id']); ?>" class="btn btn-icon btn-light-primary btn-sm" title="View Package">
                                                 <i class="la la-eye"></i>
                                             </a>
