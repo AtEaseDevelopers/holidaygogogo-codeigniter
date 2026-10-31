@@ -166,12 +166,49 @@ class Costing extends MY_Controller
         $parsed = array();
         foreach (costing_import_sheets_meta() as $meta) {
             list($key, $title, $columns) = $meta;
+            // The Packages sheet is parsed with a Tour-Code-aware column map so an
+            // EXPORT's TOUR CODE column is captured (to match an existing revision
+            // family). The template itself has no such column — header-aware parsing
+            // then just leaves tour_code blank.
+            if ($key === 'packages') {
+                $columns = costing_import_package_columns_with_tour_code();
+            }
             $ws = $spreadsheet->getSheetByName($title);
             $rows = $ws ? $ws->toArray(null, true, true, false) : array();
             $parsed[$key] = costing_import_sheet_to_records($rows, $columns);
         }
 
         return costing_import_assemble_packages($parsed, $this->Import_Lookups());
+    }
+
+    /**
+     * Build the revision-family lookup the import "new vs revision" decision needs:
+     * for every distinct TOUR CODE base in the uploaded packages, resolve the existing
+     * family (root id, root name, next revision code) — or omit it when no package
+     * carries that base. Keyed by lower-cased base code to match
+     * costing_import_revision_decisions().
+     */
+    private function Import_Revision_Families($packages)
+    {
+        $this->load->helper('costing_tour_code');
+
+        $families = array();
+        foreach ((array) $packages as $pkg) {
+            $code = trim((string) (isset($pkg['tour_code']) ? $pkg['tour_code'] : ''));
+            if ($code === '') {
+                continue;
+            }
+            $base = strtolower(costing_tour_code_base($code));
+            if ($base === '' || isset($families[$base])) {
+                continue;
+            }
+            $family = $this->Costing_Model->Read_Revision_Family_By_Base($code);
+            if ($family !== null) {
+                $families[$base] = $family;
+            }
+        }
+
+        return $families;
     }
 
     /**
@@ -240,6 +277,17 @@ class Costing extends MY_Controller
             return;
         }
 
+        // Decide per package whether it creates a brand-new package or a revision of an
+        // existing family (matched on the TOUR CODE column). The default (revision when
+        // matched) is shown; the user confirms/overrides per row on the preview.
+        $families = $this->Import_Revision_Families($assembled['packages']);
+        $decisions = costing_import_revision_decisions($assembled['packages'], $families);
+        foreach ($summary['rows'] as $i => $row) {
+            $summary['rows'][$i]['revision'] = isset($decisions[$i]) ? $decisions[$i] : array(
+                'mode' => 'new', 'has_match' => false, 'base_code' => '', 'root_id' => 0, 'root_name' => '', 'target_code' => '',
+            );
+        }
+
         $titles = array(
             'tab_title' => 'HolidayGoGoGo | Confirm Costing Import',
             'breadcrumb_title' => 'Setting >> Costing >> Import Preview',
@@ -282,19 +330,37 @@ class Costing extends MY_Controller
             return;
         }
 
+        // Re-resolve the new-vs-revision decision with the user's per-row choices
+        // (posted as import_mode[<index>]). Indexes are stable because assembly is
+        // deterministic for the same file.
+        $families = $this->Import_Revision_Families($assembled['packages']);
+        $posted_modes = (array) $this->input->post('import_mode');
+        $decisions = costing_import_revision_decisions($assembled['packages'], $families, $posted_modes);
+
+        $admin_id = (int) $this->session->userdata('admin_id');
         $created = 0;
         $lines = array();
         foreach ($assembled['global_errors'] as $err) {
             $lines[] = $err;
         }
-        foreach ($assembled['packages'] as $pkg) {
+        foreach ($assembled['packages'] as $i => $pkg) {
             if (!empty($pkg['errors'])) {
                 $lines[] = 'Skipped "' . $pkg['name'] . '": ' . implode(' ', $pkg['errors']);
                 continue;
             }
-            $result = $this->Costing_Model->Import_Package($pkg, (int) $this->session->userdata('admin_id'));
+
+            $decision = isset($decisions[$i]) ? $decisions[$i] : array('mode' => 'new', 'root_id' => 0);
+            $as_revision = ($decision['mode'] === 'revision') && !empty($decision['root_id']);
+
+            $result = $as_revision
+                ? $this->Costing_Model->Import_Package_As_Revision($pkg, (int) $decision['root_id'], $admin_id)
+                : $this->Costing_Model->Import_Package($pkg, $admin_id);
+
             if (!empty($result['ok'])) {
                 $created++;
+                if ($as_revision) {
+                    $lines[] = 'Imported "' . $pkg['name'] . '" as revision ' . $result['tour_code'] . '.';
+                }
                 foreach ((array) $pkg['warnings'] as $w) {
                     $lines[] = 'Imported "' . $pkg['name'] . '" with a note: ' . $w;
                 }

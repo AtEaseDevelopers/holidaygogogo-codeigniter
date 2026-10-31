@@ -1004,12 +1004,50 @@ class Costing_Model extends CI_Model
      */
     public function Create_Revision($package_id, $op_admin_id = 0)
     {
+        $state = $this->Revision_Family_State($package_id);
+        if ($state === null) {
+            return 0;
+        }
+
+        // Copy from the latest member (re-read via Read_Package so the row shape matches
+        // Deep_Copy_Package's expectations).
+        $copy_source = $this->Read_Package((int) $state['latest']['id']);
+        if (empty($copy_source)) {
+            return 0;
+        }
+
+        $overrides = array(
+            // Keep the base package name — a revision is the same quote, not a copy.
+            'name' => trim((string) $state['root']['name']),
+            'tour_code' => $state['next_code'],
+            'revision_root_id' => $state['root_id'],
+            'revision_number' => $state['next'],
+        );
+        // The revision is created by whoever clicked Create Revision — re-stamp the OP person.
+        if ((int) $op_admin_id > 0) {
+            $overrides['op_admin_id'] = (int) $op_admin_id;
+        }
+        return $this->Deep_Copy_Package($copy_source, $overrides);
+    }
+
+    /**
+     * Resolve the revision-family state for any member of a family: its root row, the
+     * base tour code, the latest member (highest revision number), and the next
+     * revision number + code. Returns null when the package (or its root) is missing.
+     * Shared by Create_Revision (deep-copy source) and Import_Package_As_Revision
+     * (import a new member) so revision numbering stays in one place.
+     *
+     * @param int $package_id any member of the family (root or a revision).
+     * @return array|null ['root','root_id','base_code','latest','next','next_code']
+     */
+    private function Revision_Family_State($package_id)
+    {
         $this->load->helper('costing_tour_code');
 
         $package_id = (int) $package_id;
         $source = $package_id > 0 ? $this->Read_Package($package_id) : null;
         if (empty($source)) {
-            return 0;
+            return null;
         }
 
         // The family root owns the base tour code. The base itself has no root set, so
@@ -1017,19 +1055,19 @@ class Costing_Model extends CI_Model
         $root_id = !empty($source['revision_root_id']) ? (int) $source['revision_root_id'] : (int) $source['id'];
         $root = $this->Read_Package($root_id);
         if (empty($root)) {
-            return 0;
+            return null;
         }
         $base_code = costing_tour_code_base((string) $root['tour_code']);
 
         // Gather every member of the family (root + its revisions) to find both the
-        // latest version (our copy source) and the next revision number.
+        // latest version and the next revision number.
         $members = $this->db
             ->where('id', $root_id)
             ->or_where('revision_root_id', $root_id)
             ->get('costing_packages')
             ->result_array();
         if (empty($members)) {
-            return 0;
+            return null;
         }
 
         $latest = null;
@@ -1041,27 +1079,134 @@ class Costing_Model extends CI_Model
             }
         }
 
-        // Copy from the latest member (re-read via Read_Package so the row shape matches
-        // Deep_Copy_Package's expectations).
-        $copy_source = $this->Read_Package((int) $latest['id']);
-        if (empty($copy_source)) {
-            return 0;
-        }
-
         $next = costing_tour_code_next_revision($existing_codes, $base_code);
 
-        $overrides = array(
-            // Keep the base package name — a revision is the same quote, not a copy.
-            'name' => trim((string) $root['name']),
-            'tour_code' => costing_tour_code_revision($base_code, $next),
-            'revision_root_id' => $root_id,
-            'revision_number' => $next,
+        return array(
+            'root'      => $root,
+            'root_id'   => $root_id,
+            'base_code' => $base_code,
+            'latest'    => $latest,
+            'next'      => $next,
+            'next_code' => costing_tour_code_revision($base_code, $next),
         );
-        // The revision is created by whoever clicked Create Revision — re-stamp the OP person.
-        if ((int) $op_admin_id > 0) {
-            $overrides['op_admin_id'] = (int) $op_admin_id;
+    }
+
+    /**
+     * Look up the revision family a given (base) tour code belongs to, for the Excel
+     * import's "import as revision" matching. Accepts a base OR a -REVnn code; the base
+     * is recovered either way. Returns the family's root id, root name and the next
+     * revision code it would mint, or null when no package carries that base code.
+     *
+     * @param string $tour_code a tour code from the uploaded file.
+     * @return array|null ['root_id','root_name','next_code']
+     */
+    public function Read_Revision_Family_By_Base($tour_code)
+    {
+        $this->load->helper('costing_tour_code');
+
+        $base_code = costing_tour_code_base((string) $tour_code);
+        if ($base_code === '') {
+            return null;
         }
-        return $this->Deep_Copy_Package($copy_source, $overrides);
+
+        // 'QU-YYMM-XXXX%' matches the base itself and its -REVnn members only (the
+        // sequence is fixed-width, so it never bleeds into a neighbouring code). Confirm
+        // the base in PHP to be safe.
+        $rows = $this->db
+            ->select('id, tour_code')
+            ->like('tour_code', $base_code, 'after')
+            ->get('costing_packages')
+            ->result_array();
+
+        $match_id = 0;
+        foreach ($rows as $row) {
+            if (costing_tour_code_base((string) $row['tour_code']) === $base_code) {
+                $match_id = (int) $row['id'];
+                break;
+            }
+        }
+        if ($match_id <= 0) {
+            return null;
+        }
+
+        $state = $this->Revision_Family_State($match_id);
+        if ($state === null) {
+            return null;
+        }
+
+        return array(
+            'root_id'   => $state['root_id'],
+            'root_name' => trim((string) $state['root']['name']),
+            'next_code' => $state['next_code'],
+        );
+    }
+
+    /**
+     * Import ONE assembled package as a new REVISION of an existing family, rather than
+     * a brand-new package. Mirrors Import_Package's save pipeline, but the new package
+     * row is stamped with the family's next revision tour code + lineage and keeps the
+     * family's base name. $root_id is any member of the target family (resolved to its
+     * root). Returns ['ok'=>bool,'package_id'=>int,'tour_code'=>string].
+     *
+     * @param array $pkg assembled package (costing_import_assemble_packages).
+     * @param int   $root_id a member of the family to revise.
+     * @param int   $op_admin_id admin running the import (stamped as OP/creator).
+     * @return array
+     */
+    public function Import_Package_As_Revision($pkg, $root_id, $op_admin_id = 0)
+    {
+        // Same pax guard as Import_Package — Generate_Booking_Snapshot needs pax.
+        $sp = (array) $pkg['snapshot_payload'];
+        $has_pax = (max(0, (int) $sp['adult_count']) + max(0, (int) $sp['child_count'])) > 0;
+        if (!$has_pax) {
+            return array('ok' => false, 'package_id' => 0, 'tour_code' => '');
+        }
+
+        // Resolve the lineage FRESH at commit time so the revision number reflects any
+        // family members added since the preview was shown.
+        $state = $this->Revision_Family_State((int) $root_id);
+        if ($state === null) {
+            return array('ok' => false, 'package_id' => 0, 'tour_code' => '');
+        }
+
+        $this->db->trans_start();
+
+        $save_package = (array) $pkg['save_package'];
+        $save_package['op_admin_id'] = (int) $op_admin_id;
+        // A revision keeps the family's base package name (mirrors Create_Revision).
+        $save_package['name'] = trim((string) $state['root']['name']);
+        $package_id = $this->Save_Package($save_package);
+        if ($package_id > 0) {
+            // Save_Package mints a throwaway monthly code on insert; overwrite it with
+            // the real revision code and link the row into the family.
+            $this->db->where('id', $package_id)->update('costing_packages', array(
+                'tour_code'        => $state['next_code'],
+                'revision_root_id' => $state['root_id'],
+                'revision_number'  => $state['next'],
+            ));
+            $this->Generate_Booking_Snapshot($package_id, $pkg['snapshot_payload']);
+            $this->Save_Quote_Details(
+                $package_id,
+                isset($pkg['hotels']) ? (array) $pkg['hotels'] : array(),
+                isset($pkg['flight_options']) ? (array) $pkg['flight_options'] : array(),
+                isset($pkg['quote_level']) ? (array) $pkg['quote_level'] : array()
+            );
+            $this->Save_Itinerary_Days(
+                $package_id,
+                isset($pkg['itinerary']) ? (array) $pkg['itinerary'] : array(),
+                isset($pkg['itinerary_level']) ? (array) $pkg['itinerary_level'] : array(),
+                isset($pkg['itinerary_tour_intro']) ? $pkg['itinerary_tour_intro'] : null
+            );
+        }
+
+        $this->db->trans_complete();
+
+        $ok = ($package_id > 0) && (bool) $this->db->trans_status();
+        return array(
+            'ok'         => $ok,
+            'package_id' => $ok ? $package_id : 0,
+            'tour_code'  => $ok ? $state['next_code'] : '',
+        );
     }
 
     /**

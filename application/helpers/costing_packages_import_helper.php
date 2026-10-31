@@ -62,6 +62,30 @@ if (!function_exists('costing_import_package_columns')) {
     }
 }
 
+if (!function_exists('costing_import_package_columns_with_tour_code')) {
+    /**
+     * The Packages column map with a 'TOUR CODE' => 'tour_code' column inserted right
+     * after Package Name — the PARSE-time map used when reading an uploaded Packages
+     * sheet, so an EXPORT's Tour Code (used to match an existing revision family) is
+     * captured. The plain template/sheet-meta map deliberately OMITS Tour Code, so the
+     * downloaded template layout is unchanged; header-aware parsing yields a blank
+     * tour_code when the column is absent (i.e. a plain template upload).
+     *
+     * @return array label => record key.
+     */
+    function costing_import_package_columns_with_tour_code()
+    {
+        $out = array();
+        foreach (costing_import_package_columns() as $label => $key) {
+            $out[$label] = $key;
+            if ($key === 'name') {
+                $out['TOUR CODE'] = 'tour_code';
+            }
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('costing_import_item_columns')) {
     /** Cost Items sheet: label => record key, in column order. */
     function costing_import_item_columns()
@@ -559,6 +583,10 @@ if (!function_exists('costing_import_assemble_packages')) {
 
             $packages[] = array(
                 'name'             => $name,
+                // Trimmed TOUR CODE from the file (blank on the plain template). Used
+                // downstream to match an existing revision family; never saved verbatim
+                // (the model mints the real revision code).
+                'tour_code'        => trim((string) (isset($rec['tour_code']) ? $rec['tour_code'] : '')),
                 'save_package'     => $save_package,
                 'snapshot_payload' => $snapshot_payload,
                 'hotels'           => $hotels,
@@ -844,6 +872,61 @@ if (!function_exists('costing_import_preview_summary')) {
             'skip_count'    => $total - $create,
             'total'         => $total,
         );
+    }
+}
+
+if (!function_exists('costing_import_revision_decisions')) {
+    /**
+     * Decide, per assembled package, whether an import row creates a BRAND-NEW
+     * package or a REVISION of an existing family — the pure core shared by the
+     * import preview and commit so both agree exactly.
+     *
+     * A package can only become a revision when its TOUR CODE (base, REV suffix
+     * stripped) matches an existing family supplied in $families. When it matches,
+     * the default is 'revision'; the user may downgrade it to 'new' via $posted_modes
+     * (keyed by the package's 0-based index). A posted 'revision' with no matching
+     * family is ignored — you cannot revise what does not exist.
+     *
+     * Requires costing_tour_code_base() (costing_tour_code helper) to be loaded.
+     *
+     * @param array $packages     assembled packages (costing_import_assemble_packages).
+     * @param array $families     map: lower base tour code => ['root_id','root_name','next_code'].
+     * @param array $posted_modes map: index => 'new'|'revision' (user's per-row choice).
+     * @return array list aligned to $packages: each ['mode','has_match','base_code',
+     *               'root_id','root_name','target_code'].
+     */
+    function costing_import_revision_decisions($packages, $families, $posted_modes = array())
+    {
+        $families = (array) $families;
+        $posted_modes = (array) $posted_modes;
+
+        $out = array();
+        foreach ((array) $packages as $i => $pkg) {
+            $code = trim((string) (isset($pkg['tour_code']) ? $pkg['tour_code'] : ''));
+            $base = $code !== '' ? costing_tour_code_base($code) : '';
+            $family = ($base !== '' && isset($families[strtolower($base)])) ? $families[strtolower($base)] : null;
+
+            $posted = isset($posted_modes[$i]) ? strtolower(trim((string) $posted_modes[$i])) : '';
+
+            if ($family === null) {
+                $mode = 'new';                       // no family => always a new package
+            } elseif ($posted === 'new') {
+                $mode = 'new';                       // user chose to fork a new package
+            } else {
+                $mode = 'revision';                  // matched (default), or explicit 'revision'
+            }
+
+            $out[$i] = array(
+                'mode'        => $mode,
+                'has_match'   => $family !== null,
+                'base_code'   => $base,
+                'root_id'     => $family !== null ? (int) $family['root_id'] : 0,
+                'root_name'   => $family !== null ? (string) $family['root_name'] : '',
+                'target_code' => ($mode === 'revision' && $family !== null) ? (string) $family['next_code'] : '',
+            );
+        }
+
+        return $out;
     }
 }
 

@@ -35,6 +35,29 @@ $export_params = array_filter(array(
 $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) : '';
 ?>
 
+<style>
+    /* Keep the Package Name column a sensible width and stop long descriptions
+       from ballooning the row height. The full text stays available on hover. */
+    .costing-pkg-name-cell {
+        min-width: 220px;
+        max-width: 300px;
+        vertical-align: top;
+    }
+    .costing-pkg-name {
+        word-break: break-word;
+    }
+    .costing-pkg-desc {
+        margin-top: 4px;
+        font-size: 0.85rem;
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        word-break: break-word;
+    }
+</style>
+
 <div class="d-flex flex-column-fluid">
     <div class="container-fluid">
         <div class="card card-custom mb-5">
@@ -221,9 +244,11 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                 <?php foreach ($packages as $package) { ?>
                                     <tr>
                                         <td style="text-align:center; padding-top:15px; padding-bottom:15px;"><?php echo $count; ?></td>
-                                        <td>
-                                            <div class="font-weight-bold"><?php echo html_escape($package['name']); ?></div>
-                                            <div class="text-muted"><?php echo html_escape($package['description']); ?></div>
+                                        <td class="costing-pkg-name-cell">
+                                            <div class="font-weight-bold costing-pkg-name"><?php echo html_escape($package['name']); ?></div>
+                                            <?php if (!empty($package['description'])) { ?>
+                                                <div class="text-muted costing-pkg-desc" title="<?php echo html_escape($package['description']); ?>"><?php echo html_escape($package['description']); ?></div>
+                                            <?php } ?>
                                         </td>
                                         <td><?php echo !empty($package['customer_name']) ? html_escape($package['customer_name']) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['customer_contact']) ? html_escape($package['customer_contact']) : '-'; ?></td>
@@ -446,6 +471,9 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                 <div class="modal-body">
                     <div class="alert alert-light-primary" role="alert" style="border-left:4px solid #6082B6;">
                         Download <strong>Import Template</strong> first. Fill the <strong>Packages</strong> sheet (one package per row) and attach cost items, combinations, hotels and flights on the other sheets using the same <strong>Package Name</strong>. The <strong>Instructions</strong> sheet lists the valid category / currency codes.
+                    </div>
+                    <div class="alert alert-light-warning" role="alert" style="border-left:4px solid #b58100;">
+                        <strong>New revision?</strong> Use <strong>Export Excel</strong> on an existing package, edit it, and re-upload — rows whose <strong>Tour Code</strong> still matches are offered as a <strong>new revision</strong> of that package on the confirmation screen (you can switch any back to a new package).
                     </div>
                     <div class="form-group">
                         <label>Excel File <span class="text-danger">*</span></label>

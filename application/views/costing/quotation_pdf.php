@@ -42,7 +42,7 @@ $SalesPerson   = isset($package['sales_person']) && $package['sales_person'] !==
 $SalesPersonContact = isset($package['sales_person_contact']) ? trim((string) $package['sales_person_contact']) : '';
 // Quotation validity date ("Valid until"), set on the wizard's step 1. Blank = hidden.
 $ValidUntil = !empty($package['validity_date']) && strtotime($package['validity_date'])
-    ? date('Y-m-d', strtotime($package['validity_date']))
+    ? strtoupper(date('d M Y', strtotime($package['validity_date'])))
     : '';
 // Step 1 free-text description, shown under the Pricing per person table. Blank = hidden.
 $PackageDescription = isset($package['description']) ? trim((string) $package['description']) : '';
