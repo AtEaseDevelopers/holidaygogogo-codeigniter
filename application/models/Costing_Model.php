@@ -1899,6 +1899,15 @@ class Costing_Model extends CI_Model
             return false;
         }
 
+        // The itinerary rows FK back to costing_packages (ON DELETE CASCADE). If the
+        // parent package has gone — e.g. deleted in another tab while this wizard page
+        // stayed open — the delete/insert below would blow up on a 1452 FK violation
+        // and dump a raw DB error page. Bail gracefully so the controller flashes
+        // "Unable to save itinerary." instead.
+        if (!$this->db->where('id', $package_id)->count_all_results('costing_packages')) {
+            return false;
+        }
+
         $this->db->trans_start();
         $this->db->where('package_id', $package_id)->delete('costing_itinerary_days');
 
