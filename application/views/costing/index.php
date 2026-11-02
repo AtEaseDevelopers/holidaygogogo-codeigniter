@@ -56,18 +56,14 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
         overflow: hidden;
         word-break: break-word;
     }
-    /* Keep all action icons on a single row and give the column enough width
-       to hold them so none overflow the cell border. */
+    /* Action column now holds a single grouped dropdown (like the Booking
+       listing), so it only needs room for the toggle button. */
     table.table th.action,
     table.table td:last-child {
-        min-width: 260px;
         white-space: nowrap;
     }
-    .costing-action-buttons {
-        flex-wrap: nowrap;
-    }
-    .costing-action-buttons .btn {
-        flex: 0 0 auto;
+    .costing-action-buttons .dropdown-menu {
+        min-width: 180px;
     }
     .costing-action-buttons form {
         margin: 0;
@@ -324,34 +320,29 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                         <td style="text-align:center;"><?php echo !empty($package['validity_date']) ? date('Y-m-d', strtotime($package['validity_date'])) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['created_at']) ? date('d/m/Y H:i', strtotime($package['created_at'])) : 'N/A'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['updated_at']) ? date('d/m/Y H:i', strtotime($package['updated_at'])) : 'N/A'; ?></td>
-                                        <td>
-                                            <div class="d-flex align-items-center justify-content-center costing-action-buttons" style="gap:6px;">
-                                            <a href="<?php echo base_url('Costing/Package/' . (int) $package['id']); ?>" class="btn btn-icon btn-light-primary btn-sm" title="View Package">
-                                                <i class="la la-eye"></i>
-                                            </a>
-                                            <?php if (!empty($package['latest_quotation_token']) && strtolower((string) $package['status']) !== 'inactive') { ?>
-                                                <a href="<?php echo base_url('Costing/Quotation/' . $package['latest_quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-sm" title="Open Quotation PDF">
-                                                    <i class="la la-file-pdf"></i>
-                                                </a>
-                                            <?php } ?>
-                                            <form method="post" action="<?php echo base_url('Costing/Duplicate_Package'); ?>" class="d-inline duplicate-package-form">
-                                                <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
-                                                <button type="button" class="btn btn-icon btn-light-info btn-sm duplicate-package-button" data-name="<?php echo html_escape($package['name']); ?>" title="Duplicate Package">
-                                                    <i class="la la-copy"></i>
-                                                </button>
-                                            </form>
-                                            <form method="post" action="<?php echo base_url('Costing/Create_Revision'); ?>" class="d-inline revision-package-form">
-                                                <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
-                                                <button type="button" class="btn btn-icon btn-light-warning btn-sm revision-package-button" data-name="<?php echo html_escape($package['tour_code'] !== '' ? $package['tour_code'] : $package['name']); ?>" title="Create Revision">
-                                                    <i class="la la-code-branch"></i>
-                                                </button>
-                                            </form>
-                                            <form method="post" action="<?php echo base_url('Costing/Delete_Package'); ?>" class="d-inline delete-package-form">
-                                                <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
-                                                <button type="button" class="btn btn-icon btn-light-danger btn-sm delete-package-button" data-name="<?php echo html_escape($package['name']); ?>" title="Delete Package">
-                                                    <i class="la la-trash"></i>
-                                                </button>
-                                            </form>
+                                        <td class="text-center">
+                                            <div class="btn-group costing-action-buttons">
+                                                <button type="button" data-toggle="dropdown" data-boundary="window" class="btn btn-light-primary btn-sm dropdown-toggle" style="padding-left:3px;"></button>
+                                                <div class="dropdown-menu dropdown-menu-right">
+                                                    <a href="<?php echo base_url('Costing/Package/' . (int) $package['id']); ?>" class="dropdown-item" style="font-size:11px;">View Package</a>
+                                                    <?php if (!empty($package['latest_quotation_token']) && strtolower((string) $package['status']) !== 'inactive') { ?>
+                                                        <a href="<?php echo base_url('Costing/Quotation/' . $package['latest_quotation_token']); ?>" target="_blank" class="dropdown-item" style="font-size:11px;">Open Quotation PDF</a>
+                                                    <?php } ?>
+                                                    <div class="dropdown-divider"></div>
+                                                    <form method="post" action="<?php echo base_url('Costing/Duplicate_Package'); ?>" class="duplicate-package-form">
+                                                        <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
+                                                        <button type="button" class="dropdown-item duplicate-package-button" data-name="<?php echo html_escape($package['name']); ?>" style="font-size:11px;">Duplicate Package</button>
+                                                    </form>
+                                                    <form method="post" action="<?php echo base_url('Costing/Create_Revision'); ?>" class="revision-package-form">
+                                                        <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
+                                                        <button type="button" class="dropdown-item revision-package-button" data-name="<?php echo html_escape($package['tour_code'] !== '' ? $package['tour_code'] : $package['name']); ?>" style="font-size:11px;">Create Revision</button>
+                                                    </form>
+                                                    <div class="dropdown-divider"></div>
+                                                    <form method="post" action="<?php echo base_url('Costing/Delete_Package'); ?>" class="delete-package-form">
+                                                        <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
+                                                        <button type="button" class="dropdown-item delete-package-button" data-name="<?php echo html_escape($package['name']); ?>" style="color:#E37383; font-size:11px;">Delete Package</button>
+                                                    </form>
+                                                </div>
                                             </div>
                                         </td>
                                     </tr>

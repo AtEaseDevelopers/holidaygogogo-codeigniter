@@ -115,6 +115,41 @@ $positional = costing_import_sheet_to_records(array(
 check('positional: no header maps by position', 'Japan Spring', $positional[0]['package_name']);
 check('positional: 2nd cell -> combination', 'Option A', $positional[0]['combination']);
 
+/* ------------------------------------------- Template carries TOUR CODE column */
+
+// The downloadable template's Packages sheet must now expose a TOUR CODE column
+// (right after PACKAGE NAME) so a plain template can also target a revision
+// family, and its greyed sample row must stay column-aligned with the header.
+$tpl_sheets = costing_import_template_sheets(array(
+    'category_map' => array(), 'currency_codes' => array(), 'sales_names' => array(),
+));
+$tpl_packages = null;
+foreach ($tpl_sheets as $s) {
+    if (isset($s['title']) && $s['title'] === 'Packages') { $tpl_packages = $s; break; }
+}
+check_true('template: Packages sheet present', $tpl_packages !== null);
+$tpl_labels = $tpl_packages['labels'];
+check_true('template: TOUR CODE label present', in_array('TOUR CODE', $tpl_labels, true));
+$name_idx = array_search('PACKAGE NAME', $tpl_labels, true);
+$tc_idx   = array_search('TOUR CODE', $tpl_labels, true);
+check('template: TOUR CODE sits right after PACKAGE NAME', $name_idx + 1, $tc_idx);
+// A blank TOUR CODE cell is spliced in at the matching position, shifting every
+// following cell right by one (not overwriting a neighbour). Name stays at 0,
+// Tour Code is blank, and the original 2nd cell (customer name) moves to index 2.
+$tpl_sample = $tpl_packages['samples'][0];
+check('template: sample PACKAGE NAME preserved', 'Japan Spring 2027', $tpl_sample[$name_idx]);
+check('template: sample TOUR CODE cell blank (= new package)', '', $tpl_sample[$tc_idx]);
+check('template: following cell shifted right, not overwritten', 'Tan Family', $tpl_sample[$tc_idx + 1]);
+
+// A template-generated Packages header round-trips through the parser onto the
+// tour_code key (blank cell -> blank tour_code), proving header + parse agree.
+$tpl_parsed = costing_import_sheet_to_records(
+    array($tpl_labels, $tpl_sample),
+    costing_import_package_columns_with_tour_code()
+);
+check_true('template: parser yields tour_code key', array_key_exists('tour_code', $tpl_parsed[0]));
+check('template: blank sample -> blank tour_code', '', $tpl_parsed[0]['tour_code']);
+
 /* ----------------------------------------------------- Assemble: happy path */
 
 $parsed = array(

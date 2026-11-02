@@ -66,10 +66,10 @@ if (!function_exists('costing_import_package_columns_with_tour_code')) {
     /**
      * The Packages column map with a 'TOUR CODE' => 'tour_code' column inserted right
      * after Package Name — the PARSE-time map used when reading an uploaded Packages
-     * sheet, so an EXPORT's Tour Code (used to match an existing revision family) is
-     * captured. The plain template/sheet-meta map deliberately OMITS Tour Code, so the
-     * downloaded template layout is unchanged; header-aware parsing yields a blank
-     * tour_code when the column is absent (i.e. a plain template upload).
+     * sheet, so a Tour Code (used to match an existing revision family) is captured.
+     * Both the downloadable template and an EXPORT now carry this column; header-aware
+     * parsing still yields a blank tour_code when the column is absent (e.g. an older
+     * template), which simply means "create a new package".
      *
      * @return array label => record key.
      */
@@ -944,10 +944,27 @@ if (!function_exists('costing_import_template_sheets')) {
         $sheets = array();
         foreach (costing_import_sheets_meta() as $meta) {
             list($key, $title, $columns) = $meta;
+            $sheet_samples = isset($samples[$key]) ? $samples[$key] : array();
+            // The Packages sheet carries a TOUR CODE column (right after Package
+            // Name) so a plain template can also target an existing revision family:
+            // leave it blank to create a brand-new package, or fill it with an
+            // existing package's tour code to import as a new revision. Splice a
+            // blank Tour Code cell into each greyed sample row at the matching
+            // position so the sample stays column-aligned.
+            if ($key === 'packages') {
+                $columns = costing_import_package_columns_with_tour_code();
+                $pos = array_search('tour_code', array_values($columns), true);
+                if ($pos !== false) {
+                    foreach ($sheet_samples as &$row) {
+                        array_splice($row, $pos, 0, array(''));
+                    }
+                    unset($row);
+                }
+            }
             $sheets[] = array(
                 'title'   => $title,
                 'labels'  => array_keys($columns),
-                'samples' => isset($samples[$key]) ? $samples[$key] : array(),
+                'samples' => $sheet_samples,
             );
         }
         $sheets[] = array(
@@ -1008,6 +1025,7 @@ if (!function_exists('costing_import_instruction_rows')) {
         $rows[] = array('3.', 'A Cost Item with a COMBINATION joins that customer option; leave it blank for a plain internal cost line.');
         $rows[] = array('4.', 'Delete the grey sample rows before uploading. A package needs pax > 0; cost items are optional (a package with none still imports).');
         $rows[] = array('5.', 'Itinerary: one row per day. Set Day Number to order days; Meal Plan is comma-separated (e.g. Breakfast, Dinner). Package-level Notes & Terms go in the Packages sheet INCLUDE / EXCLUDE / IMPORTANT NOTES / TERMS & CONDITIONS columns (one bullet per line).');
+        $rows[] = array('6.', 'TOUR CODE (Packages sheet): leave BLANK to create a new package. To import a package as a NEW REVISION of an existing one, put that package\'s Tour Code here (base code, with or without a -REVnn suffix) — it is matched to the existing revision family and versioned automatically.');
         $rows[] = array('', '');
 
         $rows[] = array('REQUIRED FIELDS', '(blank/invalid = package skipped)');
