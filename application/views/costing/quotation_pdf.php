@@ -210,9 +210,13 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
     .small-font { font-size: 13px; }
     .red { color: #c0392b; }
     table.kv, table.data { width: 100%; border-collapse: collapse; }
-    table.kv td { border: 1px solid #444; padding: 5px 8px; font-size: 12px; vertical-align: top; }
+    /* break-word so CJK (Chinese) text wraps inside a cell. DomPDF's line-break
+       pattern only splits on whitespace/hyphens, and Chinese runs have neither, so
+       a whole sentence is one unbreakable "word" that overflows the cell/page edge
+       unless break-word lets it wrap between characters (verified multibyte-safe). */
+    table.kv td { border: 1px solid #444; padding: 5px 8px; font-size: 12px; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
     table.kv td.k { width: 26%; font-weight: bold; background: #f2f2f2; }
-    table.data th, table.data td { border: 1px solid #444; padding: 5px 8px; font-size: 12px; }
+    table.data th, table.data td { border: 1px solid #444; padding: 5px 8px; font-size: 12px; word-wrap: break-word; overflow-wrap: break-word; }
     table.data th { background: #d9d9d9; text-align: center; font-weight: bold; }
     .section-title { font-weight: bold; text-align: center; margin: 14px 0 6px 0; }
     .note-row td { background: #f7f7f7; font-style: italic; }
@@ -433,7 +437,9 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
              Details columns right, so days on later pages no longer lined up with
              days on the first. A single fixed-layout table keeps one column model
              across page breaks; page-break-inside:avoid on each <tr> keeps a day
-             from splitting mid-row. -->
+             from splitting mid-row. The content cells set word-wrap:break-word so
+             long Chinese (CJK) itinerary text — which has no spaces for DomPDF to
+             break on — wraps inside the column instead of overflowing the page. -->
         <table style="width:100%; table-layout:fixed; border-collapse:collapse;">
             <thead>
                 <tr style="font-weight:700; font-size:13px;">
@@ -451,8 +457,8 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
                 $meals = costing_meal_plan_labels(isset($day['meal_plan']) ? $day['meal_plan'] : ''); ?>
                 <tr style="vertical-align:baseline; font-size:11px; page-break-inside:avoid;">
                     <td style="padding:6px 5px;">Day <?php echo (int) $day['day_number']; ?></td>
-                    <td style="padding:6px 5px;"><strong><?php echo html_escape(isset($day['title']) ? $day['title'] : ''); ?></strong></td>
-                    <td style="padding:6px 5px;">
+                    <td style="padding:6px 5px; word-wrap:break-word; overflow-wrap:break-word;"><strong><?php echo html_escape(isset($day['title']) ? $day['title'] : ''); ?></strong></td>
+                    <td style="padding:6px 5px; word-wrap:break-word; overflow-wrap:break-word;">
                         <div><?php echo isset($day['description']) ? $day['description'] : ''; ?></div>
                         <?php if (!empty($meals)) { ?>
                             <div style="margin-top:4px;"><strong style="color:#2b3a55;">Meal Plan:</strong> <?php echo html_escape(implode(', ', $meals)); ?></div>
