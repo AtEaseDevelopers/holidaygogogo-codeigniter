@@ -200,6 +200,11 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
         font-size: 13px;
         padding-left: 10px;
         padding-right: 10px;
+        /* break-word is inherited, so this makes every rich-text block (tour intro,
+           footer notes, Notes & Terms) wrap long Chinese (CJK) runs — which have no
+           whitespace for DomPDF to break on — instead of overflowing the page edge. */
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
     h1 { font-size: 24px; text-align: center; margin-top: 0px; margin-bottom: 5px; }
     h3 { font-size: 16px; margin: 0px; margin-bottom: 5px; }
