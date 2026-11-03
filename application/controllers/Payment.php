@@ -1184,8 +1184,13 @@ class Payment extends MY_Controller
 					$payment->Date = strtoupper(date('j M Y', strtotime($payment->Date)));
 				}
 				$payment->ForeignCurrency = $payment->ForeignCurrency == 0.00 ? '' : $payment->ForeignCurrency;
-				$payment->Credit = $payment->Credit == 0.00 ? '' : $payment->Credit;
-				$payment->Debit = $payment->Credit == 0.00 ? $payment->Debit : '';
+				// A row is either a payment in (Credit) or a payment out (Debit).
+				// Decide both from the ORIGINAL Credit value before overwriting it —
+				// re-reading $payment->Credit after blanking breaks on PHP 8 where
+				// '' == 0.00 is false, which left PAYMENT OUT permanently empty.
+				$is_credit = $payment->Credit != 0.00;
+				$payment->Debit = $is_credit ? '' : $payment->Debit;
+				$payment->Credit = $is_credit ? $payment->Credit : '';
 				if(!empty($payment->Deadline)) {
 					$payment->Deadline = strtoupper(date('j M Y', strtotime($payment->Deadline)));
 				}
