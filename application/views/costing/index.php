@@ -144,11 +144,11 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                     <div class="form-group row mb-4">
                                         <div class="col-md-4">
                                             <label class="font-weight-bold">Search</label>
-                                            <input type="text" name="search" value="<?php echo html_escape($filter_search); ?>" class="form-control" placeholder="Package name, tour code or description">
+                                            <input type="text" name="search" value="<?php echo html_escape($filter_search); ?>" class="form-control" placeholder="Name, tour code, description, customer or sales person">
                                         </div>
                                         <div class="col-md-2">
                                             <label class="font-weight-bold">Tour Code</label>
-                                            <input type="text" name="tour_code" value="<?php echo html_escape($filter_tour_code); ?>" class="form-control" placeholder="Tour code">
+                                            <input type="text" name="tour_code" value="<?php echo html_escape($filter_tour_code); ?>" class="form-control" placeholder="Tour or related code">
                                         </div>
                                         <div class="col-md-2">
                                             <label class="font-weight-bold">Status</label>
@@ -251,6 +251,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                 <th style="text-align:center;">Sales Person</th>
                                 <th style="text-align:center;">OP Person</th>
                                 <th style="text-align:center;">Tour Code</th>
+                                <th style="text-align:center;">Related Tour Code</th>
                                 <th style="text-align:center;">Duration</th>
                                 <th style="text-align:center;">Status</th>
                                 <th style="text-align:center;">Validity</th>
@@ -262,7 +263,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                         <tbody>
                             <?php if (empty($packages)) { ?>
                                 <tr>
-                                    <td colspan="14" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
+                                    <td colspan="15" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
                                 </tr>
                             <?php } else { ?>
                                 <?php $count = 1; ?>
@@ -302,10 +303,16 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                                         <i class="la la-eye"></i>
                                                                     </a>
                                                                     <?php if (!empty($rev['quotation_token']) && strtolower((string) $rev['status']) !== 'inactive') { ?>
-                                                                        <a href="<?php echo base_url('Costing/Quotation/' . $rev['quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-xs" title="Open Quotation PDF">
+                                                                        <a href="<?php echo base_url('Costing/Quotation/' . $rev['quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-xs mr-1" title="Open Quotation PDF">
                                                                             <i class="la la-file-pdf"></i>
                                                                         </a>
                                                                     <?php } ?>
+                                                                    <form method="post" action="<?php echo base_url('Costing/Delete_Package'); ?>" class="delete-package-form d-inline">
+                                                                        <input type="hidden" name="package_id" value="<?php echo (int) $rev['id']; ?>">
+                                                                        <button type="button" class="btn btn-icon btn-light-danger btn-xs delete-package-button" data-name="<?php echo html_escape($rev['tour_code'] !== '' ? $rev['tour_code'] : $package['name']); ?>" title="Delete this version">
+                                                                            <i class="la la-trash"></i>
+                                                                        </button>
+                                                                    </form>
                                                                 </span>
                                                             </div>
                                                         <?php } ?>
@@ -313,6 +320,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                 </div>
                                             <?php } ?>
                                         </td>
+                                        <td style="text-align:center;"><?php echo !empty($package['related_tour_code']) ? html_escape($package['related_tour_code']) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo (int) $package['duration_days']; ?>D / <?php echo (int) $package['duration_nights']; ?>N</td>
                                         <td style="text-align:center;">
                                             <span class="label label-lg label-light-primary label-inline"><?php echo html_escape($package['status_label']); ?></span>
@@ -380,8 +388,8 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                 });
 
                 swalWithBootstrapButtons.fire({
-                    title: 'Delete Package: ' + packageName + '?',
-                    text: 'This will delete the package and all related costing records.',
+                    title: 'Delete: ' + packageName + '?',
+                    text: 'This hides it from the listing and disables its quotation link. The costing records are kept and can be restored from the database.',
                     icon: 'warning',
                     showCancelButton: true,
                     confirmButtonText: 'Yes, Delete',

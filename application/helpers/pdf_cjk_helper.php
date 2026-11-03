@@ -40,6 +40,36 @@ if ( ! function_exists('pdf_cjk_font_path')) {
     }
 }
 
+if ( ! function_exists('pdf_cjk_bold_font_path')) {
+    /**
+     * Absolute path to a *bold* CJK TrueType font, or '' when none is available.
+     *
+     * DroidSansFallback.ttf (the normal CJK face) ships in a single weight, so
+     * registering it for the "cjk" bold slot made bold Chinese render at regular
+     * weight — while the surrounding English bold used a real Helvetica-Bold, so
+     * Chinese looked lighter than the English it sat beside. We bundle a genuine
+     * bold CJK face (Noto Sans SC Bold, the modern successor to Droid Sans, subset
+     * to DroidSansFallback's coverage) and register it for the bold weight so bold
+     * Chinese matches bold English.
+     *
+     * Prefers the configured COMPETITOR_PDF_CJK_BOLD_FONT, else the bundled
+     * NotoSansSC-Bold.ttf. Must be a .ttf (DomPDF mis-renders .ttc collections).
+     */
+    function pdf_cjk_bold_font_path()
+    {
+        $paths = array(
+            trim((string) get_env('COMPETITOR_PDF_CJK_BOLD_FONT')),
+            FCPATH . 'assets/fonts/pdf/NotoSansSC-Bold.ttf',
+        );
+        foreach ($paths as $path) {
+            if ($path !== '' && is_file($path) && is_readable($path) && strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'ttf') {
+                return $path;
+            }
+        }
+        return '';
+    }
+}
+
 if ( ! function_exists('pdf_cjk_font_family')) {
     /**
      * Prepend the registered "cjk" family to a base CSS font-family list when a
@@ -130,8 +160,12 @@ if ( ! function_exists('pdf_cjk_make_dompdf')) {
     {
         require_once APPPATH . 'libraries/dompdf/autoload.inc.php';
 
-        $cjk_font = pdf_cjk_font_path();
-        $use_cjk  = ($cjk_font !== '');
+        $cjk_font  = pdf_cjk_font_path();
+        $use_cjk   = ($cjk_font !== '');
+        // Genuine bold face for the "cjk" bold slot; fall back to the normal face
+        // (legacy behaviour — bold renders at regular weight) when unavailable.
+        $bold_font = $use_cjk ? pdf_cjk_bold_font_path() : '';
+        if ($bold_font === '') { $bold_font = $cjk_font; }
 
         $options = new \Dompdf\Options();
         $options->setIsRemoteEnabled(true);
@@ -139,15 +173,18 @@ if ( ! function_exists('pdf_cjk_make_dompdf')) {
         if ($use_cjk) {
             // Namespace the (writable) font cache per font file so switching the
             // configured font never mixes stale glyph metrics from a previous one.
-            $font_dir = APPPATH . 'cache/dompdf_fonts/' . md5($cjk_font) . '/';
+            // Keyed by both faces so adding/swapping the bold font busts the cache.
+            $font_dir = APPPATH . 'cache/dompdf_fonts/' . md5($cjk_font . '|' . $bold_font) . '/';
             if ( ! is_dir($font_dir)) { @mkdir($font_dir, 0755, true); }
             $options->setFontDir($font_dir);
             $options->setFontCache($font_dir);
             // registerFont resolves symlinks (e.g. /Library/Fonts → /System/...), so
             // the REAL directory must be in the chroot or the font silently won't load.
-            $real = realpath($cjk_font);
+            $real      = realpath($cjk_font);
+            $real_bold = realpath($bold_font);
             $options->setChroot(array_values(array_filter(array(
-                FCPATH, APPPATH, dirname($cjk_font), $real ? dirname($real) : null
+                FCPATH, APPPATH, dirname($cjk_font), dirname($bold_font),
+                $real ? dirname($real) : null, $real_bold ? dirname($real_bold) : null
             ))));
         }
 
@@ -155,7 +192,7 @@ if ( ! function_exists('pdf_cjk_make_dompdf')) {
         if ($use_cjk) {
             $fm = $dompdf->getFontMetrics();
             $fm->registerFont(array('family' => 'cjk', 'style' => 'normal', 'weight' => 'normal'), $cjk_font);
-            $fm->registerFont(array('family' => 'cjk', 'style' => 'normal', 'weight' => 'bold'), $cjk_font);
+            $fm->registerFont(array('family' => 'cjk', 'style' => 'normal', 'weight' => 'bold'), $bold_font);
         }
         return $dompdf;
     }

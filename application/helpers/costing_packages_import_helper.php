@@ -930,6 +930,30 @@ if (!function_exists('costing_import_revision_decisions')) {
     }
 }
 
+if (!function_exists('costing_import_revision_name')) {
+    /**
+     * Pick the package name an import-as-revision should save.
+     *
+     * Unlike the "Create Revision" button (which supplies no name, so the family's
+     * base name is retained), an Excel import carries an explicit PACKAGE NAME the
+     * user may have updated — so the imported name wins. Only when the imported cell
+     * is blank do we fall back to the existing root package's name, so a revision is
+     * never left nameless.
+     *
+     * Guards the bug where importing a renamed revision silently inherited the old
+     * (sometimes corrupted) family name instead of the name typed in the spreadsheet.
+     *
+     * @param string $imported_name PACKAGE NAME from the uploaded row.
+     * @param string $root_name     existing family root's name (fallback).
+     * @return string the name to persist (trimmed).
+     */
+    function costing_import_revision_name($imported_name, $root_name)
+    {
+        $imported = trim((string) $imported_name);
+        return $imported !== '' ? $imported : trim((string) $root_name);
+    }
+}
+
 /* ------------------------------------------------------------ Template stream */
 
 if (!function_exists('costing_import_template_sheets')) {

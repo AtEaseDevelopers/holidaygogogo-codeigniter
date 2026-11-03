@@ -7,8 +7,9 @@
  *   - costing_quotation_token_is_valid(): the URL is addressed by the unguessable
  *     32-char md5 quotation_token, NOT the sequential package id, so a guessed/
  *     enumerated id (e.g. "15") must never be accepted as a token.
- *   - costing_quotation_status_accessible(): an 'inactive' package's quotation is
- *     no longer served (404); everything else stays accessible.
+ *   - costing_quotation_status_accessible(): an 'inactive' (manually hidden) or
+ *     'deleted' (soft-deleted) package's quotation is no longer served (404);
+ *     everything else stays accessible.
  */
 
 if (!defined('BASEPATH')) {
@@ -32,7 +33,7 @@ $assertions['token reject long']   = costing_quotation_token_is_valid(str_repeat
 $assertions['token reject upper']  = costing_quotation_token_is_valid(strtoupper($valid)) === false;
 $assertions['token reject nonhex'] = costing_quotation_token_is_valid(str_repeat('g', 32)) === false;
 
-// --- status gate: only explicit 'inactive' blocks ------------------------------
+// --- status gate: 'inactive' and 'deleted' block; everything else accessible ---
 $assertions['status active']        = costing_quotation_status_accessible('active') === true;
 $assertions['status active pad']    = costing_quotation_status_accessible('  ACTIVE  ') === true;
 $assertions['status unknown']       = costing_quotation_status_accessible('draft') === true;
@@ -40,6 +41,9 @@ $assertions['status blank']         = costing_quotation_status_accessible('') ==
 $assertions['status null']          = costing_quotation_status_accessible(null) === true;
 $assertions['status inactive']      = costing_quotation_status_accessible('inactive') === false;
 $assertions['status inactive case'] = costing_quotation_status_accessible('Inactive ') === false;
+$assertions['status deleted']       = costing_quotation_status_accessible('deleted') === false;
+$assertions['status deleted pad']   = costing_quotation_status_accessible(' DELETED ') === false;
+$assertions['status deleted case']  = costing_quotation_status_accessible('Deleted') === false;
 
 $failed = 0;
 foreach ($assertions as $label => $ok) {

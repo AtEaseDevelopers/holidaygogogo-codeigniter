@@ -32,15 +32,47 @@ class Costing_Model extends CI_Model
     {
         $where = array();
 
+        // Soft-deleted packages never surface anywhere this builder feeds — the
+        // dashboard listing and the Excel export both call it. Unconditional, so
+        // it holds regardless of the active/inactive status dropdown filter.
+        $where[] = "cp.status != 'deleted'";
+
+        // Free-text search box: broad, token-based match (whitespace splits
+        // into tokens; each token must hit at least one column) across every
+        // meaningful column — package name/tour code/description PLUS the
+        // customer name/contact/email and the sales person's name — so a
+        // customer like "Mr. Anthony" is findable from the single Search box.
+        // sales_admin.Name is joined by both the dashboard and export queries.
+        $this->load->helper('costing_package_search');
         $search = isset($filters['search']) ? trim((string) $filters['search']) : '';
         if ($search !== '') {
-            $like = $this->db->escape_like_str($search);
-            $where[] = "(cp.name LIKE '%" . $like . "%' OR cp.tour_code LIKE '%" . $like . "%' OR cp.description LIKE '%" . $like . "%')";
+            $search_clause = costing_package_search_clause(
+                $search,
+                array(
+                    'cp.name',
+                    'cp.tour_code',
+                    'cp.related_tour_code',
+                    'cp.description',
+                    'cp.customer_name',
+                    'cp.customer_contact',
+                    'cp.customer_email',
+                    'sales_admin.Name',
+                ),
+                array($this->db, 'escape_like_str')
+            );
+            if ($search_clause !== '') {
+                $where[] = '(' . $search_clause . ')';
+            }
         }
 
+        // The Tour Code filter cross-matches BOTH the auto tour_code AND the
+        // manually keyed related_tour_code, so typing one code surfaces that
+        // package plus every package that lists it as a related tour code — the
+        // whole related group in one result set.
         $tour_code = isset($filters['tour_code']) ? trim((string) $filters['tour_code']) : '';
         if ($tour_code !== '') {
-            $where[] = "cp.tour_code LIKE '%" . $this->db->escape_like_str($tour_code) . "%'";
+            $like = $this->db->escape_like_str($tour_code);
+            $where[] = "(cp.tour_code LIKE '%" . $like . "%' OR cp.related_tour_code LIKE '%" . $like . "%')";
         }
 
         $status = isset($filters['status']) ? trim((string) $filters['status']) : '';
@@ -117,6 +149,7 @@ class Costing_Model extends CI_Model
                 cp.op_admin_id,
                 op_admin.Name AS op_admin_name,
                 cp.tour_code,
+                cp.related_tour_code,
                 cp.revision_root_id,
                 cp.revision_number,
                 cp.duration_days,
@@ -746,6 +779,11 @@ class Costing_Model extends CI_Model
             'duration_nights' => max(0, (int) $package['duration_nights']),
             'description' => trim((string) $package['description']),
             'status' => $this->Normalize_Status($package['status']),
+            // Manually keyed code linking this package to a related one. Unlike the
+            // auto tour_code, this is editable on BOTH create and edit. NULL when blank.
+            'related_tour_code' => (isset($package['related_tour_code']) && trim((string) $package['related_tour_code']) !== '')
+                ? trim((string) $package['related_tour_code'])
+                : null,
         );
 
         if ($data['name'] === '') {
@@ -926,39 +964,30 @@ class Costing_Model extends CI_Model
         return costing_tour_code_next($existing, $period);
     }
 
-    public function Delete_Package($package_id)
+    /**
+     * Soft-delete a costing package: flag status='deleted' and stamp the audit
+     * columns (who/when). The package then disappears from the listing, the
+     * Excel export (both filter out status='deleted' via Build_Package_Filter_Where)
+     * and its public quotation URL (costing_quotation_status_accessible), but
+     * every row — bookings/items/financials/combinations/quotation token — is
+     * kept intact and recoverable via the DB. No in-app restore UI.
+     */
+    public function Delete_Package($package_id, $deleted_by = 0)
     {
         $package_id = (int) $package_id;
         if ($package_id <= 0 || !$this->Read_Package($package_id)) {
             return false;
         }
 
-        $booking_ids = array();
-        $booking_rows = $this->db
-            ->select('id')
-            ->where('package_id', $package_id)
-            ->get('costing_bookings')
-            ->result_array();
+        $now = date('Y-m-d H:i:s');
+        $this->db->where('id', $package_id)->update('costing_packages', array(
+            'status'     => 'deleted',
+            'deleted_at' => $now,
+            'deleted_by' => ((int) $deleted_by > 0) ? (int) $deleted_by : null,
+            'updated_at' => $now,
+        ));
 
-        foreach ($booking_rows as $booking_row) {
-            $booking_ids[] = (int) $booking_row['id'];
-        }
-
-        $this->db->trans_start();
-
-        if (!empty($booking_ids)) {
-            $this->db->where_in('booking_id', $booking_ids)->delete('costing_booking_financials');
-            $this->db->where_in('booking_id', $booking_ids)->delete('costing_booking_items');
-            $this->db->where_in('costing_booking_id', $booking_ids)->delete('costing_combinations');
-        }
-
-        $this->db->where('package_id', $package_id)->delete('costing_bookings');
-        $this->db->where('package_id', $package_id)->delete('costing_package_items');
-        $this->db->where('id', $package_id)->delete('costing_packages');
-
-        $this->db->trans_complete();
-
-        return (bool) $this->db->trans_status();
+        return $this->db->affected_rows() >= 0;
     }
 
     /**
@@ -1173,8 +1202,15 @@ class Costing_Model extends CI_Model
 
         $save_package = (array) $pkg['save_package'];
         $save_package['op_admin_id'] = (int) $op_admin_id;
-        // A revision keeps the family's base package name (mirrors Create_Revision).
-        $save_package['name'] = trim((string) $state['root']['name']);
+        // Unlike the "Create Revision" button (which supplies no name, so it keeps
+        // the family's base name), an Excel import carries an explicit PACKAGE NAME
+        // the user may have updated — honour it, falling back to the root's name
+        // only when the imported cell is blank.
+        $this->load->helper('costing_packages_import');
+        $save_package['name'] = costing_import_revision_name(
+            isset($save_package['name']) ? $save_package['name'] : '',
+            isset($state['root']['name']) ? $state['root']['name'] : ''
+        );
         $package_id = $this->Save_Package($save_package);
         if ($package_id > 0) {
             // Save_Package mints a throwaway monthly code on insert; overwrite it with

@@ -417,7 +417,9 @@ class Costing extends MY_Controller
 
         $array = $this->Costing_Model->Read_Package_Workspace_Data($package_id, $existing_booking_id, 'MYR', $force_new_snapshot);
 
-        if (empty($array['package']['id'])) {
+        // A soft-deleted package is hidden from the listing, so there's no link to
+        // it — but refuse a direct URL too, so it can't be opened or edited.
+        if (empty($array['package']['id']) || strtolower((string) $array['package']['status']) === 'deleted') {
             $this->session->set_flashdata('message_error', 'Costing package not found.');
             redirect('Costing');
             return;
@@ -469,6 +471,7 @@ class Costing extends MY_Controller
             'customer_email' => $this->input->post('customer_email'),
             'sales_admin_id' => $this->input->post('sales_admin_id'),
             'sales_admin_mobile' => $this->input->post('sales_admin_mobile'),
+            'related_tour_code' => $this->input->post('related_tour_code'),
             // OP person = whoever creates the package. Stamped from the logged-in
             // admin on insert only; the model preserves it untouched on edit.
             'op_admin_id' => (int) $this->session->userdata('admin_id'),
@@ -529,7 +532,7 @@ class Costing extends MY_Controller
     {
         $package_id = (int) $this->input->post('package_id');
         if ($package_id > 0) {
-            $success = $this->Costing_Model->Delete_Package($package_id);
+            $success = $this->Costing_Model->Delete_Package($package_id, (int) $this->session->userdata('admin_id'));
             $this->session->set_flashdata($success ? 'message_success' : 'message_error', $success
                 ? 'Package deleted successfully.'
                 : 'Unable to delete package.');

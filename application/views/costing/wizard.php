@@ -35,6 +35,7 @@ $sales_agents = isset($sales_agents) ? $sales_agents : array();
 $sales_admin_id = isset($package['sales_admin_id']) ? (int) $package['sales_admin_id'] : 0;
 $sales_admin_mobile = isset($package['sales_admin_mobile']) ? (string) $package['sales_admin_mobile'] : '';
 $op_admin_name = isset($package['op_admin_name']) ? trim((string) $package['op_admin_name']) : '';
+$related_tour_code = isset($package['related_tour_code']) ? trim((string) $package['related_tour_code']) : '';
 $validity_date = !empty($package['validity_date']) && strtotime($package['validity_date']) ? date('Y-m-d', strtotime($package['validity_date'])) : '';
 
 // Multiplier options for the per-row picker in the cost template. Each row copies
@@ -277,6 +278,15 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
                             <label>Validity Date</label>
                             <input type="date" name="validity_date" class="form-control" value="<?php echo html_escape($validity_date); ?>">
                             <span class="form-text text-muted" style="font-size:11px;">Quotation is valid until this date; printed on the PDF.</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="form-group">
+                            <label>Related Tour Code</label>
+                            <input type="text" name="related_tour_code" class="form-control" value="<?php echo html_escape($related_tour_code); ?>" placeholder="e.g. QU-2611-0001">
+                            <span class="form-text text-muted" style="font-size:11px;">Link this package to a related tour code. Filtering by either code shows the whole related group. Internal use only — not shown on the PDF.</span>
                         </div>
                     </div>
                 </div>

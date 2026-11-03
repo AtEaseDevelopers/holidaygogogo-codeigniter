@@ -19,6 +19,10 @@
  *       * a 'revision' choice with no matching family => 'new' (can't revise what
  *         does not exist);
  *       * a -REVnn code resolves to its base and still matches the family.
+ *   - costing_import_revision_name(): an import-as-revision SAVES the imported
+ *     PACKAGE NAME (user may have renamed it), falling back to the family root's
+ *     name only when the imported cell is blank/whitespace. Guards the bug where a
+ *     renamed revision silently inherited the old (corrupted) family name.
  *
  * Runs without a DB or PhpSpreadsheet.
  */
@@ -167,6 +171,40 @@ $d = costing_import_revision_decisions($pkgs, $families, array(0 => 'revision', 
 check('multi[0]: revision', 'revision', $d[0]['mode']);
 check('multi[1]: new', 'new', $d[1]['mode']);
 check('multi[2]: flipped new', 'new', $d[2]['mode']);
+
+/* --------------------------------- Revision name: imported PACKAGE NAME wins */
+// Regression guard: an import-as-revision must SAVE the name from the uploaded
+// Packages sheet (the user may have renamed it), NOT silently inherit the old
+// family name. This was the bug behind pkg 82 keeping pkg 80's corrupted name.
+
+check(
+    'revision name: imported name wins over root',
+    'Guangzhou Warisan Xiguan & Pelayaran Malam 4H3M Makanan Halal - Mr Lee',
+    costing_import_revision_name(
+        'Guangzhou Warisan Xiguan & Pelayaran Malam 4H3M Makanan Halal - Mr Lee',
+        '??????·???? ????4?3? - Mr Lee'            // old corrupted family name
+    )
+);
+check(
+    'revision name: blank import falls back to root',
+    'Japan Spring',
+    costing_import_revision_name('', 'Japan Spring')
+);
+check(
+    'revision name: whitespace-only import falls back to root',
+    'Japan Spring',
+    costing_import_revision_name('   ', 'Japan Spring')
+);
+check(
+    'revision name: imported name is trimmed',
+    'Bali Escape',
+    costing_import_revision_name('  Bali Escape  ', 'Old Name')
+);
+check(
+    'revision name: multibyte imported name preserved',
+    '广州西关·游船4天3晚 - Mr Lee',
+    costing_import_revision_name('广州西关·游船4天3晚 - Mr Lee', 'Old Name')
+);
 
 echo $failures === 0 ? "\nALL PASS\n" : "\n{$failures} FAILURE(S)\n";
 exit($failures === 0 ? 0 : 1);

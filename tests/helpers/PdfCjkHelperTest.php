@@ -9,6 +9,8 @@
  *
  * Covers the pure path/string logic only (does NOT construct a DomPDF instance):
  *  - pdf_cjk_font_path() resolves to an existing .ttf (the bundled font is committed).
+ *  - pdf_cjk_bold_font_path() resolves to the bundled bold .ttf (so bold Chinese
+ *    renders at a genuine bold weight instead of the regular face).
  *  - pdf_cjk_font_family() prepends the "cjk" family when a font is available.
  */
 
@@ -36,6 +38,18 @@ $assertions['font path is a real file'] = $path !== '' && is_file($path);
 // The bundled fallback must exist regardless of any .env override.
 $bundled = FCPATH . 'assets/fonts/pdf/DroidSansFallback.ttf';
 $assertions['bundled DroidSansFallback.ttf exists'] = is_file($bundled);
+
+// --- pdf_cjk_bold_font_path() --------------------------------------------------
+// A genuine bold CJK face is bundled so bold Chinese matches bold English (the
+// regular DroidSansFallback has no bold weight).
+$boldPath = pdf_cjk_bold_font_path();
+$assertions['bold font path is non-empty']   = $boldPath !== '';
+$assertions['bold font path is a .ttf']       = strtolower(pathinfo($boldPath, PATHINFO_EXTENSION)) === 'ttf';
+$assertions['bold font path is a real file']  = $boldPath !== '' && is_file($boldPath);
+$assertions['bold font differs from regular'] = $boldPath !== '' && $boldPath !== $path;
+
+$bundledBold = FCPATH . 'assets/fonts/pdf/NotoSansSC-Bold.ttf';
+$assertions['bundled NotoSansSC-Bold.ttf exists'] = is_file($bundledBold);
 
 // --- pdf_cjk_font_family() -----------------------------------------------------
 // A font IS available (bundled), so the family list is prepended with "cjk".

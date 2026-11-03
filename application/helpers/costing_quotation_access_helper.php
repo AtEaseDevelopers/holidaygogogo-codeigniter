@@ -26,12 +26,13 @@ if (!function_exists('costing_quotation_token_is_valid')) {
 if (!function_exists('costing_quotation_status_accessible')) {
     /**
      * Whether a package status allows its quotation to be served publicly.
-     * Mirrors Costing_Model::Normalize_Status() (lowercase + trim). Only an explicit
-     * 'inactive' blocks access; unknown/blank falls back to accessible ('active').
+     * Mirrors Costing_Model::Normalize_Status() (lowercase + trim). An explicit
+     * 'inactive' (manually hidden) or 'deleted' (soft-deleted) blocks access and
+     * 404s the URL; unknown/blank falls back to accessible ('active').
      */
     function costing_quotation_status_accessible($status)
     {
         $status = strtolower(trim((string) $status));
-        return $status !== 'inactive';
+        return !in_array($status, array('inactive', 'deleted'), true);
     }
 }
