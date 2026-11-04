@@ -49,6 +49,7 @@ class Manual_Leads extends MY_Controller
 		$data['list_base']      = 'Manual_Leads';
 		$data['page_title']     = 'Manual Leads Records';
 		$data['admins']         = $this->Booking_Model->Read_Admins();
+		$data['booking_op_admins'] = $this->Booking_Model->Read_Booking_OP_Admins();
 		$data['sources']        = $this->Booking_Model->Read_Sources();
 		$data['manual_sources'] = $this->Guests_Model->Read_Distinct_Ghl_Sources();
 		$data['destinations']   = $this->Booking_Model->Read_Categories();
@@ -103,6 +104,7 @@ class Manual_Leads extends MY_Controller
 
 		$prepared = ghl_manual_lead_prepare($this->input->post(), $uid, $now, $created_by, true);
 
+		$this->Validate_Lead_Assignees($prepared);
 		if (!$prepared['ok']) {
 			$this->session->set_flashdata('ghl_lead_error', implode(' ', $prepared['errors']));
 			redirect(base_url('Manual_Leads'));
@@ -176,6 +178,30 @@ class Manual_Leads extends MY_Controller
 		$this->Guests_Model->Add_Lead_Status_Log($dedup_key, substr((string) $now, 0, 10), $st['value'], '', $created_by);
 	}
 
+	private function Validate_Lead_Assignees(&$prepared, $existing = null)
+	{
+		if (!$prepared['ok']) { return; }
+		$lists = array(
+			'sales_person_id' => $this->Booking_Model->Read_Admins(),
+			'op_id' => $this->Booking_Model->Read_Booking_OP_Admins(),
+		);
+		foreach ($lists as $field => $users) {
+			$id = $prepared['row'][$field];
+			if ($id === null || ($existing && (int) $existing->$field === $id)) { continue; }
+			$allowed = false;
+			foreach ($users as $user) {
+				if ((int) $user->AdminID === $id && (!isset($user->Status) || $user->Status === 'Y')) {
+					$allowed = true;
+					break;
+				}
+			}
+			if (!$allowed) {
+				$prepared['ok'] = false;
+				$prepared['errors'][] = 'Please select a valid ' . ($field === 'op_id' ? 'OP' : 'Sales Person') . '.';
+			}
+		}
+	}
+
 	/**
 	 * Update an existing hand-entered ("Manual") lead from the Edit Lead modal
 	 * (the same form as Create, in edit mode). POST dedup_key + the lead fields.
@@ -212,6 +238,7 @@ class Manual_Leads extends MY_Controller
 		// so passing the empty uid / null creator here is harmless.
 		$now = date('Y-m-d H:i:s');
 		$prepared = ghl_manual_lead_prepare($this->input->post(), '', $now, null, true);
+		$this->Validate_Lead_Assignees($prepared, isset($existing) ? $existing : null);
 		if (!$prepared['ok']) {
 			$this->session->set_flashdata('ghl_lead_error', implode(' ', $prepared['errors']));
 			redirect(base_url('Manual_Leads'));
@@ -252,8 +279,15 @@ class Manual_Leads extends MY_Controller
 
 		return $out(array('ok' => true, 'lead' => array(
 			'first_name'    => $row->first_name,
+			'sales_person_name' => $row->SalesPersonName,
+			'op_name' => $row->OpName,
 			'last_name'     => $row->last_name,
 			'company_name'  => $row->company_name,
+			'travel_date' => $row->travel_date,
+			'sales_person_id' => $row->sales_person_id,
+			'op_id' => $row->op_id,
+			'destination' => $row->destination,
+			'potential_sales_amount' => $row->potential_sales_amount,
 			'phone'         => $row->phone,
 			'email'         => $row->email,
 			'address'       => $row->address,
@@ -315,7 +349,14 @@ class Manual_Leads extends MY_Controller
 
 		return $out(array('ok' => true, 'lead' => array(
 			'name'          => $name,
+			'sales_person_name' => $row->SalesPersonName,
+			'op_name' => $row->OpName,
 			'company_name'  => $row->company_name,
+			'travel_date' => $row->travel_date,
+			'sales_person_id' => $row->sales_person_id,
+			'op_id' => $row->op_id,
+			'destination' => $row->destination,
+			'potential_sales_amount' => $row->potential_sales_amount,
 			'phone'         => $row->phone,
 			'email'         => $row->email,
 			'address'       => $row->address,

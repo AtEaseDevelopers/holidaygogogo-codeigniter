@@ -23,7 +23,7 @@ function assert_eq($label, $expected, $actual) {
     }
 }
 
-assert_eq('client types', array('HRDC', 'Meeting', 'Incentive', 'Conference', 'Expo', 'Leisure'), ghl_manual_lead_client_types());
+assert_eq('client types', array('HRDC', 'Meeting', 'Incentive', 'Conference', 'Expo', 'Leisure', 'Company trip'), ghl_manual_lead_client_types());
 
 $pax = ghl_manual_lead_pax_options();
 assert_eq('pax count', 11, count($pax));

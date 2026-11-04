@@ -38,10 +38,29 @@ $assertions['manual + ghl have DOB']       = in_array('DATE OF BIRTH', $manual_h
 // Manual export is a FULL field dump: it carries all the extra columns the slim
 // GHL Leads export omits (email, company, notes, current status + status updates…).
 $assertions['manual full-dump cols']       = in_array('EMAIL', $manual_headers, true) && in_array('COMPANY NAME', $manual_headers, true)
-	&& in_array('CURRENT STATUS', $manual_headers, true) && in_array('LEAD STATUS UPDATES', $manual_headers, true)
-	&& in_array('NOTES', $manual_headers, true) && in_array('CREATED BY', $manual_headers, true) && in_array('CREATED AT', $manual_headers, true);
+	&& in_array('LEAD STATUS', $manual_headers, true) && in_array('LEAD STATUS UPDATES', $manual_headers, true)
+	&& in_array('NOTES', $manual_headers, true) && in_array('CREATED BY', $manual_headers, true) && in_array('CREATED DATE', $manual_headers, true);
 $assertions['ghl has no EMAIL column']     = !in_array('EMAIL', $ghl_headers, true);
 $assertions['unknown mode -> guest cols']  = array_column(guest_list_export_columns('whatever'), 0) === $guest_headers;
+
+// Manual export starts with the requested summary and full history.
+$assertions['manual summary order'] = array_slice($manual_headers, 0, 9) === array(
+    'NO.', 'CREATED DATE', 'GUEST NAME', 'COMPANY NAME', 'CLIENT TYPE',
+    'LEAD STATUS', 'STATUS DATE', 'CREATED BY', 'LEAD STATUS UPDATES',
+);
+$manual_row = (object) array(
+    'Name' => 'Ali', 'Company' => 'Example Sdn Bhd', 'ClientType' => 'HRDC',
+    'LeadStatus' => 'Follow Up', 'LeadStatusDate' => '2026-08-12', 'CreatedBy' => 'Sara',
+    'CreatedAt' => '2026-08-10 14:30:00',
+    'StatusUpdates' => "2026-08-10 New\n2026-08-12 Follow Up (called)",
+);
+$manual_mx = guest_list_export_matrix(array($manual_row, $manual_row), 'manual');
+$assertions['manual sequential numbers'] = $manual_mx['rows'][0][0] === '1' && $manual_mx['rows'][1][0] === '2';
+$assertions['manual summary values'] = array_slice($manual_mx['rows'][0], 2, 7) === array(
+    'Ali', 'Example Sdn Bhd', 'HRDC', 'Follow Up', '12 Aug 2026', 'Sara', $manual_row->StatusUpdates,
+);
+$assertions['manual blank status date'] = guest_list_export_cell((object) array('LeadStatusDate' => '0000-00-00'), 'LeadStatusDate') === '';
+$assertions['manual matrix width'] = count($manual_mx['rows'][0]) === count($manual_headers);
 
 // ---- phone cell: merged multi-number row -------------------------------
 $multi = (object) array('ContactNumbers' => '+60' . $US . '0169546738' . $RS . '+60' . $US . '0198887777');

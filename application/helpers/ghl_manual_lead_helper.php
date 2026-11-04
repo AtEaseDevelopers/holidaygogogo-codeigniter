@@ -95,6 +95,17 @@ function ghl_manual_lead_prepare($post, $uid, $now, $created_by = null, $require
         $errors[] = 'Date of birth is not a valid date.';
     }
 
+    $travel_raw = $get('travel_date');
+    $travel_date = ghl_manual_lead_normalize_dob($travel_raw);
+    if ($travel_raw !== '' && $travel_date === null) {
+        $errors[] = 'Travel date is not a valid date.';
+    }
+    foreach (array('sales_person_id', 'op_id') as $field) {
+        if ($get($field) !== '' && (!ctype_digit($get($field)) || (int) $get($field) < 1)) {
+            $errors[] = 'Please select a valid ' . ($field === 'op_id' ? 'OP' : 'Sales Person') . '.';
+        }
+    }
+
     $gender = ghl_manual_lead_normalize_gender($gender);
 
     $tags_json = ghl_manual_lead_encode_tags($tags_raw);
@@ -125,6 +136,11 @@ function ghl_manual_lead_prepare($post, $uid, $now, $created_by = null, $require
         'number_of_pax' => $number_of_pax !== '' ? $number_of_pax : null,
         'client_type'   => $client_type !== '' ? $client_type : null,
         'state'         => $state !== '' ? $state : null,
+        'travel_date' => $travel_date,
+        'sales_person_id' => $get('sales_person_id') !== '' ? (int) $get('sales_person_id') : null,
+        'op_id' => $get('op_id') !== '' ? (int) $get('op_id') : null,
+        'destination' => $get('destination') !== '' ? $get('destination') : null,
+        'potential_sales_amount' => $get('potential_sales_amount') !== '' ? $get('potential_sales_amount') : null,
         'date_of_birth' => $dob,
         'tags_json'     => $tags_json,
         'date_added'    => $now,
@@ -258,7 +274,7 @@ function ghl_manual_lead_import_columns()
  */
 function ghl_manual_lead_client_types()
 {
-    return array('HRDC', 'Meeting', 'Incentive', 'Conference', 'Expo', 'Leisure');
+    return array('HRDC', 'Meeting', 'Incentive', 'Conference', 'Expo', 'Leisure', 'Company trip');
 }
 
 /**

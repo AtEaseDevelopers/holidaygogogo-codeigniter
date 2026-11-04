@@ -857,6 +857,7 @@ WHERE 1 = 1
 		CAST(NULL AS DATE) AS LeadStatusDate,
 		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS State,
 		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS CreatedByName,
+		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS CompanyName,
 		MAX(b.InsertDate) AS RecencyAt
 	{$from}
 	GROUP BY {$key}
@@ -912,6 +913,7 @@ SELECT
 	CAST(NULL AS DATE) AS LeadStatusDate,
 	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS State,
 	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS CreatedByName,
+	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS CompanyName,
 	MAX(BookingDate) AS RecencyAt
 FROM (
 	{$this->Booking_Windowed_Select($dedup, $booking['from'])}
@@ -972,6 +974,7 @@ SELECT
 	) AS LeadStatusDate,
 	CONVERT(gc.state USING utf8mb4) COLLATE utf8mb4_unicode_ci AS State,
 	CONVERT(a.Name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS CreatedByName,
+	CONVERT(gc.company_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS CompanyName,
 	COALESCE(gc.date_added, gc.created_at) AS RecencyAt
 {$ghl['from']}
 			";
@@ -1062,6 +1065,7 @@ SELECT
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.LeadStatusDate   END) AS LeadStatusDate,
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.State            END) AS State,
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.CreatedByName    END) AS CreatedByName,
+	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.CompanyName      END) AS CompanyName,
 	MAX(mm.RecencyAt) AS RecencyAt
 FROM (
 	SELECT m.*,
@@ -1165,6 +1169,17 @@ GROUP BY mm.merge_key";
 			gc.nature_of_business AS NatureOfBusiness,
 			gc.number_of_pax     AS NumberOfPax,
 			gc.state             AS State,
+			gc.travel_date AS TravelDate,
+			(SELECT sp.Name FROM admin sp WHERE sp.AdminID = gc.sales_person_id) AS SalesPerson,
+			(SELECT op.Name FROM admin op WHERE op.AdminID = gc.op_id) AS Op,
+			gc.destination AS LeadDestination,
+			gc.potential_sales_amount AS PotentialSalesAmount,
+			(SELECT lsl.LeadStatus FROM lead_status_log lsl
+				WHERE lsl.Status = 'Y' AND lsl.dedup_key = {$gc_dedup}
+				ORDER BY lsl.StatusDate DESC, lsl.LogID DESC LIMIT 1) AS LeadStatus,
+			(SELECT lsl.StatusDate FROM lead_status_log lsl
+				WHERE lsl.Status = 'Y' AND lsl.dedup_key = {$gc_dedup}
+				ORDER BY lsl.StatusDate DESC, lsl.LogID DESC LIMIT 1) AS LeadStatusDate,
 			{$status_updates}    AS StatusUpdates,
 			gc.lead_intro        AS LeadIntro,
 			gc.notes             AS Notes,
@@ -2266,6 +2281,9 @@ GROUP BY mm.merge_key";
 				gc.email, gc.address, gc.gender, gc.chat_language, gc.race, gc.nationality,
 				gc.country, gc.source, gc.notes, gc.customer_type, gc.lead_intro,
 				gc.nature_of_business, gc.number_of_pax, gc.client_type, gc.state,
+				gc.travel_date, gc.sales_person_id, gc.op_id, gc.destination, gc.potential_sales_amount,
+				(SELECT sp.Name FROM admin sp WHERE sp.AdminID = gc.sales_person_id) AS SalesPersonName,
+				(SELECT op.Name FROM admin op WHERE op.AdminID = gc.op_id) AS OpName,
 				gc.date_of_birth, gc.tags_json,
 				COALESCE(gc.date_added, gc.created_at) AS created_at, a.Name AS CreatedByName
 			FROM ghl_contacts gc

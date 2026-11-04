@@ -198,4 +198,22 @@ $imp = ghl_manual_lead_prepare(array('first_name' => 'Siti', 'phone' => '0123456
 assert_eq('import bare phone ok', true, $imp['ok']);
 assert_eq('import bare phone stored', '0123456789', $imp['row']['phone']);
 
+$travel = ghl_manual_lead_prepare(array(
+    'first_name' => 'Siti', 'travel_date' => '2026-12-15',
+    'sales_person_id' => '12', 'op_id' => '34', 'destination' => '  Redang  ',
+    'potential_sales_amount' => ' RM 10,000 approx. ', 'client_type' => 'Company trip',
+), 'travel', $now, 7);
+assert_eq('travel fields valid', true, $travel['ok']);
+foreach (array('travel_date' => '2026-12-15', 'sales_person_id' => 12, 'op_id' => 34,
+    'destination' => 'Redang', 'potential_sales_amount' => 'RM 10,000 approx.', 'client_type' => 'Company trip') as $field => $expected) {
+    assert_eq($field . ' mapped', $expected, $travel['row'][$field]);
+}
+foreach (array('travel_date' => '2026-02-30', 'sales_person_id' => 'invalid', 'op_id' => '-1') as $field => $invalid) {
+    $bad = ghl_manual_lead_prepare(array('first_name' => 'Siti', $field => $invalid), 'bad', $now, 7);
+    assert_eq($field . ' invalid rejected', false, $bad['ok']);
+}
+foreach (array('travel_date', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount') as $field) {
+    assert_eq($field . ' blank optional', null, $ccBlank['row'][$field]);
+}
+
 echo "\nAll GhlManualLeadPrepare assertions passed.\n";

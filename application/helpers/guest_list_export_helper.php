@@ -9,7 +9,7 @@ defined('BASEPATH') OR exit('No direct script access allowed');
  * page renders on screen:
  *   - 'guest'  → Guest List (booking-guest columns)
  *   - 'ghl'    → GHL Leads (lead columns + Type)
- *   - 'manual' → Manual Leads (lead columns, no Type)
+ *   - 'manual' → Manual Leads (listing summary, status history, then form fields)
  *
  * Cell values are formatted the same way the listing renders them (phone with
  * calling code, tags flattened, DOB "d M Y", destinations de-duplicated, guest
@@ -57,33 +57,38 @@ if (!function_exists('guest_list_export_columns')) {
 		}
 
 		if ($mode === 'manual') {
-			// Manual Leads: EVERY stored lead field plus the dated Lead Status
-			// Updates (the lead_status_log history joined into one cell). Client Type
-			// replaces the old Tags field; Nature of Business / Number of Pax / State
-			// are manual-only.
+			// Listing summary first, followed by dated status history and the
+			// remaining lead form fields (without repeating summary fields).
 			return array(
-				array('GUEST FIRST NAME', 'Name'),
+				array('NO.', '__number'),
+				array('CREATED DATE', 'CreatedAt'),
+				array('GUEST NAME', 'Name'),
 				array('COMPANY NAME', 'Company'),
+				array('CLIENT TYPE', 'ClientType'),
+				array('LEAD STATUS', 'LeadStatus'),
+				array('STATUS DATE', 'LeadStatusDate'),
+				array('CREATED BY', 'CreatedBy'),
+				array('LEAD STATUS UPDATES', 'StatusUpdates'),
+				array('TRAVEL DATE', 'TravelDate'),
+				array('SALES PERSON', 'SalesPerson'),
+				array('OP', 'Op'),
+				array('DESTINATION', 'LeadDestination'),
+				array('POTENTIAL SALES AMOUNT', 'PotentialSalesAmount'),
 				array('CONTACT NUM', '__phone'),
 				array('EMAIL', 'Email'),
 				array('ADDRESS', 'Address'),
 				array('COUNTRY', 'Country'),
 				array('GENDER', 'Gender'),
+				array('LANGUAGE', 'Language'),
 				array('RACE', 'Race'),
 				array('NATIONALITY', 'Nationality'),
-				array('LANGUAGE', 'Language'),
-				array('DATE OF BIRTH', 'DOB'),
 				array('SOURCE', 'Source'),
-				array('CUSTOMER TYPE', 'CustomerType'),
-				array('CLIENT TYPE', 'ClientType'),
 				array('NATURE OF BUSINESS', 'NatureOfBusiness'),
 				array('NUMBER OF PAX', 'NumberOfPax'),
 				array('STATE', 'State'),
-				array('LEAD STATUS UPDATES', 'StatusUpdates'),
-				array('LEAD INTRO', 'LeadIntro'),
 				array('NOTES', 'Notes'),
-				array('CREATED BY', 'CreatedBy'),
-				array('CREATED AT', 'CreatedAt'),
+				array('LEAD INTRO', 'LeadIntro'),
+				array('DATE OF BIRTH', 'DOB'),
 			);
 		}
 
@@ -150,8 +155,12 @@ if (!function_exists('guest_list_export_cell')) {
 	/**
 	 * One formatted cell value for a row + field, matching the listing's display.
 	 */
-	function guest_list_export_cell($g, $field)
+	function guest_list_export_cell($g, $field, $number = null)
 	{
+		if ($field === '__number') {
+			return $number === null ? '' : (string) $number;
+		}
+
 		if ($field === '__phone') {
 			return guest_list_export_phone($g);
 		}
@@ -179,7 +188,7 @@ if (!function_exists('guest_list_export_cell')) {
 			return date('d M Y, g:i A', strtotime($raw));
 		}
 
-		if ($field === 'DOB') {
+		if ($field === 'DOB' || $field === 'LeadStatusDate' || $field === 'TravelDate') {
 			$raw = trim($raw);
 			if ($raw === '' || $raw === '0000-00-00' || strtotime($raw) === false) {
 				return '';
@@ -230,7 +239,7 @@ if (!function_exists('guest_list_export_matrix')) {
 		foreach ((array) $rows as $g) {
 			$line = array();
 			foreach ($cols as $c) {
-				$line[] = guest_list_export_cell($g, $c[1]);
+				$line[] = guest_list_export_cell($g, $c[1], count($out) + 1);
 			}
 			$out[] = $line;
 		}
@@ -299,7 +308,7 @@ if (!function_exists('guest_list_export_stream')) {
 					$col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i + 1);
 					$sheet->setCellValueExplicit(
 						$col . $row,
-						guest_list_export_cell($g, $c[1]),
+						guest_list_export_cell($g, $c[1], $row - 1),
 						\PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING
 					);
 				}

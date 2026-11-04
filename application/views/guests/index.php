@@ -96,8 +96,8 @@ div.kt-datatable__pager-container {
 	$lc_module_map = array('Guests' => 'guests', 'Customer' => 'customer', 'Ghl_Leads' => 'ghl_leads', 'Manual_Leads' => 'manual_leads');
 	$lc_module = isset($lc_module_map[$list_base]) ? $lc_module_map[$list_base] : 'guests';
 	// GHL Leads and Manual Leads are both lead-only pages that share this layout
-	// (same columns/filters); only the Type column + Create modal differ. Guest
-	// List and Customer keep their own booking-guest columns.
+	// with separate column sets. Guest List and Customer keep their own
+	// booking-guest columns.
 	$is_lead_list = ($list_base === 'Ghl_Leads' || $list_base === 'Manual_Leads');
 	$page_title = isset($page_title) ? $page_title : 'Guest List Records';
 	// wa-digits => true for contacts that have a stored WhatsApp conversation.
@@ -719,26 +719,26 @@ div.kt-datatable__pager-container {
 						<thead>
 							<tr>
 								<th style="text-align:center;">No.</th>
+								<?php if($list_base === 'Manual_Leads') { ?>
+									<th style="text-align:center;">Created Date</th>
+								<?php } ?>
 								<?php if(!$is_lead_list) { ?>
 									<th style="text-align:center;">Alt Name</th>
 								<?php } ?>
 								<th style="text-align:center;"><?php echo ($list_base === 'Customer') ? 'Customer Name' : (($list_base === 'Manual_Leads') ? 'Guest Name' : 'Guest First Name'); ?></th>
-								<th style="text-align:center;">Contact Num</th>
+								<?php if($list_base !== 'Manual_Leads') { ?>
+									<th style="text-align:center;">Contact Num</th>
+								<?php } ?>
 								<?php if(!$is_lead_list) { ?>
 									<th style="text-align:center;">Email</th>
 								<?php } ?>
 								<?php if($is_lead_list) { ?>
 									<?php if($list_base === 'Manual_Leads') { ?>
-										<th style="text-align:center;">Nature of Business</th>
+										<th style="text-align:center;">Company Name</th>
 										<th style="text-align:center;">Client Type</th>
-										<th style="text-align:center;">Language</th>
-										<th style="text-align:center;">Race</th>
 										<th style="text-align:center;">Lead Status</th>
 										<th style="text-align:center;">Status Date</th>
-										<th style="text-align:center;">Created Date</th>
 										<th style="text-align:center;">Created By</th>
-										<th style="text-align:center;">Customer Type</th>
-										<th style="text-align:center;">State</th>
 									<?php } else { ?>
 										<th style="text-align:center;">Tags</th>
 										<?php if($list_base === 'Ghl_Leads') { ?>
@@ -789,12 +789,18 @@ div.kt-datatable__pager-container {
 						</thead>
 						<tbody>
 							<?php if(empty($guests)) { ?>
-								<tr><td colspan="<?php echo ($list_base === 'Customer') ? 12 : ($list_base === 'Manual_Leads' ? 14 : 10); ?>" style="text-align:center; padding-top:10px; padding-bottom:10px;">Guest Records Not Found</td></tr>
+								<tr><td colspan="<?php echo ($list_base === 'Customer') ? 12 : ($list_base === 'Manual_Leads' ? 9 : 10); ?>" style="text-align:center; padding-top:10px; padding-bottom:10px;">Guest Records Not Found</td></tr>
 							<?php } else { ?>
 								<?php $count = 1; foreach($guests as $g) { ?>
 									<?php $is_ghl_row = isset($g->Type) && ($g->Type === 'GHL' || $g->Type === 'Manual'); ?>
 									<tr>
 										<td style="text-align:center; padding-top:15px; padding-bottom:15px;"><?php echo $count; ?></td>
+										<?php if($list_base === 'Manual_Leads') {
+											$created_raw = isset($g->RecencyAt) ? (string) $g->RecencyAt : '';
+											$created_ts = ($created_raw !== '' && strpos($created_raw, '0000-00-00') !== 0) ? strtotime($created_raw) : false;
+										?>
+											<td style="text-align:center; white-space:nowrap;"><?php echo $created_ts ? date('d M Y', $created_ts) : '<span class="text-muted">&mdash;</span>'; ?></td>
+										<?php } ?>
 										<?php if(!$is_lead_list) {
 											$altname_val = isset($g->AltName) ? (string) $g->AltName : '';
 											$alt_customer_id = isset($g->CustomerID) ? (int) $g->CustomerID : 0;
@@ -823,6 +829,7 @@ div.kt-datatable__pager-container {
 												<?php } ?>
 											</span>
 										</td>
+										<?php if($list_base !== 'Manual_Leads') { ?>
 										<?php
 											$calling_code = isset($g->CallingCode) ? (string)$g->CallingCode : '';
 											// A merged row (same Name + IC across bookings) packs every distinct
@@ -876,6 +883,7 @@ div.kt-datatable__pager-container {
 												<?php } ?>
 											</span>
 										</td>
+										<?php } ?>
 										<?php if(!$is_lead_list) { ?>
 										<?php $email_val = (string) $g->Email; ?>
 										<td class="gl-cell<?php if(!$is_ghl_row) echo ' gl-editable'; ?>" style="text-align:center;"<?php if(!$is_ghl_row) { ?> data-field="email" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>" data-value="<?php echo htmlspecialchars($email_val, ENT_QUOTES); ?>"<?php } ?>>
@@ -891,41 +899,26 @@ div.kt-datatable__pager-container {
 											<?php $gl_dash = '<span class="text-muted">&mdash;</span>'; ?>
 											<?php if($list_base === 'Manual_Leads') { ?>
 												<?php
-													$nob_val    = isset($g->NatureOfBusiness) ? trim((string) $g->NatureOfBusiness) : '';
+													$company_val = isset($g->CompanyName) ? trim((string) $g->CompanyName) : '';
 													$client_val = isset($g->ClientType)       ? trim((string) $g->ClientType)       : '';
-													$lang_val   = isset($g->Language)         ? trim((string) $g->Language)         : '';
-													$race_val   = isset($g->Race)             ? trim((string) $g->Race)             : '';
 													$status_val = isset($g->LeadStatus)       ? trim((string) $g->LeadStatus)       : '';
 													$status_date_raw = isset($g->LeadStatusDate) ? (string) $g->LeadStatusDate : '';
 													$status_date_ts  = ($status_date_raw !== '' && strpos($status_date_raw, '0000-00-00') !== 0) ? strtotime($status_date_raw) : false;
-													$state_val  = isset($g->State)            ? trim((string) $g->State)            : '';
-													$cust_val   = isset($g->CustomerType)     ? trim((string) $g->CustomerType)     : '';
 													$created_by_val = isset($g->CreatedByName) ? trim((string) $g->CreatedByName) : '';
-													$created_raw = isset($g->RecencyAt) ? (string) $g->RecencyAt : '';
-													$created_ts  = ($created_raw !== '' && strpos($created_raw, '0000-00-00') !== 0) ? strtotime($created_raw) : false;
 												?>
-												<td style="text-align:center; max-width:200px;"><?php echo $nob_val !== '' ? htmlspecialchars($nob_val) : $gl_dash; ?></td>
+												<td style="text-align:center;"><?php echo $company_val !== '' ? htmlspecialchars($company_val) : $gl_dash; ?></td>
 												<td style="text-align:center;">
 													<?php if($client_val !== '') { ?>
 														<span class="label label-inline label-light-primary font-weight-bold" style="white-space:normal;"><?php echo htmlspecialchars($client_val); ?></span>
 													<?php } else { echo $gl_dash; } ?>
 												</td>
-												<td style="text-align:center;"><?php echo $lang_val !== '' ? htmlspecialchars($lang_val) : $gl_dash; ?></td>
-												<td style="text-align:center;"><?php echo $race_val !== '' ? htmlspecialchars($race_val) : $gl_dash; ?></td>
 												<td style="text-align:center;">
 													<?php if($status_val !== '') { ?>
 														<span class="label label-inline label-light-info font-weight-bold" style="white-space:normal;"><?php echo htmlspecialchars($status_val); ?></span>
 													<?php } else { echo $gl_dash; } ?>
 												</td>
 												<td style="text-align:center; white-space:nowrap;"><?php echo $status_date_ts ? date('d M Y', $status_date_ts) : $gl_dash; ?></td>
-													<td style="text-align:center; white-space:nowrap;"><?php echo $created_ts ? date('d M Y', $created_ts) : $gl_dash; ?></td>
 												<td style="text-align:center;"><?php echo $created_by_val !== '' ? htmlspecialchars($created_by_val) : $gl_dash; ?></td>
-												<td style="text-align:center;">
-													<?php if($cust_val !== '') { ?>
-														<span class="label label-inline label-light-success font-weight-bold" style="white-space:normal;"><?php echo htmlspecialchars($cust_val); ?></span>
-													<?php } else { echo $gl_dash; } ?>
-												</td>
-												<td style="text-align:center;"><?php echo $state_val !== '' ? htmlspecialchars($state_val) : $gl_dash; ?></td>
 											<?php } else { ?>
 											<td style="text-align:center; max-width:220px;">
 												<?php
@@ -2255,15 +2248,7 @@ div.kt-datatable__pager-container {
 								<?php } } ?>
 							</select>
 						</div>
-						<div class="col-md-6">
-							<label>Customer Type</label>
-							<select name="customer_type" class="form-control">
-								<option value="">-- Select --</option>
-								<?php if(!empty($customer_types)) { foreach($customer_types as $ct) { ?>
-								<option value="<?php echo htmlspecialchars($ct->Name, ENT_QUOTES); ?>"><?php echo htmlspecialchars($ct->Name); ?></option>
-								<?php } } ?>
-							</select>
-						</div>
+
 					</div>
 					<div class="form-group row">
 						<div class="col-md-6">
@@ -2305,6 +2290,36 @@ div.kt-datatable__pager-container {
 							</select>
 						</div>
 					</div>
+					<div class="form-group row"><div class="col-md-12">
+						<label>Travel Date</label>
+						<input type="date" name="travel_date" class="form-control">
+					</div></div>
+					<div class="form-group row"><div class="col-md-12">
+						<label>Sales Person</label>
+						<select name="sales_person_id" class="form-control">
+							<option value="">-- Select Sales Person --</option>
+							<?php if(!empty($admins)) { foreach($admins as $user) { if($user->Status !== 'Y') { continue; } ?>
+							<option value="<?php echo (int) $user->AdminID; ?>"><?php echo htmlspecialchars($user->Name); ?></option>
+							<?php } } ?>
+						</select>
+					</div></div>
+					<div class="form-group row"><div class="col-md-12">
+						<label>OP</label>
+						<select name="op_id" class="form-control">
+							<option value="">-- Select OP --</option>
+							<?php if(!empty($booking_op_admins)) { foreach($booking_op_admins as $user) { ?>
+							<option value="<?php echo (int) $user->AdminID; ?>"><?php echo htmlspecialchars($user->Name); ?></option>
+							<?php } } ?>
+						</select>
+					</div></div>
+					<div class="form-group row"><div class="col-md-12">
+						<label>Destination</label>
+						<input type="text" name="destination" class="form-control" maxlength="255">
+					</div></div>
+					<div class="form-group row"><div class="col-md-12">
+						<label>Potential Sales Amount</label>
+						<input type="text" name="potential_sales_amount" class="form-control" maxlength="255">
+					</div></div>
 					<div class="form-group">
 						<label>Notes</label>
 						<textarea name="notes" class="form-control" rows="2" autocomplete="off"></textarea>
@@ -2454,9 +2469,19 @@ div.kt-datatable__pager-container {
 		return { code: '', local: v };
 	}
 
+	function mlSetAssignee(field, id, name) {
+		var $select = $('#ghl_lead_create_form').find('[name="' + field + '"]');
+		$select.find('.ml-existing-assignee').remove();
+		if (id && !$select.find('option').filter(function() { return this.value === String(id); }).length) {
+			$select.append($('<option>').addClass('ml-existing-assignee').val(id).text(name || ('User #' + id)));
+		}
+		$select.val(id || '');
+	}
+
 	// Reset the shared modal back to a blank Create form.
 	function mlResetCreate() {
 		var $form = $('#ghl_lead_create_form');
+		$form.find('.ml-existing-assignee').remove();
 		$form[0].reset();
 		// reset() restores the hidden dial code to +60 but not the picker display.
 		if (window.phonePickerSetCode) { phonePickerSetCode(document.getElementById('ml_phone_wrapper'), '+60'); }
@@ -2511,7 +2536,12 @@ div.kt-datatable__pager-container {
 					set('address', d.address);           set('country', d.country);
 					set('gender', d.gender);             set('chat_language', d.chat_language);
 					set('race', d.race);                 set('nationality', d.nationality);
-					set('source', d.source);             set('customer_type', d.customer_type);
+					set('source', d.source);
+					set('travel_date', d.travel_date);
+					mlSetAssignee('sales_person_id', d.sales_person_id, d.sales_person_name);
+					mlSetAssignee('op_id', d.op_id, d.op_name);
+					set('destination', d.destination);
+					set('potential_sales_amount', d.potential_sales_amount);
 						set('client_type', d.client_type);
 					set('nature_of_business', d.nature_of_business); set('number_of_pax', d.number_of_pax); set('state', d.state);
 					set('notes', d.notes);               set('lead_intro', d.lead_intro);
@@ -2763,7 +2793,11 @@ div.kt-datatable__pager-container {
 		html += lvRow('Date of Birth', d.date_of_birth);
 		html += '<hr class="my-2">';
 		html += lvRow('Source', d.source);
-		html += lvRow('Customer Type', d.customer_type);
+		html += lvRow('Travel Date', d.travel_date);
+		html += lvRow('Sales Person', d.sales_person_name);
+		html += lvRow('OP', d.op_name);
+		html += lvRow('Destination', d.destination);
+		html += lvRow('Potential Sales Amount', d.potential_sales_amount);
 		html += lvRow('Client Type', d.client_type);
 		html += lvRow('Nature of Business', d.nature_of_business);
 		html += lvRow('Number of Pax', d.number_of_pax ? d.number_of_pax + ' pax' : '');
