@@ -96,9 +96,32 @@ function ghl_manual_lead_prepare($post, $uid, $now, $created_by = null, $require
     }
 
     $travel_raw = $get('travel_date');
+    $travel_end_raw = $get('travel_end_date');
+    // The booking-style picker posts DD/MM/YYYY - DD/MM/YYYY. Keep accepting
+    // ISO dates for existing integrations and single-date records.
+    if (array_key_exists('travel_date_range', $post)) {
+        $range = $get('travel_date_range');
+        $travel_raw = $travel_end_raw = '';
+        if ($range !== '') {
+            if (preg_match('/^(\d{2})\/(\d{2})\/(\d{4}) - (\d{2})\/(\d{2})\/(\d{4})$/', $range, $m)) {
+                $travel_raw = $m[3] . '-' . $m[2] . '-' . $m[1];
+                $travel_end_raw = $m[6] . '-' . $m[5] . '-' . $m[4];
+            } else {
+                $errors[] = 'Travel date must be a valid date range.';
+            }
+        }
+    }
     $travel_date = ghl_manual_lead_normalize_dob($travel_raw);
-    if ($travel_raw !== '' && $travel_date === null) {
-        $errors[] = 'Travel date is not a valid date.';
+    $travel_end_date = ghl_manual_lead_normalize_dob($travel_end_raw);
+    if (($travel_raw !== '' && $travel_date === null) || ($travel_end_raw !== '' && $travel_end_date === null)) {
+        $errors[] = 'Travel date must be a valid date range.';
+    } elseif ($travel_date === null && $travel_end_date !== null) {
+        $errors[] = 'Travel start date is required when an end date is provided.';
+    } elseif ($travel_date !== null) {
+        if ($travel_end_date === null) { $travel_end_date = $travel_date; }
+        if ($travel_end_date < $travel_date) {
+            $errors[] = 'Travel end date cannot be before the start date.';
+        }
     }
     foreach (array('sales_person_id', 'op_id') as $field) {
         if ($get($field) !== '' && (!ctype_digit($get($field)) || (int) $get($field) < 1)) {
@@ -137,6 +160,7 @@ function ghl_manual_lead_prepare($post, $uid, $now, $created_by = null, $require
         'client_type'   => $client_type !== '' ? $client_type : null,
         'state'         => $state !== '' ? $state : null,
         'travel_date' => $travel_date,
+        'travel_end_date' => $travel_end_date,
         'sales_person_id' => $get('sales_person_id') !== '' ? (int) $get('sales_person_id') : null,
         'op_id' => $get('op_id') !== '' ? (int) $get('op_id') : null,
         'destination' => $get('destination') !== '' ? $get('destination') : null,
@@ -338,4 +362,21 @@ function ghl_manual_lead_row_to_post($row)
         return null;
     }
     return $post;
+}
+
+/** Required listing fields on the interactive Create/Edit form (imports stay separate). */
+function ghl_manual_lead_required_form_errors($row)
+{
+    $errors = array();
+    $labels = array(
+        'first_name' => 'Guest Name', 'phone' => 'Contact Number',
+        'company_name' => 'Company Name', 'client_type' => 'Client Type',
+        'travel_date' => 'Travel start date', 'travel_end_date' => 'Travel end date',
+        'sales_person_id' => 'Sales Person', 'op_id' => 'OP',
+        'destination' => 'Destination', 'potential_sales_amount' => 'Potential Sales Amount',
+    );
+    foreach ($labels as $field => $label) {
+        if (!isset($row[$field]) || trim((string) $row[$field]) === '') { $errors[] = $label . ' is required.'; }
+    }
+    return $errors;
 }

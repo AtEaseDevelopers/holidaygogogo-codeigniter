@@ -323,6 +323,7 @@ class Guest_List extends CI_Controller
 	}
 	
 	function Download() {
+		if (nav_block_data_export()) { return; }
 		$booking_id = $this->input->get('booking_id');
 		if (!empty($booking_id)) {
 			$booking_row = $this->Booking_Model->find($booking_id);
@@ -512,6 +513,7 @@ class Guest_List extends CI_Controller
 	}
 	
 	function Download_ZIP() {
+		if (nav_block_data_export()) { return; }
 		// Get booking_id from GET parameter
 		$booking_id = $this->input->get('booking_id');
 		if(empty($booking_id)) {

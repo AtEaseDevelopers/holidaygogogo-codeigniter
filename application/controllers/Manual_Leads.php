@@ -49,7 +49,7 @@ class Manual_Leads extends MY_Controller
 		$data['list_base']      = 'Manual_Leads';
 		$data['page_title']     = 'Manual Leads Records';
 		$data['admins']         = $this->Booking_Model->Read_Admins();
-		$data['booking_op_admins'] = $this->Booking_Model->Read_Booking_OP_Admins();
+		$data['manual_lead_assignees'] = $this->Booking_Model->Read_Manual_Lead_Assignees();
 		$data['sources']        = $this->Booking_Model->Read_Sources();
 		$data['manual_sources'] = $this->Guests_Model->Read_Distinct_Ghl_Sources();
 		$data['destinations']   = $this->Booking_Model->Read_Categories();
@@ -104,58 +104,32 @@ class Manual_Leads extends MY_Controller
 
 		$prepared = ghl_manual_lead_prepare($this->input->post(), $uid, $now, $created_by, true);
 
-		$this->Validate_Lead_Assignees($prepared);
+		$this->Validate_Lead_Form($prepared);
 		if (!$prepared['ok']) {
 			$this->session->set_flashdata('ghl_lead_error', implode(' ', $prepared['errors']));
 			redirect(base_url('Manual_Leads'));
 			return;
 		}
 
+		$this->load->helper('manual_lead_status_changes');
+		$changes = manual_lead_status_seed_prepare($this->input->post(), $created_by);
+		if (!$changes['ok']) {
+			$this->session->set_flashdata('ghl_lead_error', $changes['error']);
+			redirect(base_url('Manual_Leads'));
+			return;
+		}
+		$this->db->trans_begin();
 		$new_id = $this->Ghl_Contacts_Model->create_manual_lead($prepared['row']);
-		if ($new_id) {
-			// Seed any dated Lead Status log rows entered on the create form, keyed
-			// to the new lead's listing dedup_key (author = the creator).
-			$this->Seed_Status_Log((int) $new_id, $created_by);
+		$dedup_key = $new_id ? $this->Ghl_Contacts_Model->effective_dedup_key((int) $new_id) : null;
+		$saved = $dedup_key !== null && $this->Guests_Model->Apply_Manual_Lead_Status_Changes($dedup_key, $changes, $created_by);
+		if ($saved && $this->db->trans_status() !== false) {
+			$this->db->trans_commit();
 			$this->session->set_flashdata('ghl_lead_success', 'Manual lead created.');
 		} else {
+			$this->db->trans_rollback();
 			$this->session->set_flashdata('ghl_lead_error', 'Could not save the lead. Please try again.');
 		}
 		redirect(base_url('Manual_Leads'));
-	}
-
-	/**
-	 * Insert the dated Lead Status updates entered in the Create Lead form's
-	 * repeatable block (parallel arrays log_date[]/log_status[]/log_note[]) for a
-	 * just-created lead. A row is stored only when it has a Status; its date
-	 * defaults to today when left blank. Invalid rows are skipped silently — the
-	 * lead itself is already saved, so a bad log row must not fail the create.
-	 */
-	private function Seed_Status_Log($new_id, $created_by)
-	{
-		$dates    = (array) $this->input->post('log_date');
-		$statuses = (array) $this->input->post('log_status');
-		$notes    = (array) $this->input->post('log_note');
-		if (empty($statuses)) {
-			return;
-		}
-
-		$dedup_key = $this->Ghl_Contacts_Model->effective_dedup_key($new_id);
-		if ($dedup_key === null) {
-			return;
-		}
-
-		$today = date('Y-m-d');
-		foreach ($statuses as $i => $raw_status) {
-			$st = lead_status_log_validate_status((string) $raw_status);
-			if (!$st['ok']) {
-				continue; // no status on this row -> not an entry
-			}
-			$dt = guest_remark_validate_date(isset($dates[$i]) ? (string) $dates[$i] : '', false, 'Date');
-			$date = ($dt['ok'] && $dt['value'] !== '') ? $dt['value'] : $today;
-			$nt = lead_status_log_validate_note(isset($notes[$i]) ? (string) $notes[$i] : '');
-			$note = $nt['ok'] ? $nt['value'] : '';
-			$this->Guests_Model->Add_Lead_Status_Log($dedup_key, $date, $st['value'], $note, $created_by);
-		}
 	}
 
 	/**
@@ -178,13 +152,13 @@ class Manual_Leads extends MY_Controller
 		$this->Guests_Model->Add_Lead_Status_Log($dedup_key, substr((string) $now, 0, 10), $st['value'], '', $created_by);
 	}
 
-	private function Validate_Lead_Assignees(&$prepared, $existing = null)
+	private function Validate_Lead_Form(&$prepared, $existing = null)
 	{
 		if (!$prepared['ok']) { return; }
-		$lists = array(
-			'sales_person_id' => $this->Booking_Model->Read_Admins(),
-			'op_id' => $this->Booking_Model->Read_Booking_OP_Admins(),
-		);
+		$prepared['errors'] = ghl_manual_lead_required_form_errors($prepared['row']);
+		if ($prepared['errors']) { $prepared['ok'] = false; return; }
+		$users = $this->Booking_Model->Read_Manual_Lead_Assignees();
+		$lists = array('sales_person_id' => $users, 'op_id' => $users);
 		foreach ($lists as $field => $users) {
 			$id = $prepared['row'][$field];
 			if ($id === null || ($existing && (int) $existing->$field === $id)) { continue; }
@@ -238,16 +212,34 @@ class Manual_Leads extends MY_Controller
 		// so passing the empty uid / null creator here is harmless.
 		$now = date('Y-m-d H:i:s');
 		$prepared = ghl_manual_lead_prepare($this->input->post(), '', $now, null, true);
-		$this->Validate_Lead_Assignees($prepared, isset($existing) ? $existing : null);
+		$this->Validate_Lead_Form($prepared, isset($existing) ? $existing : null);
 		if (!$prepared['ok']) {
 			$this->session->set_flashdata('ghl_lead_error', implode(' ', $prepared['errors']));
 			redirect(base_url('Manual_Leads'));
 			return;
 		}
 
-		if ($this->Ghl_Contacts_Model->update_manual_lead((int) $existing->id, $prepared['row'])) {
+		$this->load->helper('manual_lead_status_changes');
+		$admin_id = (int) $this->session->userdata('admin_id');
+		$changes = manual_lead_status_changes_prepare(
+			$this->input->post('status_changes'),
+			$this->Guests_Model->Read_Lead_Status_Log($dedup_key, $admin_id), $admin_id, true
+		);
+		if (!$changes['ok']) {
+			$this->session->set_flashdata('ghl_lead_error', $changes['error']);
+			redirect(base_url('Manual_Leads'));
+			return;
+		}
+
+		// Lead fields and status changes commit together only on Save Changes.
+		$this->db->trans_begin();
+		$saved = $this->Ghl_Contacts_Model->update_manual_lead((int) $existing->id, $prepared['row']);
+		if ($saved) { $saved = $this->Guests_Model->Apply_Manual_Lead_Status_Changes($dedup_key, $changes, $admin_id); }
+		if ($saved && $this->db->trans_status() !== false) {
+			$this->db->trans_commit();
 			$this->session->set_flashdata('ghl_lead_success', 'Manual lead updated.');
 		} else {
+			$this->db->trans_rollback();
 			$this->session->set_flashdata('ghl_lead_error', 'Could not update the lead. Please try again.');
 		}
 		redirect(base_url('Manual_Leads'));
@@ -284,6 +276,7 @@ class Manual_Leads extends MY_Controller
 			'last_name'     => $row->last_name,
 			'company_name'  => $row->company_name,
 			'travel_date' => $row->travel_date,
+			'travel_end_date' => $row->travel_end_date,
 			'sales_person_id' => $row->sales_person_id,
 			'op_id' => $row->op_id,
 			'destination' => $row->destination,
@@ -353,6 +346,7 @@ class Manual_Leads extends MY_Controller
 			'op_name' => $row->OpName,
 			'company_name'  => $row->company_name,
 			'travel_date' => $row->travel_date,
+			'travel_end_date' => $row->travel_end_date,
 			'sales_person_id' => $row->sales_person_id,
 			'op_id' => $row->op_id,
 			'destination' => $row->destination,
@@ -435,6 +429,9 @@ class Manual_Leads extends MY_Controller
 		$nt = lead_status_log_validate_note((string) $this->input->post('note'));
 		if (!$nt['ok']) {
 			return $out(array('ok' => false, 'message' => $nt['error']));
+		}
+		if ($nt['value'] === '') {
+			return $out(array('ok' => false, 'message' => 'A note is required for each lead status.'));
 		}
 		$admin_id = $this->session->userdata('admin_id');
 		$id = $this->Guests_Model->Add_Lead_Status_Log($dedup_key, $dt['value'], $st['value'], $nt['value'], $admin_id);

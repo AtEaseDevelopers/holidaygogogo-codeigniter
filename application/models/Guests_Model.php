@@ -358,7 +358,13 @@ class Guests_Model extends CI_Model
 		if($run_ghl) {
 			$g_params = array();
 			$ghl_where = "";
-			if($has_q) {
+			if($this->mode === 'manual') {
+				$this->load->helper('manual_lead_filter');
+				list($manual_sql, $manual_params) = manual_lead_filter_sql($get);
+				$ghl_where .= $manual_sql;
+				$g_params = array_merge($g_params, $manual_params);
+			}
+			if($has_q && $this->mode !== 'manual') {
 				$ghl_where .= " AND ( gc.first_name LIKE ? OR gc.last_name LIKE ? OR CONCAT_WS(' ', gc.first_name, gc.last_name) LIKE ? ) ";
 				$g_params[] = $like;
 				$g_params[] = $like;
@@ -858,6 +864,12 @@ WHERE 1 = 1
 		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS State,
 		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS CreatedByName,
 		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS CompanyName,
+		CAST(NULL AS DATE) AS TravelDate,
+		CAST(NULL AS DATE) AS TravelEndDate,
+		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS SalesPerson,
+		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS Op,
+		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS LeadDestination,
+		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS PotentialSalesAmount,
 		MAX(b.InsertDate) AS RecencyAt
 	{$from}
 	GROUP BY {$key}
@@ -914,6 +926,12 @@ SELECT
 	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS State,
 	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS CreatedByName,
 	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS CompanyName,
+	CAST(NULL AS DATE) AS TravelDate,
+	CAST(NULL AS DATE) AS TravelEndDate,
+	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS SalesPerson,
+	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS Op,
+	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS LeadDestination,
+	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS PotentialSalesAmount,
 	MAX(BookingDate) AS RecencyAt
 FROM (
 	{$this->Booking_Windowed_Select($dedup, $booking['from'])}
@@ -975,6 +993,12 @@ SELECT
 	CONVERT(gc.state USING utf8mb4) COLLATE utf8mb4_unicode_ci AS State,
 	CONVERT(a.Name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS CreatedByName,
 	CONVERT(gc.company_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS CompanyName,
+	gc.travel_date AS TravelDate,
+	gc.travel_end_date AS TravelEndDate,
+	CONVERT((SELECT sp.Name FROM admin sp WHERE sp.AdminID = gc.sales_person_id) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS SalesPerson,
+	CONVERT((SELECT op.Name FROM admin op WHERE op.AdminID = gc.op_id) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS Op,
+	CONVERT(gc.destination USING utf8mb4) COLLATE utf8mb4_unicode_ci AS LeadDestination,
+	CONVERT(gc.potential_sales_amount USING utf8mb4) COLLATE utf8mb4_unicode_ci AS PotentialSalesAmount,
 	COALESCE(gc.date_added, gc.created_at) AS RecencyAt
 {$ghl['from']}
 			";
@@ -1066,6 +1090,12 @@ SELECT
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.State            END) AS State,
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.CreatedByName    END) AS CreatedByName,
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.CompanyName      END) AS CompanyName,
+	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.TravelDate END) AS TravelDate,
+	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.TravelEndDate END) AS TravelEndDate,
+	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.SalesPerson END) AS SalesPerson,
+	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.Op END) AS Op,
+	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.LeadDestination END) AS LeadDestination,
+	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.PotentialSalesAmount END) AS PotentialSalesAmount,
 	MAX(mm.RecencyAt) AS RecencyAt
 FROM (
 	SELECT m.*,
@@ -1170,6 +1200,7 @@ GROUP BY mm.merge_key";
 			gc.number_of_pax     AS NumberOfPax,
 			gc.state             AS State,
 			gc.travel_date AS TravelDate,
+			gc.travel_end_date AS TravelEndDate,
 			(SELECT sp.Name FROM admin sp WHERE sp.AdminID = gc.sales_person_id) AS SalesPerson,
 			(SELECT op.Name FROM admin op WHERE op.AdminID = gc.op_id) AS Op,
 			gc.destination AS LeadDestination,
@@ -2245,6 +2276,22 @@ GROUP BY mm.merge_key";
 		return $rows;
 	}
 
+	function Apply_Manual_Lead_Status_Changes($dedup_key, $changes, $admin_id)
+	{
+		foreach ($changes['notes'] as $entry) {
+			if (!$this->db->where('LogID', $entry['id'])->where('dedup_key', $dedup_key)->where('Status', 'Y')
+				->update('lead_status_log', array('Note' => $entry['note'] !== '' ? $entry['note'] : null))) { return false; }
+		}
+		foreach ($changes['delete'] as $id) {
+			if (!$this->db->where('LogID', $id)->where('dedup_key', $dedup_key)->where('CreatedBy', $admin_id)->where('Status', 'Y')
+				->update('lead_status_log', array('Status' => 'N'))) { return false; }
+		}
+		foreach ($changes['add'] as $entry) {
+			if (!$this->Add_Lead_Status_Log($dedup_key, $entry['date'], $entry['status'], $entry['note'], $admin_id)) { return false; }
+		}
+		return true;
+	}
+
 	function Delete_Lead_Status_Log($log_id, $admin_id)
 	{
 		$this->db->query(
@@ -2281,7 +2328,7 @@ GROUP BY mm.merge_key";
 				gc.email, gc.address, gc.gender, gc.chat_language, gc.race, gc.nationality,
 				gc.country, gc.source, gc.notes, gc.customer_type, gc.lead_intro,
 				gc.nature_of_business, gc.number_of_pax, gc.client_type, gc.state,
-				gc.travel_date, gc.sales_person_id, gc.op_id, gc.destination, gc.potential_sales_amount,
+				gc.travel_date, gc.travel_end_date, gc.sales_person_id, gc.op_id, gc.destination, gc.potential_sales_amount,
 				(SELECT sp.Name FROM admin sp WHERE sp.AdminID = gc.sales_person_id) AS SalesPersonName,
 				(SELECT op.Name FROM admin op WHERE op.AdminID = gc.op_id) AS OpName,
 				gc.date_of_birth, gc.tags_json,

@@ -5,6 +5,9 @@ class MY_Controller extends CI_Controller
 	{
 		parent::__construct();
 		if($this->session->has_userdata('admin_id') && $this->session->has_userdata('level')) {
+			if (nav_is_data_export_request($this->router->class, $this->router->fetch_method()) && nav_block_data_export()) {
+				exit;
+			}
 			if (function_exists('nav_apply_request_flags')) {
 				nav_apply_request_flags();
 			}

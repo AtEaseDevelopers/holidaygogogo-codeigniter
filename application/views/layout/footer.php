@@ -11,6 +11,25 @@
     </div>
 </div>
 
+<?php if (!nav_can_view('export_data')) { ?>
+<style>
+/* Match the server's export route list, including dynamically rendered links. */
+<?php foreach (nav_data_export_routes() as $controller => $methods) {
+    foreach ($methods as $method) {
+        $route = '/' . $controller . '/' . $method;
+        foreach (array('a' => 'href', 'form' => 'action') as $tag => $attribute) {
+            echo $tag . '[' . $attribute . '$="' . $route . '" i],';
+            echo $tag . '[' . $attribute . '*="' . $route . '?" i],';
+        }
+    }
+} ?>
+#messageLogCsv, #lead-reply-export-btn, #download_excel,
+#mp_download_results, #mp_download_selected, #mp_download_tour_info {
+    display: none !important;
+}
+</style>
+<?php } ?>
+
 <script>
     var HOST_URL = '<?php echo base_url() ?>';
     var KTAppSettings = {
@@ -76,7 +95,7 @@
 <script src="<?php echo base_url('assets/js/prismjs-bundle.js'); ?>"></script>
 <script src="<?php echo base_url('assets/js/scripts-bundle.js'); ?>"></script>
 <script src="<?php echo base_url('assets/js/datatables-bundle.js'); ?>"></script>
-<script src="<?php echo base_url('assets/js/column-rendering.js?param=qiqi3'); ?>"></script>
+<script src="<?php echo base_url('assets/js/column-rendering.js?param=manual-leads-layout-20261105'); ?>"></script>
 <script src="<?php echo base_url('assets/js/bootstrap-daterangepicker.js?param=qiqi'); ?>"></script>
 <script src="<?php echo base_url('assets/js/bootstrap-datepicker.js?param=angie'); ?>"></script>
 <script src="<?php echo base_url('assets/plugins/custom/tinymce/tinymce.bundle.js'); ?>"></script>

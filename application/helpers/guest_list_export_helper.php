@@ -188,7 +188,18 @@ if (!function_exists('guest_list_export_cell')) {
 			return date('d M Y, g:i A', strtotime($raw));
 		}
 
-		if ($field === 'DOB' || $field === 'LeadStatusDate' || $field === 'TravelDate') {
+		if ($field === 'TravelDate') {
+			$start = trim($raw);
+			if ($start === '' || strpos($start, '0000-00-00') === 0 || strtotime($start) === false) { return ''; }
+			$end = isset($g->TravelEndDate) ? trim((string) $g->TravelEndDate) : '';
+			$display = date('d M Y', strtotime($start));
+			if ($end !== '' && strpos($end, '0000-00-00') !== 0 && strtotime($end) !== false) {
+				return $display . ' - ' . date('d M Y', strtotime($end));
+			}
+			return $display;
+		}
+
+		if ($field === 'DOB' || $field === 'LeadStatusDate') {
 			$raw = trim($raw);
 			if ($raw === '' || $raw === '0000-00-00' || strtotime($raw) === false) {
 				return '';

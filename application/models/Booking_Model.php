@@ -746,6 +746,16 @@ class Booking_Model extends CI_Model
 		return $this->db->get('admin')->result();
 	}
 
+	function Read_Manual_Lead_Assignees()
+	{
+		$this->db->select('AdminID, Name, Level, Status');
+		$this->db->where('AdminID !=', 8);
+		$this->db->where_not_in('Level', array('30', '60')); // Finance, Marketing
+		$this->db->where('Status', 'Y');
+		$this->db->order_by('Name', 'ASC');
+		return $this->db->get('admin')->result();
+	}
+
 	function Read_Notify_Admins()
 	{
 		$this->db->select('AdminID, Name, Level, Status');

@@ -23,6 +23,8 @@
 					member's current access. After you save, those choices become the source of truth.
 					The Owner always has full access and is not listed. Ticking <strong>Edit</strong>
 					automatically grants <strong>View</strong>. Unticking View hides that item from their sidebar.
+					<strong>Export Data</strong> grants Excel/CSV downloads across BC and starts disabled for staff.
+					Page access is still required. Blank import templates are available without Export Data access.
 				</p>
 				<ul class="nav nav-tabs nav-tabs-line nav-tabs-bold" role="tablist">
 					<?php $gi = 0; foreach ($groups as $group => $keys) { ?>
@@ -42,19 +44,19 @@
 									<tr>
 										<th rowspan="2" style="text-align:center; vertical-align:middle;">Staff</th>
 										<?php foreach ($keys as $mk) { ?>
-										<th colspan="2" style="text-align:center;"><?php echo htmlspecialchars($modules[$mk]['label'], ENT_QUOTES); ?></th>
+										<th colspan="<?php echo !empty($modules[$mk]['single']) ? 1 : 2; ?>" style="text-align:center;"><?php echo htmlspecialchars($modules[$mk]['label'], ENT_QUOTES); ?></th>
 										<?php } ?>
 									</tr>
 									<tr>
 										<?php foreach ($keys as $mk) { ?>
-										<th style="text-align:center; font-weight:500;">View</th>
-										<th style="text-align:center; font-weight:500;">Edit</th>
+										<th style="text-align:center; font-weight:500;"><?php echo !empty($modules[$mk]['single']) ? 'Allow' : 'View'; ?></th>
+										<?php if(empty($modules[$mk]['single'])) { ?><th style="text-align:center; font-weight:500;">Edit</th><?php } ?>
 										<?php } ?>
 									</tr>
 								</thead>
 								<tbody>
 									<?php if (empty($admins)) { ?>
-									<tr><td colspan="<?php echo 1 + count($keys) * 2; ?>" style="text-align:center; padding:15px;">No staff found.</td></tr>
+									<tr><td colspan="<?php echo 1 + array_sum(array_map(function($key) use ($modules) { return !empty($modules[$key]['single']) ? 1 : 2; }, $keys)); ?>" style="text-align:center; padding:15px;">No staff found.</td></tr>
 									<?php } else { foreach ($admins as $a) {
 										$aid = (int) $a->AdminID;
 									?>
@@ -73,12 +75,14 @@
 												<span></span>
 											</label>
 										</td>
+										<?php if(empty($modules[$mk]['single'])) { ?>
 										<td style="text-align:center; vertical-align:middle;">
 											<label class="checkbox checkbox-lg justify-content-center mb-0">
 												<input type="checkbox" class="nav-edit" data-aid="<?php echo $aid; ?>" data-mod="<?php echo $mk; ?>" <?php if ($can_edit) echo 'checked'; ?>>
 												<span></span>
 											</label>
 										</td>
+										<?php } ?>
 										<?php } ?>
 									</tr>
 									<?php } } ?>

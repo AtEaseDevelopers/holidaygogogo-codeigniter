@@ -81,6 +81,86 @@ div.kt-datatable__pager-container {
 	font-weight: 600;
 	white-space: normal;
 }
+/* Manual Leads keeps every column readable inside a horizontal scroll area. */
+.manual-leads-table-wrap { border: 1px solid #e9edf4; border-radius: 10px; }
+#kt_datatable.manual-leads-table {
+    width: 100% !important;
+    min-width: 1576px;
+    table-layout: fixed;
+    border: 0;
+    margin-bottom: 0 !important;
+    font-size: 12px;
+}
+#kt_datatable.manual-leads-table thead th {
+    background: #f6f8fc;
+    color: #606c82;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    line-height: 1.5;
+    padding: 10px 22px 10px 8px !important;
+    vertical-align: middle;
+    white-space: normal;
+    border-bottom: 1px solid #e3e8f0;
+}
+#kt_datatable.manual-leads-table tbody td {
+    padding: 8px !important;
+    line-height: 1.4;
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+    border-color: #edf0f5;
+    background: #fff;
+}
+#kt_datatable.manual-leads-table tbody tr:nth-child(even) td { background: #fbfcfe; }
+#kt_datatable.manual-leads-table tbody tr:hover td { background: #f2f7ff; }
+#kt_datatable.manual-leads-table th:nth-child(3),
+#kt_datatable.manual-leads-table th:nth-child(4),
+#kt_datatable.manual-leads-table th:nth-child(12),
+#kt_datatable.manual-leads-table th:nth-child(13),
+#kt_datatable.manual-leads-table td:nth-child(3),
+#kt_datatable.manual-leads-table td:nth-child(4),
+#kt_datatable.manual-leads-table td:nth-child(12),
+#kt_datatable.manual-leads-table td:nth-child(13) { text-align: left !important; }
+#kt_datatable.manual-leads-table td:nth-child(3) { font-weight: 500; }
+#kt_datatable.manual-leads-table .label.label-inline {
+    display: inline-block;
+    height: auto;
+    min-height: 23px;
+    max-width: 100%;
+    padding: 4px 7px;
+    line-height: 1.5;
+    font-size: 11px;
+    border-radius: 6px;
+    white-space: normal;
+    overflow-wrap: normal;
+}
+#kt_datatable.manual-leads-table th:first-child,
+#kt_datatable.manual-leads-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+}
+#kt_datatable.manual-leads-table th:last-child,
+#kt_datatable.manual-leads-table td:last-child {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    box-shadow: -3px 0 6px -4px rgba(45, 60, 85, .3);
+}
+#kt_datatable.manual-leads-table th:first-child,
+#kt_datatable.manual-leads-table th:last-child { z-index: 3; }
+#kt_datatable.manual-leads-table th:last-child {
+    padding: 10px 8px !important;
+    white-space: nowrap;
+    letter-spacing: 0;
+}
+#kt_datatable.manual-leads-table td:nth-child(9) { white-space: normal !important; }
+#kt_datatable.manual-leads-table td:last-child .dropdown-toggle {
+    min-width: 30px;
+    height: 30px;
+    padding: 4px 8px !important;
+}
+
 </style>
 
 <?php
@@ -136,9 +216,11 @@ div.kt-datatable__pager-container {
 						</a>
 						<?php } ?>
 						<?php $current_url = base_url($_SERVER['REQUEST_URI']); ?>
-						<a href="<?php if(strpos($current_url, '?') == true) { echo base_url('Customer/Download?') . (explode('?', $current_url))[1]; } else { echo base_url('Customer/Download'); } ?>" class="btn btn-light-warning font-weight-bold mb-2" style="width:180px;">
+						<?php if(nav_can_view('export_data')) { ?>
+<a href="<?php if(strpos($current_url, '?') == true) { echo base_url('Customer/Download?') . (explode('?', $current_url))[1]; } else { echo base_url('Customer/Download'); } ?>" class="btn btn-light-warning font-weight-bold mb-2" style="width:180px;">
 							<i class="las la-arrow-circle-down"></i>Customer Records
 						</a>
+						<?php } ?>
 					</div>
 				<?php } ?>
 				<?php if($list_base === 'Guests' || $list_base === 'Ghl_Leads' || $list_base === 'Manual_Leads') {
@@ -162,9 +244,11 @@ div.kt-datatable__pager-container {
 								<i class="la la-user-plus"></i>Create Lead
 							</button>
 						<?php } ?>
-						<a href="<?php echo base_url($list_base . '/Download') . $export_qs; ?>" class="btn btn-light-warning font-weight-bold mb-2" style="width:180px;" data-toggle="tooltip" title="Download the filtered list as an Excel file">
+						<?php if(nav_can_view('export_data')) { ?>
+<a href="<?php echo base_url($list_base . '/Download') . $export_qs; ?>" class="btn btn-light-warning font-weight-bold mb-2" style="width:180px;" data-toggle="tooltip" title="Download the filtered list as an Excel file">
 							<i class="las la-arrow-circle-down"></i><?php echo $export_label; ?>
 						</a>
+						<?php } ?>
 					</div>
 				<?php } ?>
 			</div>
@@ -502,9 +586,9 @@ div.kt-datatable__pager-container {
 										<div class="row">
 											<div class="col-md-3">
 												<div class="form-group">
-													<label>Search Name</label>
+													<label><?php echo $list_base === 'Manual_Leads' ? 'Guest / Company Name' : 'Search Name'; ?></label>
 													<div class="input-icon">
-														<input type="text" name="q" value="<?php if(!empty($this->input->get('q'))) { echo htmlspecialchars($this->input->get('q'), ENT_QUOTES); } ?>" autocomplete="off" class="form-control" placeholder="Lead name">
+														<input type="text" name="q" value="<?php if(!empty($this->input->get('q'))) { echo htmlspecialchars($this->input->get('q'), ENT_QUOTES); } ?>" autocomplete="off" class="form-control" placeholder="Any part of guest or company name">
 														<span><i class="la la-user"></i></span>
 													</div>
 												</div>
@@ -529,7 +613,7 @@ div.kt-datatable__pager-container {
 											</div>
 											<div class="col-md-3">
 												<div class="form-group">
-													<label>Lead Capture Date
+													<label><?php echo $list_base === 'Manual_Leads' ? 'Created Date' : 'Lead Capture Date'; ?>
 														<a onclick="Reset_Booking_Date()" class="btn btn-icon btn-light-warning btn-xs" data-toggle="tooltip" title="Clear lead capture date">
 															<i class="la la-undo"></i>
 														</a>
@@ -610,6 +694,42 @@ div.kt-datatable__pager-container {
 												<?php } ?>
 											</div>
 										<?php if($list_base === 'Manual_Leads') { ?>
+											<div class="row">
+												<div class="col-md-3"><div class="form-group">
+													<label>Company Name</label>
+													<input type="text" name="company_name" value="<?php echo htmlspecialchars((string) $this->input->get('company_name'), ENT_QUOTES); ?>" class="form-control" placeholder="Any part of company name" autocomplete="off">
+												</div></div>
+												<div class="col-md-3"><div class="form-group">
+													<label>Travel Date</label>
+													<input readonly id="manual_lead_filter_travel" type="text" name="manual_travel_date" value="<?php echo htmlspecialchars((string) $this->input->get('manual_travel_date'), ENT_QUOTES); ?>" class="form-control" placeholder="DD/MM/YYYY - DD/MM/YYYY" autocomplete="off">
+												</div></div>
+												<div class="col-md-3"><div class="form-group">
+													<label>Sales Person</label>
+													<?php $picked = guest_list_multi_values($this->input->get('manual_sales_person')); ?>
+													<select name="manual_sales_person[]" class="form-control selectpicker" multiple data-live-search="true" data-actions-box="true" title="--SELECT SALES PERSON--">
+														<?php foreach($manual_lead_assignees as $person) { ?>
+														<option value="<?php echo (int) $person->AdminID; ?>" <?php if(in_array((string) $person->AdminID, $picked, true)) echo 'selected'; ?>><?php echo htmlspecialchars($person->Name); ?></option>
+														<?php } ?>
+													</select>
+												</div></div>
+												<div class="col-md-3"><div class="form-group">
+													<label>OP</label>
+													<?php $picked = guest_list_multi_values($this->input->get('manual_op')); ?>
+													<select name="manual_op[]" class="form-control selectpicker" multiple data-live-search="true" data-actions-box="true" title="--SELECT OP--">
+														<?php foreach($manual_lead_assignees as $person) { ?>
+														<option value="<?php echo (int) $person->AdminID; ?>" <?php if(in_array((string) $person->AdminID, $picked, true)) echo 'selected'; ?>><?php echo htmlspecialchars($person->Name); ?></option>
+														<?php } ?>
+													</select>
+												</div></div>
+												<div class="col-md-3"><div class="form-group">
+													<label>Destination</label>
+													<input type="text" name="manual_destination" value="<?php echo htmlspecialchars((string) $this->input->get('manual_destination'), ENT_QUOTES); ?>" class="form-control" placeholder="Any part of destination" autocomplete="off">
+												</div></div>
+												<div class="col-md-3"><div class="form-group">
+													<label>Potential Sales Amount</label>
+													<input type="text" name="potential_sales_amount" value="<?php echo htmlspecialchars((string) $this->input->get('potential_sales_amount'), ENT_QUOTES); ?>" class="form-control" placeholder="Any part of potential sales amount" autocomplete="off">
+												</div></div>
+											</div>
 											<div class="row">
 												<div class="col-md-3">
 													<div class="form-group">
@@ -714,8 +834,26 @@ div.kt-datatable__pager-container {
 				</div>
 
 				<br><br>
-				<div class="dataTables_wrapper dt-bootstrap4 no-footer" style="overflow-x:auto;">
-					<table id="kt_datatable" class="table table-bordered table-head-custom table-checkable dataTable no-footer dtr-inline"<?php if($list_base === 'Customer') { echo ' data-no-datatable="1"'; } ?>>
+				<div class="dataTables_wrapper dt-bootstrap4 no-footer<?php if($list_base === 'Manual_Leads') { echo ' manual-leads-table-wrap'; } ?>" style="overflow-x:auto;">
+					<table id="kt_datatable" class="table table-bordered table-head-custom table-checkable dataTable no-footer<?php echo $list_base === 'Manual_Leads' ? ' manual-leads-table' : ' dtr-inline'; ?>"<?php if($list_base === 'Customer') { echo ' data-no-datatable="1"'; } if($list_base === 'Manual_Leads') { echo ' data-responsive="false"'; } ?>>
+						<?php if($list_base === 'Manual_Leads') { ?>
+						<colgroup>
+							<col style="width:52px;">
+							<col style="width:100px;">
+							<col style="width:125px;">
+							<col style="width:180px;">
+							<col style="width:95px;">
+							<col style="width:155px;">
+							<col style="width:100px;">
+							<col style="width:100px;">
+							<col style="width:170px;">
+							<col style="width:100px;">
+							<col style="width:90px;">
+							<col style="width:110px;">
+							<col style="width:135px;">
+							<col style="width:64px;">
+						</colgroup>
+						<?php } ?>
 						<thead>
 							<tr>
 								<th style="text-align:center;">No.</th>
@@ -739,6 +877,11 @@ div.kt-datatable__pager-container {
 										<th style="text-align:center;">Lead Status</th>
 										<th style="text-align:center;">Status Date</th>
 										<th style="text-align:center;">Created By</th>
+										<th style="text-align:center;">Travel Date</th>
+										<th style="text-align:center;">Sales Person</th>
+										<th style="text-align:center;">OP</th>
+										<th style="text-align:center;">Destination</th>
+										<th style="text-align:center;">Potential Sales Amount</th>
 									<?php } else { ?>
 										<th style="text-align:center;">Tags</th>
 										<?php if($list_base === 'Ghl_Leads') { ?>
@@ -789,7 +932,7 @@ div.kt-datatable__pager-container {
 						</thead>
 						<tbody>
 							<?php if(empty($guests)) { ?>
-								<tr><td colspan="<?php echo ($list_base === 'Customer') ? 12 : ($list_base === 'Manual_Leads' ? 9 : 10); ?>" style="text-align:center; padding-top:10px; padding-bottom:10px;">Guest Records Not Found</td></tr>
+								<tr><td colspan="<?php echo ($list_base === 'Customer') ? 12 : ($list_base === 'Manual_Leads' ? 14 : 10); ?>" style="text-align:center; padding-top:10px; padding-bottom:10px;">Guest Records Not Found</td></tr>
 							<?php } else { ?>
 								<?php $count = 1; foreach($guests as $g) { ?>
 									<?php $is_ghl_row = isset($g->Type) && ($g->Type === 'GHL' || $g->Type === 'Manual'); ?>
@@ -919,6 +1062,23 @@ div.kt-datatable__pager-container {
 												</td>
 												<td style="text-align:center; white-space:nowrap;"><?php echo $status_date_ts ? date('d M Y', $status_date_ts) : $gl_dash; ?></td>
 												<td style="text-align:center;"><?php echo $created_by_val !== '' ? htmlspecialchars($created_by_val) : $gl_dash; ?></td>
+												<?php
+													$travel_display = '';
+													$travel_start = isset($g->TravelDate) ? strtotime((string) $g->TravelDate) : false;
+													$travel_end = isset($g->TravelEndDate) ? strtotime((string) $g->TravelEndDate) : false;
+													if ($travel_start && strpos((string) $g->TravelDate, '0000-00-00') !== 0) {
+														$travel_display = date('d M Y', $travel_start);
+														if ($travel_end && strpos((string) $g->TravelEndDate, '0000-00-00') !== 0) {
+															$travel_display .= ' - ' . date('d M Y', $travel_end);
+														}
+													}
+												?>
+												<td style="text-align:center; white-space:nowrap;"><?php echo $travel_display !== '' ? htmlspecialchars($travel_display) : $gl_dash; ?></td>
+												<?php foreach (array('SalesPerson', 'Op', 'LeadDestination', 'PotentialSalesAmount') as $lead_field) {
+													$lead_value = isset($g->$lead_field) ? trim((string) $g->$lead_field) : '';
+												?>
+													<td style="text-align:center;"><?php echo $lead_value !== '' ? htmlspecialchars($lead_value) : $gl_dash; ?></td>
+												<?php } ?>
 											<?php } else { ?>
 											<td style="text-align:center; max-width:220px;">
 												<?php
@@ -1298,7 +1458,7 @@ div.kt-datatable__pager-container {
 
 <script>
 	<?php
-		$expanded_keys = array('q', 'booking_number', 'contact_number', 'email', 'destination', 'role', 'pax_min', 'pax_max', 'sales_agent', 'source', 'customer_type', 'nationality', 'gender', 'guest_type', 'language', 'booking_date', 'travel_date', 'dob', 'birthday', 'campaign_date', 'follow_date', 'customer_code', 'create_date', 'race', 'client_type', 'number_of_pax', 'state', 'nature_of_business', 'lead_status', 'customer_booking_status', 'non_booker');
+		$expanded_keys = array('company_name', 'manual_travel_date', 'manual_sales_person', 'manual_op', 'manual_destination', 'potential_sales_amount', 'created_by', 'lead_status_date', 'q', 'booking_number', 'contact_number', 'email', 'destination', 'role', 'pax_min', 'pax_max', 'sales_agent', 'source', 'customer_type', 'nationality', 'gender', 'guest_type', 'language', 'booking_date', 'travel_date', 'dob', 'birthday', 'campaign_date', 'follow_date', 'customer_code', 'create_date', 'race', 'client_type', 'number_of_pax', 'state', 'nature_of_business', 'lead_status', 'customer_booking_status', 'non_booker');
 		$expand = false;
 		foreach($expanded_keys as $k) {
 			if($this->input->get($k) !== null && $this->input->get($k) !== '') { $expand = true; break; }
@@ -1407,6 +1567,14 @@ div.kt-datatable__pager-container {
 	}, function(start, end, label) {
 		$('#kt_daterangepicker_guests_create .form-control').val(start.format('DD/MM/YYYY') + ' - ' + end.format('DD/MM/YYYY'));
 	});
+
+	$('#manual_lead_filter_travel').daterangepicker({
+		buttonClasses: 'btn', applyClass: 'btn-primary', cancelClass: 'btn-secondary',
+		autoUpdateInput: false,
+		locale: { format: 'DD/MM/YYYY', cancelLabel: 'Clear' }
+	}).on('apply.daterangepicker', function(event, picker) {
+		$(this).val(picker.startDate.format('DD/MM/YYYY') + ' - ' + picker.endDate.format('DD/MM/YYYY'));
+	}).on('cancel.daterangepicker', function() { $(this).val(''); });
 
 	// Lead Status Date = when any lead_status_log entry was recorded (Manual Leads).
 	// autoUpdateInput:false keeps the input blank until a range is picked, so an
@@ -2136,6 +2304,7 @@ div.kt-datatable__pager-container {
 		<form action="<?php echo base_url('Manual_Leads/Create'); ?>" method="post" id="ghl_lead_create_form">
 			<!-- Empty for Create; the Edit action fills this + repoints the form to Update. -->
 			<input type="hidden" name="dedup_key" id="ghl_lead_dedup_key" value="">
+			<input type="hidden" name="status_changes" id="manual_lead_status_changes" value="">
 			<div class="modal-content">
 				<div class="modal-header" style="background-color:#D7E2F2;">
 					<h5 class="modal-title" id="ghl_lead_create_label" style="color:#6082B6;"><strong>Create Manual Lead</strong></h5>
@@ -2147,11 +2316,11 @@ div.kt-datatable__pager-container {
 					<div class="form-group row">
 						<div class="col-md-6">
 							<label>Name <span class="text-danger">*</span></label>
-							<input type="text" name="first_name" class="form-control" autocomplete="off">
+							<input type="text" name="first_name" class="form-control" autocomplete="off" required>
 						</div>
 						<div class="col-md-6">
-							<label>Company Name</label>
-							<input type="text" name="company_name" class="form-control" autocomplete="off">
+							<label>Company Name <span class="text-danger">*</span></label>
+							<input type="text" name="company_name" class="form-control" autocomplete="off" required>
 						</div>
 					</div>
 					<div class="form-group row">
@@ -2163,7 +2332,7 @@ div.kt-datatable__pager-container {
 										<span class="phone-country-code">--</span>
 										<span class="phone-country-arrow">▼</span>
 									</div>
-									<input type="text" name="phone" id="ml_phone_local" class="phone-input-field" autocomplete="off" placeholder="Enter phone number">
+									<input type="text" name="phone" id="ml_phone_local" class="phone-input-field" autocomplete="off" placeholder="Enter phone number" required>
 									<input type="hidden" name="phone_country_code" id="ml_phone_country_code" class="phone-code-value" value="+60">
 									<div class="phone-dropdown">
 										<div class="phone-dropdown-search">
@@ -2272,8 +2441,8 @@ div.kt-datatable__pager-container {
 					</div>
 					<div class="form-group row">
 						<div class="col-md-6">
-							<label>Client Type</label>
-							<select name="client_type" class="form-control">
+							<label>Client Type <span class="text-danger">*</span></label>
+							<select name="client_type" class="form-control" required>
 								<option value="">-- Select --</option>
 								<?php foreach($client_types as $ctp) { ?>
 								<option value="<?php echo htmlspecialchars($ctp, ENT_QUOTES); ?>"><?php echo htmlspecialchars($ctp); ?></option>
@@ -2291,34 +2460,34 @@ div.kt-datatable__pager-container {
 						</div>
 					</div>
 					<div class="form-group row"><div class="col-md-12">
-						<label>Travel Date</label>
-						<input type="date" name="travel_date" class="form-control">
+						<label>Travel Date <span class="text-danger">*</span></label>
+						<input readonly type="text" name="travel_date_range" id="manual_lead_travel_range" class="form-control" autocomplete="off" placeholder="DD/MM/YYYY - DD/MM/YYYY" required>
 					</div></div>
 					<div class="form-group row"><div class="col-md-12">
-						<label>Sales Person</label>
-						<select name="sales_person_id" class="form-control">
+						<label>Sales Person <span class="text-danger">*</span></label>
+						<select name="sales_person_id" class="form-control" required>
 							<option value="">-- Select Sales Person --</option>
-							<?php if(!empty($admins)) { foreach($admins as $user) { if($user->Status !== 'Y') { continue; } ?>
+							<?php if(!empty($manual_lead_assignees)) { foreach($manual_lead_assignees as $user) { ?>
 							<option value="<?php echo (int) $user->AdminID; ?>"><?php echo htmlspecialchars($user->Name); ?></option>
 							<?php } } ?>
 						</select>
 					</div></div>
 					<div class="form-group row"><div class="col-md-12">
-						<label>OP</label>
-						<select name="op_id" class="form-control">
+						<label>OP <span class="text-danger">*</span></label>
+						<select name="op_id" class="form-control" required>
 							<option value="">-- Select OP --</option>
-							<?php if(!empty($booking_op_admins)) { foreach($booking_op_admins as $user) { ?>
+							<?php if(!empty($manual_lead_assignees)) { foreach($manual_lead_assignees as $user) { ?>
 							<option value="<?php echo (int) $user->AdminID; ?>"><?php echo htmlspecialchars($user->Name); ?></option>
 							<?php } } ?>
 						</select>
 					</div></div>
 					<div class="form-group row"><div class="col-md-12">
-						<label>Destination</label>
-						<input type="text" name="destination" class="form-control" maxlength="255">
+						<label>Destination <span class="text-danger">*</span></label>
+						<input type="text" name="destination" class="form-control" maxlength="255" required>
 					</div></div>
 					<div class="form-group row"><div class="col-md-12">
-						<label>Potential Sales Amount</label>
-						<input type="text" name="potential_sales_amount" class="form-control" maxlength="255">
+						<label>Potential Sales Amount <span class="text-danger">*</span></label>
+						<input type="text" name="potential_sales_amount" class="form-control" maxlength="255" required>
 					</div></div>
 					<div class="form-group">
 						<label>Notes</label>
@@ -2326,13 +2495,13 @@ div.kt-datatable__pager-container {
 					</div>
 					<div class="form-group">
 						<label>Lead Intro</label>
-						<textarea name="lead_intro" class="form-control" rows="2" autocomplete="off"></textarea>
+						<textarea name="lead_intro" class="form-control" rows="6" autocomplete="off"></textarea>
 					</div>
 					<!-- Create-only: dated status seed rows. Hidden in Edit mode (status
 					     history is managed there via the Lead Status action instead). -->
 					<div id="lead_seed_block">
 					<div class="separator separator-dashed my-3"></div>
-					<label class="font-weight-bold">Lead Status Updates <span class="text-muted font-size-xs">(optional — dated status history)</span></label>
+					<label class="font-weight-bold">Lead Status Updates <span class="text-muted font-size-xs">(date, status and note required)</span></label>
 					<div id="lead_log_rows">
 						<div class="form-group row lead-log-row mb-2">
 							<div class="col-md-4">
@@ -2347,7 +2516,7 @@ div.kt-datatable__pager-container {
 								</select>
 							</div>
 							<div class="col-md-4 d-flex">
-								<input type="text" name="log_note[]" class="form-control" maxlength="1000" autocomplete="off" placeholder="Note (optional)">
+								<input type="text" name="log_note[]" class="form-control" maxlength="1000" autocomplete="off" placeholder="Note (required)">
 								<button type="button" class="btn btn-icon btn-light-danger ml-1 lead-log-remove" title="Remove"><i class="la la-trash"></i></button>
 							</div>
 						</div>
@@ -2355,12 +2524,11 @@ div.kt-datatable__pager-container {
 					<button type="button" id="lead_log_add" class="btn btn-light-primary btn-sm font-weight-bold"><i class="la la-plus"></i> Add update</button>
 					</div><!-- /#lead_seed_block -->
 
-					<!-- Edit-only: live dated status history (add/delete against the saved
-					     lead). Replaces the old Action ▸ Lead Status modal — same endpoints
-					     (Lead_Status_Log / Add / Delete) and IDs the LSL script drives. -->
+					<!-- Edit-only: status changes are staged until Save Changes. -->
 					<div id="lead_edit_status_block" style="display:none;">
+						<p class="text-muted mb-2">Status updates and notes are saved when you click Save Changes. Cancel discards your changes.</p>
 						<div class="separator separator-dashed my-3"></div>
-						<label class="font-weight-bold">Lead Status Updates <span class="text-muted font-size-xs">(dated status history)</span></label>
+						<label class="font-weight-bold">Lead Status Updates <span class="text-muted font-size-xs">(date, status and note required)</span></label>
 						<div class="form-group row mb-2">
 							<div class="col-md-4">
 								<label class="font-weight-bold" style="font-size:12px;">Date</label>
@@ -2382,7 +2550,7 @@ div.kt-datatable__pager-container {
 							</div>
 						</div>
 						<div class="form-group mb-2">
-							<label class="font-weight-bold" style="font-size:12px;">Note <span class="text-muted">(optional)</span></label>
+							<label class="font-weight-bold" style="font-size:12px;">Note <span class="text-danger">*</span></label>
 							<input type="text" id="lsl_note" class="form-control" maxlength="1000" placeholder="e.g. Sent Redang package, waiting on reply">
 						</div>
 						<div id="lsl_error" class="text-danger font-weight-bold mb-2" style="font-size:12px; display:none;"></div>
@@ -2403,6 +2571,23 @@ div.kt-datatable__pager-container {
 </div>
 <script>
 	$('[data-toggle="tooltip"]').tooltip();
+	$('#manual_lead_travel_range').daterangepicker({
+		parentEl: '#ghl_lead_create_modal',
+		buttonClasses: 'btn', applyClass: 'btn-primary', cancelClass: 'btn-secondary',
+		autoUpdateInput: false,
+		locale: { format: 'DD/MM/YYYY', cancelLabel: 'Clear' }
+	}).on('apply.daterangepicker', function(event, picker) {
+		$(this).val(picker.startDate.format('DD/MM/YYYY') + ' - ' + picker.endDate.format('DD/MM/YYYY'));
+	}).on('cancel.daterangepicker', function() { $(this).val(''); });
+
+	function mlTravelRange(start, end) {
+		var first = moment(start || '', 'YYYY-MM-DD', true);
+		if (!first.isValid()) { return ''; }
+		var last = moment(end || start, 'YYYY-MM-DD', true);
+		if (!last.isValid()) { last = first.clone(); }
+		return first.format('DD/MM/YYYY') + ' - ' + last.format('DD/MM/YYYY');
+	}
+
 	$('#ghl_lead_create_form').on('submit', function(e) {
 		var $form = $(this);
 		var val = function(name) { return $.trim($form.find('[name="' + name + '"]').val() || ''); };
@@ -2410,6 +2595,7 @@ div.kt-datatable__pager-container {
 		var phoneCode = val('phone_country_code');
 		var $err = $('#ghl_lead_create_error');
 		var problems = [];
+		if ($form.data('edit-loading')) { problems.push('Please reopen the lead and wait for its details to load.'); }
 
 		// Name and Contact Number are the required fields on the form; the number
 		// must carry a country code.
@@ -2421,6 +2607,31 @@ div.kt-datatable__pager-container {
 			problems.push('Email address is not valid.');
 		}
 
+		var requiredFields = {
+			company_name: 'Company Name', client_type: 'Client Type',
+			travel_date_range: 'Travel Date', sales_person_id: 'Sales Person', op_id: 'OP',
+			destination: 'Destination', potential_sales_amount: 'Potential Sales Amount'
+		};
+		$.each(requiredFields, function(field, label) {
+			if (!val(field)) { problems.push(label + ' is required.'); }
+		});
+		if (!val('dedup_key')) {
+			var statusCount = 0;
+			$('#lead_log_rows .lead-log-row').each(function() {
+				var date = $(this).find('[name="log_date[]"]').val();
+				var status = $(this).find('[name="log_status[]"]').val();
+				var note = $.trim($(this).find('[name="log_note[]"]').val());
+				if (date || status || note) {
+					if (!date || !status || !note) { problems.push('Each lead status needs a status, date and note.'); }
+					else { statusCount++; }
+				}
+			});
+			if (!statusCount) { problems.push('At least one dated lead status is required.'); }
+		}
+		if (val('dedup_key') && !problems.length) {
+			var statusProblem = lslPrepareSave();
+			if (statusProblem) { problems.push(statusProblem); }
+		}
 		if (problems.length) {
 			e.preventDefault();
 			$err.html(problems.join('<br>')).removeClass('d-none');
@@ -2455,6 +2666,7 @@ div.kt-datatable__pager-container {
 	// ---- Create / Edit mode for the shared Manual Lead modal -------------------
 	// The Create modal doubles as the Edit modal: the Edit action pre-fills it and
 	// repoints the form to Update. Everything below just swaps between the two.
+	var mlEditGeneration = 0;
 	var ML_CREATE_ACTION = '<?php echo base_url('Manual_Leads/Create'); ?>';
 	var ML_UPDATE_ACTION = '<?php echo base_url('Manual_Leads/Update'); ?>';
 	var ML_EDIT_URL      = '<?php echo base_url('Manual_Leads/Edit_Data'); ?>';
@@ -2480,9 +2692,16 @@ div.kt-datatable__pager-container {
 
 	// Reset the shared modal back to a blank Create form.
 	function mlResetCreate() {
+		mlEditGeneration++;
 		var $form = $('#ghl_lead_create_form');
+		$form.data('edit-loading', false);
+		$('#manual_lead_status_changes').val('');
+		lslEntries = []; lslLoaded = false; lslLoadGeneration++;
 		$form.find('.ml-existing-assignee').remove();
 		$form[0].reset();
+		var travelPicker = $('#manual_lead_travel_range').data('daterangepicker');
+		travelPicker.setStartDate(moment());
+		travelPicker.setEndDate(moment());
 		// reset() restores the hidden dial code to +60 but not the picker display.
 		if (window.phonePickerSetCode) { phonePickerSetCode(document.getElementById('ml_phone_wrapper'), '+60'); }
 		$('#ghl_lead_dedup_key').val('');
@@ -2494,7 +2713,7 @@ div.kt-datatable__pager-container {
 		$('#lead_log_rows .lead-log-row:gt(0)').remove();
 		$('#lead_log_rows .lead-log-row').find('input,select').val('');
 		$('#lead_seed_block').show();
-		// The live dated-status manager is Edit-only.
+		// The staged status editor is Edit-only.
 		$('#lead_edit_status_block').hide();
 	}
 
@@ -2507,11 +2726,16 @@ div.kt-datatable__pager-container {
 		mlResetCreate();
 		var $form   = $('#ghl_lead_create_form');
 		var $submit = $('#ghl_lead_create_submit');
+		var editGeneration = mlEditGeneration;
+		$form.data('edit-loading', true).attr('action', ML_UPDATE_ACTION);
+		$('#ghl_lead_dedup_key').val(dedupKey);
 		$('#ghl_lead_create_label').html('<strong>Edit Manual Lead</strong>');
-		// Swap the create-only seed rows for the live dated-status manager, and load
-		// this lead's existing status history (add/delete save immediately via AJAX).
+		// Swap the create-only seed rows for the staged status editor, and load
+		// this lead's existing status history; changes wait for Save Changes.
 		$('#lead_seed_block').hide();
 		$('#lead_edit_status_block').show();
+		lslEntries = []; lslLoaded = false; lslLoadGeneration++;
+		$('#manual_lead_status_changes').val('');
 		lslDedupKey = dedupKey;
 		$('#lsl_error').hide().text('');
 		$('#lsl_status_date').val(lslTodayLocal());
@@ -2523,8 +2747,10 @@ div.kt-datatable__pager-container {
 
 		$.ajax({ url: ML_EDIT_URL, method: 'GET', dataType: 'json', data: { dedup_key: dedupKey }, timeout: 30000 })
 			.done(function(res) {
+				if (editGeneration !== mlEditGeneration) { return; }
 				if (res && res.ok && res.lead) {
 					var d = res.lead;
+					$form.data('edit-loading', false);
 					var set = function(name, val) { $form.find('[name="' + name + '"]').val(val == null ? '' : val); };
 					$('#ghl_lead_dedup_key').val(dedupKey);
 					$form.attr('action', ML_UPDATE_ACTION);
@@ -2537,7 +2763,12 @@ div.kt-datatable__pager-container {
 					set('gender', d.gender);             set('chat_language', d.chat_language);
 					set('race', d.race);                 set('nationality', d.nationality);
 					set('source', d.source);
-					set('travel_date', d.travel_date);
+					set('travel_date_range', mlTravelRange(d.travel_date, d.travel_end_date));
+					var travelPicker = $('#manual_lead_travel_range').data('daterangepicker');
+					if (d.travel_date && moment(d.travel_date, 'YYYY-MM-DD', true).isValid()) {
+						travelPicker.setStartDate(moment(d.travel_date, 'YYYY-MM-DD'));
+						travelPicker.setEndDate(moment(d.travel_end_date || d.travel_date, 'YYYY-MM-DD'));
+					}
 					mlSetAssignee('sales_person_id', d.sales_person_id, d.sales_person_name);
 					mlSetAssignee('op_id', d.op_id, d.op_name);
 					set('destination', d.destination);
@@ -2548,12 +2779,13 @@ div.kt-datatable__pager-container {
 					$submit.prop('disabled', false).html('<i class="la la-save"></i>Save Changes');
 				} else {
 					$('#ghl_lead_create_error').html((res && res.message) || 'Could not load lead.').removeClass('d-none');
-					$submit.prop('disabled', false).html('<i class="la la-save"></i>Save Changes');
+					$submit.prop('disabled', true).html('<i class="la la-save"></i>Save Changes');
 				}
 			})
 			.fail(function() {
+				if (editGeneration !== mlEditGeneration) { return; }
 				$('#ghl_lead_create_error').html('Network error. Please try again.').removeClass('d-none');
-				$submit.prop('disabled', false).html('<i class="la la-save"></i>Save Changes');
+				$submit.prop('disabled', true).html('<i class="la la-save"></i>Save Changes');
 			});
 	});
 </script>
@@ -2605,19 +2837,19 @@ div.kt-datatable__pager-container {
 <?php } ?>
 
 <?php if($list_base === 'Manual_Leads') { ?>
-<!-- Lead Status log (Manual Leads): a dated status history per lead — multiple
-     (Date + Status + optional Note) entries, alongside the single current status
-     on the lead. Author-only delete. The add form + list live inside the Edit
-     Manual Lead modal (#lead_edit_status_block); this script drives them. -->
+<!-- Manual Lead status history: staged additions, note edits and author-only
+     deletions are submitted with the lead when Save Changes is clicked. -->
 <script>
 	// ----- Lead Status log (dated status history, multiple per Manual lead) -----
 	var LSL_LIST_URL   = '<?php echo base_url('Manual_Leads/Lead_Status_Log'); ?>';
-	var LSL_ADD_URL    = '<?php echo base_url('Manual_Leads/Add_Lead_Status_Log'); ?>';
-	var LSL_DELETE_URL = '<?php echo base_url('Manual_Leads/Delete_Lead_Status_Log'); ?>';
 	var LSL_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 	var lslDedupKey = '';
+	var lslEntries = [];
+	var lslLoaded = false;
+	var lslLoadGeneration = 0;
 
 	function lslEscape(v) { return $('<span>').text(v == null ? '' : v).html(); }
+	function lslAttr(v) { return lslEscape(v).replace(/"/g, '&quot;'); }
 	function lslPad(n) { return (n < 10 ? '0' : '') + n; }
 	function lslFormatDate(raw) {
 		var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw || '');
@@ -2630,92 +2862,91 @@ div.kt-datatable__pager-container {
 	}
 
 	function lslRenderList(entries) {
-		var $list = $('#lsl_list');
-		if (!entries || !entries.length) {
-			$list.html('<div class="text-muted text-center py-3">No status updates yet.</div>');
-			return;
-		}
-		var html = '<div>';
-		for (var i = 0; i < entries.length; i++) {
-			var e = entries[i];
+		var html = '';
+		entries.forEach(function(e, index) {
+			if (e.deleted) { return; }
 			var meta = '<i class="la la-calendar text-primary"></i> ' + lslEscape(lslFormatDate(e.status_date)) +
 				' <span class="label label-inline label-light-primary font-weight-bold">' + lslEscape(e.lead_status) + '</span>';
-			if (e.created_by) {
-				meta += ' <span class="text-muted font-weight-normal">— ' + lslEscape(e.created_by) + '</span>';
-			}
-			html += '<div class="d-flex align-items-start border-bottom py-2" data-log-id="' + e.id + '">' +
-				'<div class="flex-grow-1">' +
-					'<div class="font-weight-bold text-dark-75" style="font-size:12px;">' + meta + '</div>' +
-					(e.note ? '<div class="text-dark-75" style="font-size:13px; white-space:pre-wrap;">' + lslEscape(e.note) + '</div>' : '') +
-				'</div>' +
-				(e.can_delete ?
-					'<button type="button" class="btn btn-icon btn-light-danger btn-xs lsl-delete ml-2" data-id="' + e.id + '" data-toggle="tooltip" title="Delete entry"><i class="la la-trash"></i></button>' : '') +
-			'</div>';
-		}
-		html += '</div>';
-		$list.html(html);
-		$list.find('[data-toggle="tooltip"]').tooltip();
+			if (e.created_by) { meta += ' <span class="text-muted font-weight-normal">— ' + lslEscape(e.created_by) + '</span>'; }
+			if (!e.id) { meta += ' <span class="text-muted">(not saved)</span>'; }
+			html += '<div class="d-flex align-items-start border-bottom py-2">' +
+				'<div class="flex-grow-1"><div class="font-weight-bold mb-2" style="font-size:12px;">' + meta + '</div>' +
+				'<input type="text" class="form-control form-control-sm lsl-entry-note" data-index="' + index + '" maxlength="1000" aria-label="Note for ' + lslAttr(e.lead_status) + '" required placeholder="Note for this status (required)" value="' + lslAttr(e.note) + '"></div>' +
+				(e.can_delete ? '<button type="button" class="btn btn-icon btn-light-danger btn-xs lsl-delete ml-2" data-index="' + index + '" title="Remove entry"><i class="la la-trash"></i></button>' : '') + '</div>';
+		});
+		$('#lsl_list').html(html || '<div class="text-muted text-center py-3">No status updates yet.</div>');
 	}
 
 	function lslLoad() {
-		$('#lsl_list').html('<div class="text-muted text-center py-3"><i class="la la-spinner la-spin"></i>&nbsp; Loading&hellip;</div>');
-		$.ajax({ url: LSL_LIST_URL, method: 'GET', dataType: 'json', data: { dedup_key: lslDedupKey }, timeout: 30000 })
+		var key = lslDedupKey;
+		var generation = ++lslLoadGeneration;
+		lslLoaded = false;
+		$('#lsl_list').html('<div class="text-muted text-center py-3">Loading status history...</div>');
+		$.ajax({ url: LSL_LIST_URL, method: 'GET', dataType: 'json', data: { dedup_key: key }, timeout: 30000 })
 			.done(function(res) {
-				if (res && res.ok) { lslRenderList(res.entries); }
-				else { $('#lsl_list').html('<div class="text-danger text-center py-3">' + lslEscape((res && res.message) || 'Could not load.') + '</div>'); }
+				if (key !== lslDedupKey || generation !== lslLoadGeneration) { return; }
+				if (res && res.ok) {
+					lslEntries = res.entries || [];
+					lslEntries.forEach(function(e) { e.original_note = e.note; });
+					lslLoaded = true;
+					lslRenderList(lslEntries);
+				} else { $('#lsl_list').text((res && res.message) || 'Could not load status history. Please reopen the lead.'); }
 			})
-			.fail(function() { $('#lsl_list').html('<div class="text-danger text-center py-3">Network error. Please try again.</div>'); });
+			.fail(function() {
+				if (key === lslDedupKey && generation === lslLoadGeneration) { $('#lsl_list').text('Could not load status history. Please reopen the lead.'); }
+			});
+	}
+
+	function lslStageAdd() {
+		if (!lslLoaded) { return 'Please wait for status history to load, or reopen the lead.'; }
+		var status = $('#lsl_status').val();
+		var date = $('#lsl_status_date').val();
+		if (!status) { return 'Please choose a status for the new note.'; }
+		if (!date) { return 'Please choose a status date.'; }
+		if (!$.trim($('#lsl_note').val())) { return 'Please enter a note for this status.'; }
+		lslEntries.unshift({ id: 0, status_date: date, lead_status: status, note: $.trim($('#lsl_note').val()), can_delete: true });
+		$('#lsl_status').val('');
+		$('#lsl_note').val('');
+		lslRenderList(lslEntries);
+		return '';
+	}
+
+	function lslPrepareSave() {
+		if (!lslLoaded) { return 'Please wait for status history to load, or reopen the lead.'; }
+		// Save Changes also includes a status/note entered without clicking Add.
+		if ($('#lsl_status').val() || $.trim($('#lsl_note').val())) {
+			var error = lslStageAdd();
+			if (error) { return error; }
+		}
+		if (!lslEntries.some(function(e) { return !e.deleted; })) { return 'At least one dated lead status is required.'; }
+		if (lslEntries.some(function(e) { return !e.deleted && !$.trim(e.note); })) { return 'A note is required for each lead status.'; }
+		var changes = { add: [], notes: [], delete: [] };
+		lslEntries.forEach(function(e) {
+			if (e.deleted) { if (e.id) { changes.delete.push(e.id); } return; }
+			if (!e.id) { changes.add.push({ status_date: e.status_date, lead_status: e.lead_status, note: e.note || '' }); }
+			else if (e.note !== e.original_note) { changes.notes.push({ id: e.id, note: e.note || '' }); }
+		});
+		$('#manual_lead_status_changes').val(JSON.stringify(changes));
+		return '';
 	}
 
 	$('#lsl_add').on('click', function() {
-		var $btn   = $(this);
-		var $error = $('#lsl_error');
-		var date   = $('#lsl_status_date').val();
-		var status = $('#lsl_status').val();
-		var note   = $.trim($('#lsl_note').val());
-
-		$error.hide().text('');
-		if (!status) { $error.text('Please choose a status.').show(); return; }
-		$btn.prop('disabled', true);
-
-		$.ajax({
-			url: LSL_ADD_URL, method: 'POST', dataType: 'json', timeout: 30000,
-			data: { dedup_key: lslDedupKey, status_date: date, lead_status: status, note: note }
-		}).done(function(res) {
-			$btn.prop('disabled', false);
-			if (res && res.ok) {
-				$('#lsl_note').val('');
-				lslLoad();
-			} else {
-				$error.text((res && res.message) || 'Could not add entry.').show();
-			}
-		}).fail(function() {
-			$btn.prop('disabled', false);
-			$error.text('Network error. Please try again.').show();
-		});
+		var error = lslStageAdd();
+		$('#lsl_error').text(error).toggle(!!error);
 	});
-
 	$('#lsl_note').on('keydown', function(e) {
 		if (e.which === 13) { e.preventDefault(); $('#lsl_add').click(); }
 	});
-
-	$('#lsl_list').on('click', '.lsl-delete', function() {
-		var $btn = $(this);
-		var id   = $btn.attr('data-id');
-		$btn.tooltip('hide').prop('disabled', true).find('i').attr('class', 'la la-spinner la-spin');
-		$.ajax({ url: LSL_DELETE_URL, method: 'POST', dataType: 'json', data: { id: id }, timeout: 30000 })
-			.done(function(res) {
-				if (res && res.ok) { lslLoad(); }
-				else {
-					$('#lsl_error').text((res && res.message) || 'Could not delete entry.').show();
-					$btn.prop('disabled', false).find('i').attr('class', 'la la-trash');
-				}
-			})
-			.fail(function() {
-				$('#lsl_error').text('Network error. Please try again.').show();
-				$btn.prop('disabled', false).find('i').attr('class', 'la la-trash');
-			});
+	$('#lsl_list').on('input', '.lsl-entry-note', function() {
+		lslEntries[Number($(this).attr('data-index'))].note = $(this).val();
+	}).on('keydown', '.lsl-entry-note', function(e) {
+		if (e.which === 13) { e.preventDefault(); }
 	});
+	$('#lsl_list').on('click', '.lsl-delete', function() {
+		var entry = lslEntries[Number($(this).attr('data-index'))];
+		if (entry && entry.can_delete) { entry.deleted = true; lslRenderList(lslEntries); }
+	});
+
 </script>
 
 <!-- Lead View modal (Manual Leads): read-only detail of one hand-entered lead,
@@ -2793,7 +3024,7 @@ div.kt-datatable__pager-container {
 		html += lvRow('Date of Birth', d.date_of_birth);
 		html += '<hr class="my-2">';
 		html += lvRow('Source', d.source);
-		html += lvRow('Travel Date', d.travel_date);
+		html += lvRow('Travel Date', mlTravelRange(d.travel_date, d.travel_end_date));
 		html += lvRow('Sales Person', d.sales_person_name);
 		html += lvRow('OP', d.op_name);
 		html += lvRow('Destination', d.destination);

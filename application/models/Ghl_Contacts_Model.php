@@ -152,7 +152,7 @@ class Ghl_Contacts_Model extends CI_Model
             'assigned_to', 'lead_source', 'created_by', 'gender', 'race', 'nationality',
             'address', 'country', 'source', 'notes', 'customer_type', 'lead_intro',
             'nature_of_business', 'number_of_pax', 'client_type', 'state',
-            'travel_date', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount',
+            'travel_date', 'travel_end_date', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount',
             'chat_language', 'date_of_birth', 'tags_json', 'date_added',
         );
 
@@ -198,7 +198,7 @@ class Ghl_Contacts_Model extends CI_Model
             'race', 'nationality', 'address', 'country', 'source', 'notes',
             'lead_intro', 'chat_language',
             'nature_of_business', 'number_of_pax', 'client_type', 'state',
-            'travel_date', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount',
+            'travel_date', 'travel_end_date', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount',
             'tags_json',
         );
 

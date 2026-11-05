@@ -14,7 +14,8 @@ var KTDatatablesAdvancedColumnRendering = function() {
 		// begin first table
 		table.DataTable({
 			deferRender: true,
-			responsive: true,
+			responsive: table.data('responsive') !== false,
+			autoWidth: !table.hasClass('manual-leads-table'),
 			paging: true,
 			columnDefs: [
 				{

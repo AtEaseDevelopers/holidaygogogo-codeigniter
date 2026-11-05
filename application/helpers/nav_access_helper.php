@@ -27,6 +27,7 @@ if ( ! function_exists('nav_modules'))
 			'lead_status' => array('label' => 'Lead Status', 'group' => 'Lead & Customer', 'class' => 'Lead_Status', 'lc' => true),
 			'nature_of_business' => array('label' => 'Nature of Business', 'group' => 'Lead & Customer', 'class' => 'Nature_Of_Business', 'lc' => true),
 			'customer_type' => array('label' => 'Customer Type', 'group' => 'Lead & Customer', 'class' => 'Customer_Type'),
+			'export_data' => array('label' => 'Export Data', 'group' => 'Lead & Customer', 'class' => '', 'capability' => true, 'single' => true),
 
 			'campaign' => array('label' => 'Campaign', 'group' => 'Campaign', 'class' => 'Campaign', 'lc' => true),
 
@@ -373,7 +374,7 @@ if ( ! function_exists('nav_module_for_request'))
 		}
 
 		foreach (nav_modules() as $mod => $meta) {
-			if ($meta['class'] === $class && empty($meta['method'])) {
+			if (empty($meta['capability']) && $meta['class'] === $class && empty($meta['method'])) {
 				return $mod;
 			}
 		}
@@ -415,8 +416,9 @@ if ( ! function_exists('nav_home_url'))
 			return base_url('Booking');
 		}
 		foreach (array_keys(nav_modules()) as $mod) {
+			$meta = nav_modules()[$mod];
+			if (!empty($meta['capability'])) { continue; }
 			if (nav_can_view($mod)) {
-				$meta = nav_modules()[$mod];
 				$path = $meta['class'];
 				if ( ! empty($meta['method'])) {
 					$path .= '/' . $meta['method'];
@@ -515,4 +517,42 @@ if ( ! function_exists('nav_apply_request_flags'))
 
 		$CI->session->set_userdata('access_control', array_values(array_unique($ac)));
 	}
+}
+
+/** Data exports only. Blank import templates and PDF/attachment downloads are separate. */
+function nav_data_export_routes()
+{
+	return array(
+		'booking' => array('download'),
+		'customer' => array('download'),
+		'guests' => array('download'),
+		'ghl_leads' => array('download'),
+		'manual_leads' => array('download'),
+		'guest_list' => array('download', 'download_zip'),
+		'payment' => array('download'),
+		'costing' => array('export_packages', 'export_currency_history'),
+		'product' => array('download'),
+		'supplier' => array('download', 'downloadresults'),
+		'footer' => array('download'),
+		'faq' => array('download', 'export_template'),
+		'competitor_product' => array('download_excel', 'download_excel_tables', 'download_crawl_excel'),
+		'master_product' => array('download_excel', 'download_excel_tables'),
+		'message_log' => array('csv'),
+		'report' => array('download', 'download_product_sales', 'download_guest_by_country',
+			'ghl_message_log_export', 'lead_reply_activity_export', 'leads_by_hour_export'),
+	);
+}
+
+function nav_is_data_export_request($class, $method)
+{
+	$routes = nav_data_export_routes();
+	$class = strtolower((string) $class);
+	return isset($routes[$class]) && in_array(strtolower((string) $method), $routes[$class], true);
+}
+
+function nav_block_data_export()
+{
+	if (nav_can_view('export_data')) { return false; }
+	show_error('You do not have Export Data access. Please contact the Owner.', 403);
+	return true;
 }

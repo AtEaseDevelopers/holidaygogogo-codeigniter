@@ -121,6 +121,7 @@ class Nav_Module_Access_Model extends CI_Model
 				foreach ($modules as $m) {
 					$view = ! empty($mods[$m]['view']) ? 1 : 0;
 					$edit = ! empty($mods[$m]['edit']) ? 1 : 0;
+					if (!empty(nav_modules()[$m]['single'])) { $edit = 0; }
 					if ($edit) {
 						$view = 1;
 					}
