@@ -132,26 +132,6 @@ class Manual_Leads extends MY_Controller
 		redirect(base_url('Manual_Leads'));
 	}
 
-	/**
-	 * Seed the single "LEAD STATUS" cell from a bulk-import row as the lead's first
-	 * dated Lead Status log entry (status lives only in lead_status_log now — there
-	 * is no current-status column). Dated the import time. A blank or invalid status
-	 * is skipped silently: the lead is already saved, so a bad status must not fail
-	 * the import.
-	 */
-	private function Seed_Import_Status($new_id, $raw_status, $created_by, $now)
-	{
-		$st = lead_status_log_validate_status((string) $raw_status);
-		if (!$st['ok']) {
-			return; // blank / invalid -> lead simply starts with no status
-		}
-		$dedup_key = $this->Ghl_Contacts_Model->effective_dedup_key($new_id);
-		if ($dedup_key === null) {
-			return;
-		}
-		$this->Guests_Model->Add_Lead_Status_Log($dedup_key, substr((string) $now, 0, 10), $st['value'], '', $created_by);
-	}
-
 	private function Validate_Lead_Form(&$prepared, $existing = null)
 	{
 		if (!$prepared['ok']) { return; }
@@ -458,45 +438,11 @@ class Manual_Leads extends MY_Controller
 		return $out(array('ok' => true));
 	}
 
-	/**
-	 * Download the Bulk Upload template: an .xlsx whose header row is the manual-
-	 * lead field labels (ghl_manual_lead_import_columns), with one greyed sample
-	 * row so the format is obvious. Mirrors Customer::Import_Template().
-	 */
+	/** Download export-compatible headers with required-field guidance and BC user names. */
 	function Import_Template()
 	{
-		$this->load->helper('ghl_manual_lead');
-
-		$spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
-		$sheet = $spreadsheet->getActiveSheet();
-		$sheet->setTitle('Manual Lead Template');
-		$spreadsheet->getProperties()->setCreator('HolidayGoGoGo');
-
-		$headers = array_keys(ghl_manual_lead_import_columns());
-		$col = 'A';
-		foreach ($headers as $label) {
-			$sheet->setCellValueExplicit($col . '1', $label, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
-			$sheet->getColumnDimension($col)->setWidth(20);
-			$col++;
-		}
-		$last_col = chr(ord('A') + count($headers) - 1); // 19 cols => 'S'
-		$sheet->getStyle('A1:' . $last_col . '1')->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_BLACK);
-		$sheet->getStyle('A1:' . $last_col . '1')->getFont()->getColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE);
-		$sheet->getStyle('A1:' . $last_col . '1')->getFont()->setBold(true);
-
-		// One greyed sample row; delete before importing. NAME or CONTACT NUMBER
-		// (or EMAIL) must be filled — a fully-blank row is skipped.
-		$sample = array('ALI BIN ABU', 'Acme Sdn Bhd', '0123456789', 'ali@example.com',
-			'No 1, Jalan Besar, 50000 KL', 'Male', 'Malay', 'Malay', 'Malaysia', 'Malaysia',
-			'Facebook', 'HRDC', 'Called twice, keen on Redang', 'Company',
-			'Referred by existing client', 'New', 'Travel Agency', '11-20', 'Selangor');
-		$col = 'A';
-		foreach ($sample as $val) {
-			$sheet->setCellValueExplicit($col . '2', $val, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
-			$col++;
-		}
-		$sheet->getStyle('A2:' . $last_col . '2')->getFont()->getColor()->setARGB('FF999999');
-
+		$this->load->helper('manual_lead_import');
+		$spreadsheet = manual_lead_import_template($this->Booking_Model->Read_Manual_Lead_Assignees());
 		$filename = 'MANUAL_LEAD_IMPORT_TEMPLATE_' . date('Ymd') . '.xlsx';
 		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 		header('Content-Disposition: attachment;filename="' . $filename . '"');
@@ -506,17 +452,15 @@ class Manual_Leads extends MY_Controller
 	}
 
 	/**
-	 * Bulk-create manual leads from an uploaded template (Import_Template output,
-	 * rows filled). Each row is mapped to the SAME POST shape the Create modal
-	 * sends (ghl_manual_lead_row_to_post) and run through the SAME validator
-	 * (ghl_manual_lead_prepare), so bulk and single create behave identically.
-	 * created_by is the current admin (drives per-creator visibility). The upload
-	 * is backed up under assets/upload/manual_lead_import/ (newest 3 kept).
+	 * Bulk-create leads from the Records sheet using export-compatible headers.
+	 * Validate required fields, BC user names and complete status history first.
+	 * Each row commits its lead and status history together. Creator/date come
+	 * from the server. The newest three upload files are retained as backups.
 	 */
 	function Import()
 	{
 		if(lc_block_edit('manual_leads')) { return; }
-		$this->load->helper('ghl_manual_lead');
+		$this->load->helper('manual_lead_import');
 		$this->load->model('Ghl_Contacts_Model');
 
 		if ($this->input->server('REQUEST_METHOD') !== 'POST' || empty($_FILES['import_file']['name'])) {
@@ -564,40 +508,38 @@ class Manual_Leads extends MY_Controller
 
 		try {
 			$spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($dest);
-			$rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+			$data_sheet = $spreadsheet->getSheetByName('Records') ?: $spreadsheet->getSheet(0);
+			$rows = $data_sheet->toArray(null, true, true, false);
+			$header_map = manual_lead_import_header_map(isset($rows[0]) ? $rows[0] : array());
 		} catch (\Exception $e) {
-			$this->session->set_flashdata('ghl_lead_error', 'Could not read the Excel file. Please use the downloaded template.');
+			$this->session->set_flashdata('ghl_lead_error', 'Could not read the Excel file: ' . $e->getMessage());
 			redirect(base_url('Manual_Leads'));
 			return;
 		}
 
 		$created_by = (int) $this->session->userdata('admin_id');
 		$now = date('Y-m-d H:i:s');
+		$users = $this->Booking_Model->Read_Manual_Lead_Assignees();
 		$created = 0;
 		$failed = array();
-		$line = 0;
-		foreach ((array) $rows as $row) {
-			$line++;
-			$post = ghl_manual_lead_row_to_post($row);
-			if ($post === null) {
-				continue; // header / blank row
-			}
-			$uid = uniqid('', true);
-			$prepared = ghl_manual_lead_prepare($post, $uid, $now, $created_by);
+		foreach (array_slice($rows, 1, null, true) as $index => $row) {
+			$line = $index + 1;
+			$prepared = manual_lead_import_prepare($row, $header_map, $users, $now, $created_by, uniqid('', true));
+			if ($prepared === null) { continue; }
 			if (!$prepared['ok']) {
-				$name = trim($post['first_name'] ?? '');
-				$failed[] = 'row ' . $line . ($name !== '' ? ' (' . $name . ')' : '') . ' — ' . implode(' ', $prepared['errors']);
+				$failed[] = 'row ' . $line . ' — ' . $prepared['error'];
 				continue;
 			}
+			$this->db->trans_begin();
 			$new_id = $this->Ghl_Contacts_Model->create_manual_lead($prepared['row']);
-			if ($new_id) {
+			$key = $new_id ? $this->Ghl_Contacts_Model->effective_dedup_key((int) $new_id) : null;
+			$saved = $key !== null && $this->Guests_Model->Apply_Manual_Lead_Status_Changes($key, $prepared['changes'], $created_by);
+			if ($saved && $this->db->trans_status() !== false) {
+				$this->db->trans_commit();
 				$created++;
-				// The single "LEAD STATUS" cell becomes the lead's first dated status
-				// log entry (status lives only in lead_status_log now). Dated today;
-				// skipped when blank/invalid so a bad status never fails the import.
-				$this->Seed_Import_Status((int) $new_id, (string) ($post['lead_status'] ?? ''), $created_by, $now);
 			} else {
-				$failed[] = 'row ' . $line . ' — could not save';
+				$this->db->trans_rollback();
+				$failed[] = 'row ' . $line . ' — could not save lead and status history';
 			}
 		}
 

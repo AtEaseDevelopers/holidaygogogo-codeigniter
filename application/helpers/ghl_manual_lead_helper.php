@@ -258,7 +258,9 @@ function ghl_manual_lead_normalize_gender($raw)
 }
 
 /**
- * The Bulk Upload template columns, in order: sheet column label => the POST key
+ * Legacy positional template columns (retained for older helper integrations).
+ * The current server import uses manual_lead_import_helper and export headers.
+ * Sheet column label => the POST key
  * ghl_manual_lead_prepare() reads. One place so the template (Import_Template)
  * and the parser (row_to_post) can never drift apart.
  *

@@ -2803,7 +2803,7 @@ div.kt-datatable__pager-container {
 				</div>
 				<div class="modal-body">
 					<div class="alert alert-light-primary" role="alert" style="border-left:4px solid #6082B6;">
-						Download <strong>Import Template</strong> first, fill one lead per row, then upload it here. Each row becomes a new manual lead.
+						Download <strong>Import Template</strong> first. Its Records sheet follows the export field order, excluding automatic No. and Created Date; a red * marks compulsory headers. See Instructions for dates, BC users and status notes. Each row creates a new manual lead.
 					</div>
 					<div class="form-group">
 						<label>Excel File <span class="text-danger">*</span></label>
@@ -2811,7 +2811,7 @@ div.kt-datatable__pager-container {
 							<input type="file" name="import_file" class="custom-file-input" id="manual_lead_import_file" accept=".xlsx,.xls" required>
 							<label class="custom-file-label" for="manual_lead_import_file" id="manual_lead_import_file_label">Choose .xlsx / .xls file</label>
 						</div>
-						<span class="form-text text-muted"><strong>Name</strong> and <strong>Contact Number</strong> are required per row. The last 3 uploads are kept as backups.</span>
+						<span class="form-text text-muted">Fill every field marked *, including status notes. Delete the grey example row and keep the header row unchanged. The last 3 uploads are kept as backups.</span>
 					</div>
 				</div>
 				<div class="modal-footer">
