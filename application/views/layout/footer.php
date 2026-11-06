@@ -11,24 +11,27 @@
     </div>
 </div>
 
-<?php if (!nav_can_view('export_data')) { ?>
-<style>
-/* Match the server's export route list, including dynamically rendered links. */
-<?php foreach (nav_data_export_routes() as $controller => $methods) {
-    foreach ($methods as $method) {
-        $route = '/' . $controller . '/' . $method;
-        foreach (array('a' => 'href', 'form' => 'action') as $tag => $attribute) {
-            echo $tag . '[' . $attribute . '$="' . $route . '" i],';
-            echo $tag . '[' . $attribute . '*="' . $route . '?" i],';
+<?php if (!nav_can_view('export_data')) {
+    // Hide only the Lead & Customer data-export buttons (see nav_data_export_routes).
+    // All other exports follow normal page-view access and are never hidden here.
+    $export_selectors = array();
+    foreach (nav_data_export_routes() as $controller => $methods) {
+        foreach ($methods as $method) {
+            $route = '/' . $controller . '/' . $method;
+            foreach (array('a' => 'href', 'form' => 'action') as $tag => $attribute) {
+                $export_selectors[] = $tag . '[' . $attribute . '$="' . $route . '" i]';
+                $export_selectors[] = $tag . '[' . $attribute . '*="' . $route . '?" i]';
+            }
         }
     }
-} ?>
-#messageLogCsv, #lead-reply-export-btn, #download_excel,
-#mp_download_results, #mp_download_selected, #mp_download_tour_info {
+    if (!empty($export_selectors)) { ?>
+<style>
+<?php echo implode(",\n", $export_selectors); ?> {
     display: none !important;
 }
 </style>
-<?php } ?>
+<?php }
+} ?>
 
 <script>
     var HOST_URL = '<?php echo base_url() ?>';

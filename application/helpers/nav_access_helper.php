@@ -519,27 +519,21 @@ if ( ! function_exists('nav_apply_request_flags'))
 	}
 }
 
-/** Data exports only. Blank import templates and PDF/attachment downloads are separate. */
+/**
+ * Routes gated by the "Export Data" permission — LEAD & CUSTOMER data only
+ * (Customer, Guest List, GHL Leads, Manual Leads). Every other export
+ * (Booking, Payment, Costing, Product/Supplier, Reports, FAQ, Competitor, etc.)
+ * is intentionally NOT gated here: if an admin can view the page, they can
+ * export it. Blank import templates and PDF/attachment downloads are separate.
+ */
 function nav_data_export_routes()
 {
 	return array(
-		'booking' => array('download'),
 		'customer' => array('download'),
 		'guests' => array('download'),
 		'ghl_leads' => array('download'),
 		'manual_leads' => array('download'),
 		'guest_list' => array('download', 'download_zip'),
-		'payment' => array('download'),
-		'costing' => array('export_packages', 'export_currency_history'),
-		'product' => array('download'),
-		'supplier' => array('download', 'downloadresults'),
-		'footer' => array('download'),
-		'faq' => array('download', 'export_template'),
-		'competitor_product' => array('download_excel', 'download_excel_tables', 'download_crawl_excel'),
-		'master_product' => array('download_excel', 'download_excel_tables'),
-		'message_log' => array('csv'),
-		'report' => array('download', 'download_product_sales', 'download_guest_by_country',
-			'ghl_message_log_export', 'lead_reply_activity_export', 'leads_by_hour_export'),
 	);
 }
 
