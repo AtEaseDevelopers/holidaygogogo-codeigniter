@@ -23,7 +23,7 @@
 					member's current access. After you save, those choices become the source of truth.
 					The Owner always has full access and is not listed. Ticking <strong>Edit</strong>
 					automatically grants <strong>View</strong>. Unticking View hides that item from their sidebar.
-					<strong>Export Data</strong> grants Excel/CSV downloads across BC and starts disabled for staff.
+					<strong>Export Data</strong> grants Excel/CSV downloads only within its navigation group and starts disabled for staff.
 					Page access is still required. Blank import templates are available without Export Data access.
 				</p>
 				<ul class="nav nav-tabs nav-tabs-line nav-tabs-bold" role="tablist">

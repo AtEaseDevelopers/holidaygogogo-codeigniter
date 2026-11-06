@@ -11,27 +11,36 @@
     </div>
 </div>
 
-<?php if (!nav_can_view('export_data')) {
-    // Hide only the Lead & Customer data-export buttons (see nav_data_export_routes).
-    // All other exports follow normal page-view access and are never hidden here.
-    $export_selectors = array();
-    foreach (nav_data_export_routes() as $controller => $methods) {
-        foreach ($methods as $method) {
-            $route = '/' . $controller . '/' . $method;
-            foreach (array('a' => 'href', 'form' => 'action') as $tag => $attribute) {
-                $export_selectors[] = $tag . '[' . $attribute . '$="' . $route . '" i]';
-                $export_selectors[] = $tag . '[' . $attribute . '*="' . $route . '?" i]';
-            }
+<style>
+/* Hide direct and dynamically rendered exports using the same group as the server guard. */
+<?php
+$export_selectors = array();
+foreach (nav_data_export_routes() as $controller => $methods) {
+    if (nav_can_export_data($controller)) { continue; }
+    foreach ($methods as $method) {
+        $route = '/' . $controller . '/' . $method;
+        foreach (array('a' => 'href', 'form' => 'action') as $tag => $attribute) {
+            $export_selectors[] = $tag . '[' . $attribute . '$="' . $route . '" i]';
+            $export_selectors[] = $tag . '[' . $attribute . '*="' . $route . '?" i]';
         }
     }
-    if (!empty($export_selectors)) { ?>
-<style>
-<?php echo implode(",\n", $export_selectors); ?> {
-    display: none !important;
 }
+$export_buttons = array(
+    'message_log' => array('#messageLogCsv'),
+    'report' => array('#lead-reply-export-btn'),
+    'competitor_product' => array('#download_excel'),
+    'master_product' => array('#mp_download_results', '#mp_download_selected', '#mp_download_tour_info'),
+);
+foreach ($export_buttons as $controller => $selectors) {
+    if (!nav_can_export_data($controller)) {
+        $export_selectors = array_merge($export_selectors, $selectors);
+    }
+}
+if ($export_selectors) {
+    echo implode(",\n", $export_selectors) . " { display: none !important; }\n";
+}
+?>
 </style>
-<?php }
-} ?>
 
 <script>
     var HOST_URL = '<?php echo base_url() ?>';

@@ -38,14 +38,17 @@ if ( ! function_exists('nav_modules'))
 			'slow_conversion_reason' => array('label' => 'Slow Conversion Reason', 'group' => 'Booking', 'class' => 'Slow_Conversion_Reason'),
 			'quick_filter' => array('label' => 'Quick Filter Setup', 'group' => 'Booking', 'class' => 'Quick_Filter'),
 			'footer' => array('label' => 'Footer', 'group' => 'Booking', 'class' => 'Footer'),
+			'booking_export_data' => array('label' => 'Export Data', 'group' => 'Booking', 'class' => '', 'capability' => true, 'single' => true),
 
 			'payment' => array('label' => 'Payment Listing', 'group' => 'Payment', 'class' => 'Payment'),
 			'payment_due_soon' => array('label' => 'Payment Due Soon', 'group' => 'Payment', 'class' => 'Payment', 'method' => 'upcoming_due'),
+			'payment_export_data' => array('label' => 'Export Data', 'group' => 'Payment', 'class' => '', 'capability' => true, 'single' => true),
 
 			'costing' => array('label' => 'Costing Package', 'group' => 'Costing', 'class' => 'Costing'),
 			'costing_item' => array('label' => 'Costing Item', 'group' => 'Costing', 'class' => 'Costing_Item'),
 			'costing_category' => array('label' => 'Costing Category', 'group' => 'Costing', 'class' => 'Costing_Category'),
 			'costing_currency' => array('label' => 'Costing Currency', 'group' => 'Costing', 'class' => 'Costing', 'method' => 'Currency'),
+			'costing_export_data' => array('label' => 'Export Data', 'group' => 'Costing', 'class' => '', 'capability' => true, 'single' => true),
 
 			'product' => array('label' => 'Product List', 'group' => 'Product & Supplier', 'class' => 'Product'),
 			'supplier' => array('label' => 'Supplier List', 'group' => 'Product & Supplier', 'class' => 'Supplier'),
@@ -53,13 +56,16 @@ if ( ! function_exists('nav_modules'))
 			'category_code' => array('label' => 'Category Code', 'group' => 'Product & Supplier', 'class' => 'Category_Code'),
 			'product_tag' => array('label' => 'Product Tag', 'group' => 'Product & Supplier', 'class' => 'Tag'),
 			'country_code' => array('label' => 'Country Code', 'group' => 'Product & Supplier', 'class' => 'Country_Code'),
+			'product_export_data' => array('label' => 'Export Data', 'group' => 'Product & Supplier', 'class' => '', 'capability' => true, 'single' => true),
 
 			'master_product' => array('label' => 'Master Product', 'group' => 'Product Analysis', 'class' => 'Master_Product'),
 			'competitor_product' => array('label' => 'Competitor Product', 'group' => 'Product Analysis', 'class' => 'Competitor_Product'),
 			'our_product' => array('label' => 'Our Product', 'group' => 'Product Analysis', 'class' => 'Our_Product'),
+			'analysis_export_data' => array('label' => 'Export Data', 'group' => 'Product Analysis', 'class' => '', 'capability' => true, 'single' => true),
 
 			'faq' => array('label' => 'FAQ', 'group' => 'FAQ', 'class' => 'Faq'),
 			'faq_tag' => array('label' => 'FAQ Tag', 'group' => 'FAQ', 'class' => 'Faq_Tag'),
+			'faq_export_data' => array('label' => 'Export Data', 'group' => 'FAQ', 'class' => '', 'capability' => true, 'single' => true),
 
 			'powerbi_report' => array('label' => 'Power BI Report', 'group' => 'Reports', 'class' => 'Report', 'method' => 'PowerBI_Reports'),
 			'powerbi_builder' => array('label' => 'Power BI Builder', 'group' => 'Reports', 'class' => 'Report', 'method' => 'PowerBI'),
@@ -67,6 +73,7 @@ if ( ! function_exists('nav_modules'))
 			'leads_by_hour' => array('label' => 'Leads by Hour', 'group' => 'Reports', 'class' => 'Report', 'method' => 'Leads_By_Hour'),
 			'lead_reply_activity' => array('label' => 'Lead Reply Activity', 'group' => 'Reports', 'class' => 'Report', 'method' => 'Lead_Reply_Activity_Dashboard'),
 			'message_log' => array('label' => 'Message Log', 'group' => 'Reports', 'class' => 'Report', 'method' => 'Ghl_Message_Log'),
+			'reports_export_data' => array('label' => 'Export Data', 'group' => 'Reports', 'class' => '', 'capability' => true, 'single' => true),
 
 			'admin' => array('label' => 'Admin', 'group' => 'Settings', 'class' => 'Admin'),
 			'team' => array('label' => 'Team', 'group' => 'Settings', 'class' => 'Team'),
@@ -519,21 +526,27 @@ if ( ! function_exists('nav_apply_request_flags'))
 	}
 }
 
-/**
- * Routes gated by the "Export Data" permission — LEAD & CUSTOMER data only
- * (Customer, Guest List, GHL Leads, Manual Leads). Every other export
- * (Booking, Payment, Costing, Product/Supplier, Reports, FAQ, Competitor, etc.)
- * is intentionally NOT gated here: if an admin can view the page, they can
- * export it. Blank import templates and PDF/attachment downloads are separate.
- */
+/** Data exports only. Blank import templates and PDF/attachment downloads are separate. */
 function nav_data_export_routes()
 {
 	return array(
+		'booking' => array('download'),
 		'customer' => array('download'),
 		'guests' => array('download'),
 		'ghl_leads' => array('download'),
 		'manual_leads' => array('download'),
 		'guest_list' => array('download', 'download_zip'),
+		'payment' => array('download'),
+		'costing' => array('export_packages', 'export_currency_history'),
+		'product' => array('download'),
+		'supplier' => array('download', 'downloadresults'),
+		'footer' => array('download'),
+		'faq' => array('download', 'export_template'),
+		'competitor_product' => array('download_excel', 'download_excel_tables', 'download_crawl_excel'),
+		'master_product' => array('download_excel', 'download_excel_tables'),
+		'message_log' => array('csv'),
+		'report' => array('download', 'download_product_sales', 'download_guest_by_country',
+			'ghl_message_log_export', 'lead_reply_activity_export', 'leads_by_hour_export'),
 	);
 }
 
@@ -544,9 +557,37 @@ function nav_is_data_export_request($class, $method)
 	return isset($routes[$class]) && in_array(strtolower((string) $method), $routes[$class], true);
 }
 
-function nav_block_data_export()
+/** Resolve export access by the controller that owns the downloaded data. */
+function nav_export_module_for_controller($class)
 {
-	if (nav_can_view('export_data')) { return false; }
+	$modules = array(
+		'customer' => 'export_data', 'guests' => 'export_data',
+		'ghl_leads' => 'export_data', 'manual_leads' => 'export_data',
+		'booking' => 'booking_export_data', 'guest_list' => 'booking_export_data',
+		'footer' => 'booking_export_data', 'payment' => 'payment_export_data',
+		'costing' => 'costing_export_data',
+		'product' => 'product_export_data', 'supplier' => 'product_export_data',
+		'master_product' => 'analysis_export_data', 'competitor_product' => 'analysis_export_data',
+		'our_product' => 'analysis_export_data', 'faq' => 'faq_export_data',
+		'report' => 'reports_export_data', 'message_log' => 'reports_export_data',
+	);
+	$class = strtolower((string) $class);
+	return isset($modules[$class]) ? $modules[$class] : null;
+}
+
+function nav_can_export_data($class = null)
+{
+	if ($class === null) {
+		$CI =& get_instance();
+		$class = $CI->router->class;
+	}
+	$module = nav_export_module_for_controller($class);
+	return $module !== null && nav_can_view($module);
+}
+
+function nav_block_data_export($class = null)
+{
+	if (nav_can_export_data($class)) { return false; }
 	show_error('You do not have Export Data access. Please contact the Owner.', 403);
 	return true;
 }

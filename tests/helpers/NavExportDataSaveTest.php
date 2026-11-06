@@ -25,10 +25,17 @@ $model->input = new class {
 };
 $model->session = new class { function userdata($key) { return 1; } };
 foreach (array(0, 1) as $grant) {
-    $model->input->value = json_encode(array(7 => array('export_data' => array('view' => $grant, 'edit' => 1), 'manual_leads' => array('view' => 1, 'edit' => 0))));
+    $posted = array('manual_leads' => array('view' => 1, 'edit' => 0));
+    foreach (nav_modules() as $key => $meta) {
+        if (!empty($meta['capability'])) { $posted[$key] = array('view' => $grant, 'edit' => 1); }
+    }
+    $model->input->value = json_encode(array(7 => $posted));
     if (!$model->Save()) { throw new RuntimeException('Save failed'); }
     $rows = array_column($model->db->batch, null, 'Module');
-    if ($rows['export_data']['CanView'] !== $grant || $rows['export_data']['CanEdit'] !== 0) { throw new RuntimeException('Export grant/revoke not persisted'); }
+    foreach (nav_modules() as $key => $meta) {
+        if (empty($meta['capability'])) { continue; }
+        if ($rows[$key]['CanView'] !== $grant || $rows[$key]['CanEdit'] !== 0) { throw new RuntimeException('Export grant/revoke not persisted: ' . $key); }
+    }
     if ($rows['manual_leads']['CanView'] !== 1 || $rows['manual_leads']['CanEdit'] !== 0) { throw new RuntimeException('Page permission altered'); }
 }
 echo "OK: export grant/revoke saved independently, without an Edit checkbox.\n";
