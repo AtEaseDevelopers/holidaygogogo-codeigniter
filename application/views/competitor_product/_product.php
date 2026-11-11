@@ -71,18 +71,16 @@ $justified = function ($items) use ($flat) {
 $scenic = function ($items) {
     $items = function_exists('competitor_scenic_items') ? competitor_scenic_items($items) : array();
     if (empty($items)) { echo '<p class="text-muted" style="font-size:13px;">-</p>'; return; }
-    echo '<ul style="font-size:14px; padding-left:18px; margin-bottom:0;">';
-    foreach ($items as $it) {
-        $name = isset($it['name']) ? $it['name'] : '';
-        $desc = isset($it['description']) ? $it['description'] : '';
-        if ($desc !== '') {
-            echo '<li class="mb-2"><span class="font-weight-bolder">' . htmlspecialchars($name)
-                . '</span><br><span style="font-size:13px; color:#5E6278;">' . htmlspecialchars($desc) . '</span></li>';
-        } else {
-            echo '<li class="mb-2">' . htmlspecialchars($name) . '</li>';
+    echo '<div class="ca-highlight-grid">';
+    foreach ($items as $index => $it) {
+        echo '<div class="ca-section-card ca-highlight"><span class="ca-index">'
+            . sprintf('%02d', $index + 1) . '</span> <strong>' . htmlspecialchars($it['name']) . '</strong>';
+        if ($it['description'] !== '') {
+            echo '<p class="mt-2 mb-0">' . htmlspecialchars($it['description']) . '</p>';
         }
+        echo '</div>';
     }
-    echo '</ul>';
+    echo '</div>';
 };
 // Traveller-type suitability: one card per canonical segment, a colour-coded level
 // badge (green/amber/red) and a grounded justification beneath. `level` is
@@ -109,7 +107,7 @@ $segments = function ($items) use ($lbl) {
         } elseif (isset($it['suitability']) && trim((string) $it['suitability']) !== '') {
             $badge = '<span class="label label-inline font-weight-bold ml-2" style="font-size:11px; padding:9px 10px; background:#EEF2F7; color:#3F4254;">' . htmlspecialchars($it['suitability']) . '</span>';
         }
-        echo '<div class="col-md-6 mb-4"><div class="p-4 rounded" style="background:#F3F6F9; height:100%;">';
+        echo '<div class="col-12 mb-3"><div class="ca-section-card ca-fit-card">';
         echo '<div class="d-flex align-items-center mb-2"><span class="font-weight-bolder text-dark" style="font-size:14px;">' . htmlspecialchars($seg) . '</span>' . $badge . '</div>';
         echo '<div class="text-dark" style="font-size:13px; line-height:1.5;">' . htmlspecialchars($just !== '' ? $just : '-') . '</div>';
         echo '</div></div>';
@@ -133,15 +131,16 @@ $tab_info = 'ca_tab_info_' . $GLOBALS['ca_tab_uid'];
 $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
 ?>
 
+<div class="ca-tour-report">
 <?php if(!empty($show_product_source) && preg_match('#^https?://#i', $sv('url'))) { ?>
-    <div class="mb-4">
+    <div class="ca-section-card mb-4">
         <span class="text-muted font-weight-bold mr-2" style="font-size:12px;">Source:</span>
-        <a href="<?php echo htmlspecialchars($sv('url')); ?>" target="_blank" rel="noopener" style="font-size:12px;"><?php echo htmlspecialchars($sv('url')); ?></a>
+        <a href="<?php echo htmlspecialchars($sv('url')); ?>" target="_blank" rel="noopener" style="font-size:12px;"><?php echo htmlspecialchars($lbl('view_original_tour', 'View original tour')); ?></a>
     </div>
 <?php } ?>
 
 <!-- ===================== TABS: Tour Information | AI Analysis ===================== -->
-<ul class="nav nav-tabs nav-tabs-line mb-5" role="tablist">
+<ul class="nav nav-tabs nav-tabs-line ca-report-tabs mb-5" role="tablist">
     <li class="nav-item">
         <a class="nav-link active font-weight-bold" data-toggle="tab" href="#<?php echo $tab_info; ?>" role="tab" aria-selected="true">
             <span class="nav-icon mr-2"><i class="la la-list-alt" style="color:#6082B6;"></i></span>
@@ -162,6 +161,8 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
 <div class="tab-pane fade show active" id="<?php echo $tab_info; ?>" role="tabpanel">
 
 <div id="ca_ti_view">
+<div class="ca-report-chapter"><span>01</span><h4><?php echo htmlspecialchars($lbl('section_tour_info', 'Tour Information')); ?></h4></div>
+<h5><?php echo htmlspecialchars($lbl('at_a_glance', 'At a Glance')); ?></h5>
 
 <!-- Headline facts -->
 <div class="row mb-3">
@@ -171,20 +172,29 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
         $lbl('destination', 'Destination')       => $sv('destination'),
         $lbl('duration', 'Duration')             => $sv('duration'),
         $lbl('departure_city', 'Departure City') => $sv('departure_city'),
-        $lbl('price_range', 'Price Range')       => $price_range,
         $lbl('currency', 'Currency')             => $sv('currency'),
         $lbl('difficulty', 'Difficulty')         => $sv('difficulty'),
         $lbl('suitable_age', 'Suitable Age')     => $sv('suitable_age'),
     );
     foreach($facts as $label => $val) { ?>
-        <div class="col-md-3 col-sm-6 mb-4">
-            <div class="p-4 rounded" style="background:#F3F6F9; height:100%;">
+        <div class="col-md-4 col-sm-6 mb-3">
+            <div class="ca-section-card h-100">
                 <div class="text-muted font-weight-bold" style="font-size:12px;"><?php echo $label; ?></div>
                 <div class="font-weight-bolder mt-1" style="font-size:15px;"><?php echo htmlspecialchars($val !== '' ? $val : '-'); ?></div>
             </div>
         </div>
     <?php } ?>
 </div>
+
+<?php if($has($price_range)) { ?>
+    <h5><i class="la la-wallet mr-1"></i><?php echo htmlspecialchars($lbl('package_pricing', 'Package Pricing')); ?></h5>
+    <div class="ca-section-card ca-price mb-5">
+        <strong><?php echo htmlspecialchars($price_range); ?></strong>
+        <?php if($has($sv('price')) && $sv('price') !== $price_range) { ?>
+            <div class="mt-2"><?php echo htmlspecialchars($sv('price')); ?></div>
+        <?php } ?>
+    </div>
+<?php } ?>
 
 <!-- Coverage -->
 <h5 class="font-weight-bolder text-dark mt-3 mb-3"><i class="la la-globe mr-1" style="color:#6082B6;"></i><?php echo htmlspecialchars($lbl('coverage', 'Coverage')); ?></h5>
@@ -257,40 +267,49 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
     </div>
 <?php } ?>
 
-<!-- Stay & Highlights -->
-<div class="row mb-2">
-    <div class="col-md-4 mb-4">
-        <h6 class="font-weight-bolder text-dark"><i class="la la-hotel mr-1" style="color:#6082B6;"></i><?php echo htmlspecialchars($lbl('hotels', 'Hotels')); ?></h6>
-        <?php $bullets($av('hotels')); ?>
+<!-- Stay, experiences and package terms -->
+<?php if($has($av('hotels'))) { ?>
+    <div class="mb-5">
+        <h5><i class="la la-hotel mr-1"></i><?php echo htmlspecialchars($lbl('hotels', 'Accommodation')); ?></h5>
+        <div class="table-responsive"><?php $hotel_entries = $flat($av('hotels')); include __DIR__ . '/_accommodation.php'; ?></div>
     </div>
-    <div class="col-md-4 mb-4">
-        <h6 class="font-weight-bolder text-dark"><i class="la la-mountain mr-1" style="color:#6082B6;"></i><?php echo htmlspecialchars($lbl('scenic_highlights', 'Scenic Highlights')); ?></h6>
+<?php } ?>
+<?php if($has($av('scenic_highlights'))) { ?>
+    <div class="mb-5">
+        <h5><i class="la la-mountain mr-1"></i><?php echo htmlspecialchars($lbl('scenic_highlights', 'Scenic Highlights')); ?></h5>
         <?php $scenic($av('scenic_highlights')); ?>
     </div>
-    <div class="col-md-4 mb-4">
-        <h6 class="font-weight-bolder text-dark"><i class="la la-shopping-bag mr-1" style="color:#6082B6;"></i><?php echo htmlspecialchars($lbl('shopping_stops', 'Shopping Stops')); ?></h6>
+<?php } ?>
+<?php if($has($av('shopping_stops'))) { ?>
+    <div class="mb-5">
+        <h5><i class="la la-shopping-bag mr-1"></i><?php echo htmlspecialchars($lbl('shopping_stops', 'Shopping Stops')); ?></h5>
         <?php $justified($av('shopping_stops')); ?>
     </div>
-</div>
+<?php } ?>
 
-<!-- Inclusions / Exclusions / Optional -->
-<div class="row mb-2">
-    <div class="col-md-4 mb-4">
-        <h6 class="font-weight-bolder" style="color:#1BC5BD;"><?php echo htmlspecialchars($lbl('inclusions', 'Inclusions')); ?></h6>
-        <?php $bullets($av('inclusions')); ?>
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="ca-section-card ca-positive h-100">
+            <h6><?php echo htmlspecialchars($lbl('inclusions', 'Inclusions')); ?></h6>
+            <?php $bullets($av('inclusions')); ?>
+        </div>
     </div>
-    <div class="col-md-4 mb-4">
-        <h6 class="font-weight-bolder" style="color:#F64E60;"><?php echo htmlspecialchars($lbl('exclusions', 'Exclusions')); ?></h6>
-        <?php $bullets($av('exclusions')); ?>
+    <div class="col-md-6 mb-3">
+        <div class="ca-section-card ca-caution h-100">
+            <h6><?php echo htmlspecialchars($lbl('exclusions', 'Exclusions')); ?></h6>
+            <?php $bullets($av('exclusions')); ?>
+        </div>
     </div>
-    <div class="col-md-4 mb-4">
-        <h6 class="font-weight-bolder" style="color:#8950FC;"><?php echo htmlspecialchars($lbl('optional_tours', 'Optional Tours')); ?></h6>
+</div>
+<?php if($has($av('optional_tours'))) { ?>
+    <div class="mb-5">
+        <h5><?php echo htmlspecialchars($lbl('optional_tours', 'Optional Tours')); ?></h5>
         <?php $bullets($av('optional_tours')); ?>
     </div>
-</div>
+<?php } ?>
 
 <?php if($has($av('special_remarks'))) { ?>
-    <div class="mb-5">
+    <div class="ca-section-card ca-caution mb-5">
         <h6 class="font-weight-bolder text-dark"><i class="la la-info-circle mr-1" style="color:#FFA800;"></i><?php echo htmlspecialchars($lbl('special_remarks', 'Special Remarks')); ?></h6>
         <?php $bullets($av('special_remarks')); ?>
     </div>
@@ -307,8 +326,8 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
                 $d_title = trim((string) (isset($day['title']) ? $day['title'] : ''));
                 $d_desc  = trim((string) (isset($day['description']) ? $day['description'] : ''));
             ?>
-                <div class="mb-4" style="position:relative;">
-                    <span style="position:absolute; left:-27px; top:2px; width:12px; height:12px; border-radius:50%; background:#6082B6; border:2px solid #fff;"></span>
+                <div class="ca-section-card mb-3" style="position:relative;">
+                    <span style="position:absolute; left:-27px; top:16px; width:12px; height:12px; border-radius:50%; background:#6082B6; border:2px solid #fff;"></span>
                     <div class="font-weight-bolder" style="font-size:14px; color:#6082B6;"><?php echo htmlspecialchars($d_label); ?><?php if($d_title !== '') { echo ' — <span style="color:#3F4254;">' . htmlspecialchars($d_title) . '</span>'; } ?></div>
                     <?php if($d_desc !== '') { ?><div class="text-dark-50 mt-1" style="font-size:13px; white-space:pre-line;"><?php echo htmlspecialchars($d_desc); ?></div><?php } ?>
                 </div>
@@ -325,11 +344,12 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
 
 <!-- ===================== TAB: AI Analysis (assessment with reasoning) ===================== -->
 <div class="tab-pane fade" id="<?php echo $tab_ai; ?>" role="tabpanel">
+<div class="ca-report-chapter"><span>02</span><h4><?php echo htmlspecialchars($lbl('section_ai_analysis', 'AI Analysis')); ?></h4></div>
 
 <?php if($has($sv('main_usp'))) { ?>
-    <div class="p-4 rounded mb-5" style="background:#E1F0FF;">
+    <div class="ca-section-card ca-selling-point mb-5">
         <h5 class="font-weight-bolder text-dark"><?php echo htmlspecialchars($lbl('main_usp', 'Main Selling Point')); ?></h5>
-        <div style="font-size:14px;"><?php echo htmlspecialchars($sv('main_usp')); ?></div>
+        <strong><?php echo htmlspecialchars($sv('main_usp')); ?></strong>
     </div>
 <?php } ?>
 
@@ -360,7 +380,11 @@ $tab_ai   = 'ca_tab_ai_' . $GLOBALS['ca_tab_uid'];
 <?php if($has($av('usp'))) { ?>
     <div class="mb-5">
         <div class="text-muted font-weight-bold mb-2" style="font-size:13px;"><?php echo htmlspecialchars($lbl('usp', 'Unique Selling Points')); ?></div>
-        <?php $bullets($av('usp')); ?>
+        <ol class="ca-usp-list">
+        <?php foreach ($flat($av('usp')) as $item) { ?>
+            <li><?php echo htmlspecialchars($item); ?></li>
+        <?php } ?>
+        </ol>
     </div>
 <?php } ?>
 
@@ -395,29 +419,18 @@ $sum_sections = function_exists('competitor_summary_sections') ? competitor_summ
 
 <!-- Pros / Cons (from the customer's point of view, with justification) -->
 <div class="row">
-    <div class="col-md-6 mb-5">
-        <h6 class="font-weight-bolder" style="color:#1BC5BD;"><?php echo htmlspecialchars($lbl('pros', 'Pros')); ?></h6>
+    <div class="col-md-6 mb-5"><div class="ca-section-card ca-positive h-100">
+        <h6><?php echo htmlspecialchars($lbl('pros', 'Pros')); ?></h6>
         <?php $justified($av('pros')); ?>
-    </div>
-    <div class="col-md-6 mb-5">
-        <h6 class="font-weight-bolder" style="color:#F64E60;"><?php echo htmlspecialchars($lbl('cons', 'Cons')); ?></h6>
+    </div></div>
+    <div class="col-md-6 mb-5"><div class="ca-section-card ca-caution h-100">
+        <h6><?php echo htmlspecialchars($lbl('cons', 'Cons')); ?></h6>
         <?php $justified($av('cons')); ?>
-    </div>
+    </div></div>
 </div>
-
-<?php if($has($sv('comparison'))) { ?>
-    <div class="mt-3">
-        <h5 class="font-weight-bolder text-dark"><?php echo htmlspecialchars($lbl('comparison', 'Comparison vs Our Products')); ?></h5>
-        <?php if($has($sv('matched_product'))) { ?>
-            <div class="mb-2">
-                <span class="text-muted" style="font-size:13px;"><?php echo htmlspecialchars($lbl('compared_against', 'Compared against our product:')); ?></span>
-                <span class="label label-inline label-light-success font-weight-bolder ml-1" style="font-size:13px; padding:10px 12px;"><?php echo htmlspecialchars($sv('matched_product')); ?></span>
-            </div>
-        <?php } ?>
-        <div class="p-4 rounded" style="background:#FFF4DE; font-size:14px; white-space:pre-line;"><?php echo htmlspecialchars($sv('comparison')); ?></div>
-    </div>
-<?php } ?>
 
 </div><!-- /tab-pane AI Analysis -->
 
 </div><!-- /tab-content -->
+
+</div><!-- /.ca-tour-report -->

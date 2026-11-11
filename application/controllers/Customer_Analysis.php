@@ -75,11 +75,9 @@ class Customer_Analysis extends MY_Controller
 		// a call that may exceed the model's context window (only matters for a full run).
 		$transcript_chars = strlen(customer_analysis_render_transcript($gathered['timeline'], 0));
 
-		// Memory / change-detection: compare live chat against the last analysis so
-		// the page can say "up to date" or "N new messages" and pick full vs update.
+		// Preserve history while offering a fresh, full reassessment on every run.
 		$prior = $this->Customer_Analysis_Model->Read_Latest_Done($dedup_key);
-		$meta  = $this->gather_meta($dedup_key, $phone);
-		$mode  = $this->detect_mode($prior, $meta, false);
+		$mode  = 'full'; // Reassess current requirements and date, even without new messages.
 
 		$data = array(
 			'dedup_key'        => $dedup_key,
@@ -176,40 +174,6 @@ class Customer_Analysis extends MY_Controller
 		return array('ghl' => $ghl, 'upload_count' => $upload_count);
 	}
 
-	/** Merged timeline of only the GHL messages newer than $since (incremental delta). */
-	private function gather_delta($dedup_key, $phone, $since)
-	{
-		$phone = trim((string) $phone);
-		$ghl = ($phone !== '')
-			? $this->Ghl_Messages_Model->Conversation_By_Phone($phone, 1000000, $since)
-			: $this->Ghl_Messages_Model->Conversation_By_Dedup_Key($dedup_key, 1000000, $since);
-		return customer_analysis_merge_timeline($ghl, array());
-	}
-
-	/**
-	 * Decide how a run should behave given the last analysis + current chat stats.
-	 * Returns 'full' (first run / uploads changed / no watermark),
-	 * 'unchanged' (nothing new — reuse stored profile) or 'incremental'.
-	 */
-	private function detect_mode($prior, $meta)
-	{
-		if ( ! $prior) {
-			return 'full';
-		}
-		$live_ghl    = (int) $meta['ghl']['count'];
-		$live_upload = (int) $meta['upload_count'];
-		if ($live_upload !== (int) $prior->covered_upload) {
-			return 'full';   // an upload was added/changed — can't delta it reliably
-		}
-		if ($live_ghl === (int) $prior->covered_ghl && $live_upload === (int) $prior->covered_upload) {
-			return 'unchanged';
-		}
-		if (empty($prior->last_message_at)) {
-			return 'full';   // no watermark to delta from
-		}
-		return 'incremental';
-	}
-
 	function Analyze()
 	{
 		if ( ! $this->input->is_ajax_request()) {
@@ -232,31 +196,14 @@ class Customer_Analysis extends MY_Controller
 			return;
 		}
 
-		$prior = $this->Customer_Analysis_Model->Read_Latest_Done($dedup_key);
-		$meta  = $this->gather_meta($dedup_key, $phone);
-		$mode  = $this->detect_mode($prior, $meta);
-
-		// Nothing new since the last analysis — reuse the stored profile, no AI call.
-		if ($mode === 'unchanged') {
-			echo json_encode(array('success' => true, 'unchanged' => true,
-				'message' => 'No new messages since the last analysis — the profile is already up to date.'));
+		$meta = $this->gather_meta($dedup_key, $phone);
+		$mode = 'full';
+		// Re-read primary evidence on every explicit run, including unchanged chats.
+		// Summary-only memory can omit facts needed by the six qualification criteria.
+		$full = $this->gather_timeline($dedup_key, $phone);
+		if (empty($full['timeline'])) {
+			echo json_encode(array('success' => false, 'message' => 'No chat messages found for this customer to analyse.'));
 			return;
-		}
-
-		// Build the input for the chosen mode.
-		if ($mode === 'incremental') {
-			$new_timeline = $this->gather_delta($dedup_key, $phone, $prior->last_message_at);
-			if (empty($new_timeline)) {   // safety: watermark says new but delta empty
-				echo json_encode(array('success' => true, 'unchanged' => true,
-					'message' => 'No new messages to update the analysis with.'));
-				return;
-			}
-		} else {
-			$full = $this->gather_timeline($dedup_key, $phone);
-			if (empty($full['timeline'])) {
-				echo json_encode(array('success' => false, 'message' => 'No chat messages found for this customer to analyse.'));
-				return;
-			}
 		}
 
 		$source_counts = 'ghl:' . (int) $meta['ghl']['count'] . ',upload:' . (int) $meta['upload_count'];
@@ -269,17 +216,12 @@ class Customer_Analysis extends MY_Controller
 		// pre-empt the customer's questions with our real policy) + competitor tours
 		// captured via AI for the destinations this customer is interested in
 		// (value positioning). Both are best-effort — never block the analysis.
-		$references = $this->build_references(
-			($mode === 'incremental') ? $new_timeline : $full['timeline'],
-			($mode === 'incremental') ? $prior : null
-		);
+		$references = $this->build_references($full['timeline']);
 
 		@set_time_limit(600);
 		$this->load->library('CustomerAnalysisService');
 		try {
-			$record = ($mode === 'incremental')
-				? $this->customeranalysisservice->analyze_update($name, $prior, $new_timeline, $our_products, $references)
-				: $this->customeranalysisservice->analyze($name, $full['timeline'], $our_products, $references);
+			$record = $this->customeranalysisservice->analyze($name, $full['timeline'], $our_products, $references);
 		} catch (Exception $e) {
 			$this->Customer_Analysis_Model->Create(array(
 				'dedup_key'     => $dedup_key,
@@ -294,7 +236,7 @@ class Customer_Analysis extends MY_Controller
 			return;
 		}
 
-		// Advance the watermark to what is now covered so the next run can delta/skip.
+		// Retain source coverage metadata for auditing each saved analysis.
 		$record['dedup_key']      = $dedup_key;
 		$record['guest_name']     = $name;
 		$record['source_type']    = $source_type;

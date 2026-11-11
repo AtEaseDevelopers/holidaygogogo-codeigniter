@@ -132,9 +132,43 @@ class CompetitorExcelExport
                 ? 'Selected products from this crawl, including available saved analyses.'
                 : 'All products currently stored for this crawl, including available saved analyses.'),
         ));
+        $this->add_response_fields_sheet($analyses);
         if ( ! empty($analyses)) { $this->add_analysis_sheets($analyses, 'en'); }
         if ($sources) { $this->add_sheet('Crawl Sources', array('Item Index', 'Product Name', 'Original URL', 'Product URL', 'Source URL', 'Canonical URL'), $sources); }
         return $this->finish();
+    }
+
+    /** One row per saved product, with response keys in schema order. */
+    private function add_response_fields_sheet($analyses)
+    {
+        $schema = json_decode(file_get_contents(APPPATH . 'config/tour-analysis-42.schema.json'), true);
+        $fields = $schema['required'];
+        $rows = array();
+        foreach ($analyses as $analysis) {
+            if ($analysis->status !== 'done') { continue; }
+
+            $products = competitor_display_products($analysis);
+            $is_combined = ! empty($analysis->products);
+            $feature = isset($analysis->feature) ? $analysis->feature : 'competitor';
+            foreach ($products as $index => $product) {
+                $raw = $is_combined ? ($product['raw_json'] ?? '') : ($analysis->raw_json ?? '');
+                // Decode objects as objects so meals and nested values keep their JSON shape.
+                $response = (array) json_decode((string) $raw);
+                $row = array(
+                    competitor_product_code((int) $analysis->id, $feature, $index + 1, count($products)),
+                    (int) $analysis->id,
+                    $product['url'] ?? (string) $analysis->url,
+                );
+                foreach ($fields as $key) {
+                    $value = $response[$key] ?? $product[$key] ?? '';
+                    $row[] = is_array($value) || is_object($value)
+                        ? json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                        : $this->text($value);
+                }
+                $rows[] = $row;
+            }
+        }
+        $this->add_sheet('Response Fields', array_merge(array('Product Code', 'Analysis ID', 'Product URL'), $fields), $rows);
     }
 
     private function start()

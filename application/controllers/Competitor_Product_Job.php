@@ -580,7 +580,7 @@ class Competitor_Product_Job extends CI_Controller
 			foreach ($sel as $i => $item) {
 				$write(array('state' => 'running', 'phase' => 'analysing', 'done' => $done, 'total' => $n, 'label' => isset($item['url']) ? $item['url'] : ''));
 				try {
-					$site = $this->competitoranalysisservice->analyze_texts(array($item), $our);
+					$site = $this->competitoranalysisservice->analyze_texts(array($item), $our, null, true);
 					if ( ! empty($site['products'])) {
 						$rec = $site['products'][0];
 						$rec['status']          = 'done';

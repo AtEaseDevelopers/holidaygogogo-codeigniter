@@ -6,7 +6,7 @@
  * Owner-only (the controller enforces level 10).
  *
  * Renders a customer character profile from customer_analysis_parse_ai_response():
- *   summary (characteristics / mood / communication style) · temperature (hot/cold).
+ *   summary (characteristics / mood / communication style) · temperature (hot/warm/cold).
  */
 $total_msgs  = (int) $ghl_count + (int) $upload_count;
 $can_analyse = $total_msgs > 0;
@@ -51,6 +51,8 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
                     <?php $temp = strtolower(trim((string) $a->temperature));
                     if ($temp === 'hot') { ?>
                         <span class="label label-danger label-inline font-weight-bolder ml-2" data-toggle="tooltip" title="<?php echo htmlspecialchars($a->temperature_reason ?: ''); ?>"><i class="la la-fire mr-1"></i>HOT</span>
+                    <?php } elseif ($temp === 'warm') { ?>
+                        <span class="label label-warning label-inline font-weight-bolder ml-2" data-toggle="tooltip" title="<?php echo htmlspecialchars($a->temperature_reason ?: ''); ?>">WARM</span>
                     <?php } elseif ($temp === 'cold') { ?>
                         <span class="label label-info label-inline font-weight-bolder ml-2" data-toggle="tooltip" title="<?php echo htmlspecialchars($a->temperature_reason ?: ''); ?>"><i class="la la-snowflake mr-1"></i>COLD</span>
                     <?php } ?>
@@ -72,6 +74,24 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
                     <div class="alert-text"><strong>Analysis failed:</strong> <?php echo htmlspecialchars($a->error_message ?: 'Unknown error'); ?></div>
                 </div>
             <?php } else { ?>
+                <?php if ( ! empty($a->travel_assessment)) { $ta = $a->travel_assessment; ?>
+                    <div class="mb-5">
+                        <div class="font-weight-bolder mb-2">T.R.A.V.E.L: <?php echo (int) $ta['met_count']; ?>/6 met · Hot requires 3</div>
+                        <div class="text-muted mb-2">Assessed <?php echo htmlspecialchars(isset($ta['analysis_date']) ? $ta['analysis_date'] : ''); ?> (Asia/Kuala_Lumpur)</div>
+                        <?php if ( ! empty($ta['purchase_intent'])) { $intent = $ta['purchase_intent']; ?>
+                            <div class="mb-2"><strong>Purchase intent: <?php echo htmlspecialchars(ucfirst($intent['level'])); ?></strong>
+                                <div><?php echo htmlspecialchars($intent['evidence']); ?></div>
+                            </div>
+                        <?php } ?>
+                        <?php foreach (customer_analysis_travel_criteria() as $key => $label) { $criterion = $ta['criteria'][$key]; ?>
+                            <div class="mb-2"><strong><?php echo htmlspecialchars($key . ' — ' . $label . ': ' . ucfirst(str_replace('_', ' ', $criterion['status']))); ?></strong>
+                                <div><?php echo htmlspecialchars($criterion['evidence']); ?></div>
+                            </div>
+                        <?php } ?>
+                    </div>
+                <?php } else { ?>
+                    <div class="text-muted mb-4">Legacy classification — run AI Analysis to assess T.R.A.V.E.L criteria.</div>
+                <?php } ?>
                 <?php if (trim((string) $a->summary) !== '') { ?>
                     <div class="mb-5">
                         <div class="font-weight-bolder text-dark mb-2">Customer Profile</div>
@@ -316,13 +336,10 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
                 <?php } else { ?>
                     <div class="text-muted mt-2" style="font-size:11px;">
                         <?php if (empty($has_prior)) { ?>
-                            Not analysed yet — <strong>AI Analysis</strong> reads the full chat.
-                        <?php } elseif ($run_mode === 'unchanged') { ?>
-                            <i class="la la-check-circle text-success"></i> Up to date — last analysed <?php echo date('d M Y, H:i', strtotime($last_analysed_at)); ?>. No new messages since.
-                        <?php } elseif ($run_mode === 'incremental') { ?>
-                            <i class="la la-sync text-primary"></i> New messages since <?php echo date('d M Y, H:i', strtotime($last_analysed_at)); ?> — <strong>AI Analysis</strong> will update the saved profile (only the new messages are sent).
+                            <strong>AI Analysis</strong> reads the full chat and assesses the six T.R.A.V.E.L criteria.
                         <?php } else { ?>
-                            Chat changed since <?php echo date('d M Y, H:i', strtotime($last_analysed_at)); ?> — <strong>AI Analysis</strong> will do a full re-read.
+                            Last analysed <?php echo date('d M Y, H:i', strtotime($last_analysed_at)); ?>.
+                            <strong>AI Analysis</strong> reassesses the full chat using today's date and latest requirements, even without new messages.
                         <?php } ?>
                         <span class="ml-1">Full transcript: <?php echo number_format($transcript_chars); ?> characters.</span>
                         <?php if ($transcript_chars > $warn_chars) { ?>

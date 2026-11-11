@@ -4251,15 +4251,16 @@ if ( ! function_exists('competitor_extract_responses_text'))
 	 * body. The raw HTTP response carries an `output` array (web_search_call
 	 * items plus a `message` item whose content holds `output_text` parts);
 	 * `output_text` at the top level is an SDK convenience we still honour when
-	 * present. Returns '' when nothing usable is found.
+	 * present. Structured callers can skip commentary and read the final
+	 * message directly. Returns '' when nothing usable is found.
 	 */
-	function competitor_extract_responses_text($decoded)
+	function competitor_extract_responses_text($decoded, $final_only = false)
 	{
 		if ( ! is_array($decoded)) {
 			return '';
 		}
 		// Top-level convenience field (string or array of strings).
-		if (isset($decoded['output_text'])) {
+		if ( ! $final_only && isset($decoded['output_text'])) {
 			$ot = $decoded['output_text'];
 			if (is_string($ot) && trim($ot) !== '') {
 				return trim($ot);
@@ -4276,6 +4277,9 @@ if ( ! function_exists('competitor_extract_responses_text'))
 		if (isset($decoded['output']) && is_array($decoded['output'])) {
 			foreach ($decoded['output'] as $item) {
 				if ( ! is_array($item) || (isset($item['type']) && $item['type'] !== 'message')) {
+					continue;
+				}
+				if ($final_only && ($item['phase'] ?? null) === 'commentary') {
 					continue;
 				}
 				if ( ! isset($item['content']) || ! is_array($item['content'])) {
@@ -4462,7 +4466,7 @@ if ( ! function_exists('competitor_parse_ai_response'))
 	 * object. Returns null when no JSON object can be recovered. List fields
 	 * are always arrays of strings; scalar fields always strings.
 	 */
-	function competitor_parse_ai_response($content)
+	function competitor_parse_ai_response($content, $preserve_segment_labels = false)
 	{
 		$content = trim((string) $content);
 		if ($content === '') {
@@ -4579,7 +4583,7 @@ if ( ! function_exists('competitor_parse_ai_response'))
 			'meals'            => $meals($get('meals')),
 			'itinerary'        => $itin($get('itinerary')),
 			'scenic_highlights'=> competitor_scenic_items($get('scenic_highlights')),
-			'traveller_segments'=> competitor_traveller_segments($get('traveller_segments')),
+			'traveller_segments'=> competitor_traveller_segments($get('traveller_segments'), $preserve_segment_labels),
 		);
 	}
 }
@@ -5030,9 +5034,9 @@ if ( ! function_exists('competitor_traveller_segments'))
 	 * objects, an assoc map keyed by segment name, and tolerates alternate field
 	 * names. `level` is derived from `suitability` so the badge colour survives
 	 * translation. Entries with neither a suitability nor a justification are dropped
-	 * (legacy rows render nothing). Pure.
+	 * (legacy rows render nothing). Skill entries preserve source labels and order. Pure.
 	 */
-	function competitor_traveller_segments($value)
+	function competitor_traveller_segments($value, $preserve_labels = false)
 	{
 		if ( ! is_array($value)) { return array(); }
 		$pick = function ($arr, $keys) {
@@ -5043,6 +5047,7 @@ if ( ! function_exists('competitor_traveller_segments'))
 			}
 			return '';
 		};
+		$custom = array();
 		$found = array();   // canonical key => [suitability, level, justification]
 		foreach ($value as $k => $it) {
 			$seg_text = '';
@@ -5060,6 +5065,20 @@ if ( ! function_exists('competitor_traveller_segments'))
 			// An assoc map ("single" => {...} / "single" => "text") carries the segment
 			// name in the array key.
 			if ($seg_text === '' && is_string($k)) { $seg_text = $k; }
+			// Keep skill labels verbatim, including labels that resemble a legacy category.
+			// The persisted key keeps this behavior when the views normalize the row again.
+			if ($preserve_labels || (is_array($it) && ($it['key'] ?? '') === 'custom')) {
+				if ($seg_text !== '') {
+					$custom[] = array(
+						'key'           => 'custom',
+						'segment'       => $seg_text,
+						'suitability'   => $suit,
+						'level'         => $level !== '' ? $level : competitor_segment_level($suit),
+						'justification' => $just,
+					);
+				}
+				continue;
+			}
 			$ckey = competitor_segment_match_key($seg_text);
 			if ($ckey === '') { continue; }
 			if ($suit === '' && $just === '') { continue; }
@@ -5083,7 +5102,7 @@ if ( ! function_exists('competitor_traveller_segments'))
 				'justification' => $found[$ckey]['justification'],
 			);
 		}
-		return $out;
+		return array_merge($out, $custom);
 	}
 }
 
@@ -5701,6 +5720,8 @@ if ( ! function_exists('competitor_ui_labels'))
 			'ai_cost' => 'AI cost', 'uploaded_file' => 'uploaded file', 'back' => 'Back',
 			'download_pdf' => 'Download PDF', 'product' => 'Product', 'analysis_failed' => 'Analysis failed:',
 			'section_tour_info' => 'Tour Information', 'section_ai_analysis' => 'AI Analysis',
+			'at_a_glance' => 'At a Glance', 'package_pricing' => 'Package Pricing', 'view_original_tour' => 'View original tour',
+			'night_day' => 'Night / Day', 'location' => 'Location',
 		);
 		$cn = array(
 			'tour_code' => '行程代码', 'destination' => '目的地', 'duration' => '行程天数',
@@ -5728,6 +5749,8 @@ if ( ! function_exists('competitor_ui_labels'))
 			'ai_cost' => 'AI 成本', 'uploaded_file' => '上传文件', 'back' => '返回',
 			'download_pdf' => '下载 PDF', 'product' => '产品', 'analysis_failed' => '分析失败：',
 			'section_tour_info' => '行程资料', 'section_ai_analysis' => 'AI 分析',
+			'at_a_glance' => '行程概览', 'package_pricing' => '配套价格', 'view_original_tour' => '查看原始行程',
+			'night_day' => '住宿晚数 / 天数', 'location' => '地点',
 		);
 		return (competitor_normalize_lang($lang) === 'cn') ? array_merge($en, $cn) : $en;
 	}

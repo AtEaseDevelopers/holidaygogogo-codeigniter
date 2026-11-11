@@ -5070,21 +5070,11 @@ class Booking extends MY_Controller
 						$array['notify_admins'] = $this->Notification_Model->Build_Admin_Handles($this->Booking_Model->Read_Notify_Admins());
 						$array['booking_op_admins'] = $this->Booking_Model->Read_Booking_OP_Admins();
 
-					if(empty($array['ProductSequence'])) {
-						$array['ProductSequence'] = explode(',', $array['ProductSequence']);
-						$array['booking_products'] = $this->Booking_Product_Model->Read();
-					} else {
-						$array['ProductSequence'] = explode(',', $array['ProductSequence']);
-						$booking_products = $this->Booking_Product_Model->Read();
-						$array['booking_products'] = [];
-						for($i = 0; $i < count($array['ProductSequence']); $i++) {
-							foreach($booking_products as $booking_product) {
-								if($booking_product->BookingProductID == $array['ProductSequence'][$i]) {
-									array_push($array['booking_products'], $booking_product);
-								}
-							}
-						}
-					}
+						$array['booking_products'] = $this->Booking_Product_Model->Read_Ordered(
+							$array['BookingID'],
+							$array['ProductSequence']
+						);
+						$array['ProductSequence'] = explode(',', (string) $array['ProductSequence']);
 					$array['categories'] = $this->Booking_Model->Read_Categories();
 					$array['products'] = $this->Booking_Model->Read_Products();
 					$array['category_products'] = $this->Booking_Model->Read_Category_Products();
@@ -5388,21 +5378,11 @@ class Booking extends MY_Controller
 					$array['notify_admins'] = $this->Notification_Model->Build_Admin_Handles($this->Booking_Model->Read_Notify_Admins());
 					$array['booking_op_admins'] = $this->Booking_Model->Read_Booking_OP_Admins();
 
-				if(empty($array['ProductSequence'])) {
-					$array['ProductSequence'] = explode(',', $array['ProductSequence']);
-					$array['booking_products'] = $this->Booking_Product_Model->Read();
-				} else {
-					$array['ProductSequence'] = explode(',', $array['ProductSequence']);
-					$booking_products = $this->Booking_Product_Model->Read();
-					$array['booking_products'] = [];
-					for($i = 0; $i < count($array['ProductSequence']); $i++) {
-						foreach($booking_products as $booking_product) {
-							if($booking_product->BookingProductID == $array['ProductSequence'][$i]) {
-								array_push($array['booking_products'], $booking_product);
-							}
-						}
-					}
-				}
+				$array['booking_products'] = $this->Booking_Product_Model->Read_Ordered(
+					$array['BookingID'],
+					$array['ProductSequence']
+				);
+				$array['ProductSequence'] = explode(',', (string) $array['ProductSequence']);
 				$array['categories'] = $this->Booking_Model->Read_Categories();
 				$array['products'] = $this->Booking_Model->Read_Products();
 				$array['footers'] = $this->Booking_Model->Read_Footers();

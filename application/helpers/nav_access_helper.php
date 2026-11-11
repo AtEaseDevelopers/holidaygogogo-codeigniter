@@ -23,7 +23,7 @@ if ( ! function_exists('nav_modules'))
 			'guests' => array('label' => 'Guest List', 'group' => 'Lead & Customer', 'class' => 'Guests', 'lc' => true),
 			'ghl_leads' => array('label' => 'GHL Leads', 'group' => 'Lead & Customer', 'class' => 'Ghl_Leads', 'lc' => true),
 			'manual_leads' => array('label' => 'Manual Leads', 'group' => 'Lead & Customer', 'class' => 'Manual_Leads', 'lc' => true),
-			'hot_cold_customers' => array('label' => 'Hot / Cold Customers', 'group' => 'Lead & Customer', 'class' => 'Hot_Cold_Customers'),
+			'hot_cold_customers' => array('label' => 'Hot / Warm / Cold Customers', 'group' => 'Lead & Customer', 'class' => 'Hot_Cold_Customers'),
 			'lead_status' => array('label' => 'Lead Status', 'group' => 'Lead & Customer', 'class' => 'Lead_Status', 'lc' => true),
 			'nature_of_business' => array('label' => 'Nature of Business', 'group' => 'Lead & Customer', 'class' => 'Nature_Of_Business', 'lc' => true),
 			'customer_type' => array('label' => 'Customer Type', 'group' => 'Lead & Customer', 'class' => 'Customer_Type'),

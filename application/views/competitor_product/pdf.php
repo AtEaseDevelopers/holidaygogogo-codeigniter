@@ -3,7 +3,7 @@
  * Print-ready (DomPDF) rendering of a saved Competitor Product. Mirrors the
  * on-screen View (view.php + _product.php). Long sections use normal block flow
  * so DomPDF can split them across pages; tables are only used for short facts
- * and the BC/TV company letterhead. Handles both shapes:
+ * and accommodation records. Handles both shapes:
  *   - Site crawl ($a->products non-empty): one section per product.
  *   - Single (upload / single URL / paste): one product built from the row.
  * Expects $a (the analysis row) — the same object View() passes to the screen.
@@ -25,10 +25,6 @@ $labels   = (isset($labels) && is_array($labels)) ? $labels
     : (function_exists('competitor_ui_labels') ? competitor_ui_labels(isset($lang) ? $lang : 'en') : array());
 $lbl      = function ($k, $fallback) use ($labels) { return isset($labels[$k]) ? $labels[$k] : $fallback; };
 $pdf_font = isset($pdf_font) ? $pdf_font : '"DejaVu Sans", sans-serif';
-$company = isset($company) && is_array($company) ? $company : array();
-$company_address = isset($company_address) ? $company_address : (isset($company['Address']) ? $company['Address'] : '');
-$logo_path = FCPATH . 'assets/image/pdflogo-new.jpeg';
-$logo_src = is_file($logo_path) ? 'data:image/jpeg;base64,' . base64_encode(file_get_contents($logo_path)) : '';
 ?>
 <!DOCTYPE html>
 <html>
@@ -36,19 +32,13 @@ $logo_src = is_file($logo_path) ? 'data:image/jpeg;base64,' . base64_encode(file
 <meta charset="utf-8">
 <style>
     * { box-sizing: border-box; }
-    @page { margin: 165px 40px 35px 40px; }
-    body { margin: 0; font-family: <?php echo $pdf_font; ?>; color: #2B2B3F; font-size: 12px; line-height: 1.45; }
+    @page { margin: 38px 40px 36px; }
+    body { margin: 0; font-family: <?php echo $pdf_font; ?>; color: #203247; font-size: 11px; line-height: 1.45; }
     <?php if (isset($lang) && $lang === 'cn') { ?>
     body { word-wrap: break-word; }
     <?php } ?>
-    .company-header { position: fixed; top: -145px; left: 0; right: 0; height: 135px; font-family: Helvetica, sans-serif; color: #000; line-height: 1.25; }
-    .company-header table { width: 100%; border-collapse: collapse; }
-    .company-header td { vertical-align: middle; }
-    .company-header .company-name { font-size: 24px; font-weight: bold; margin: 0 0 5px; }
-    .company-header p { margin: 0 0 2px; font-size: 11px; }
-    .company-header hr { margin: 10px 0 0; }
-    h1 { font-size: 20px; color: #4F6D9E; margin: 0 0 2px 0; }
-    h2 { font-size: 15px; color: #3F4254; margin: 18px 0 6px 0; border-bottom: 1px solid #E4E6EF; padding-bottom: 4px; }
+    h1 { font-size: 21px; color: #142e45; margin: 0 0 2px 0; }
+    h2 { font-size: 13px; color: #125b62; margin: 14px 0 6px; }
     h3 { font-size: 13px; color: #4F6D9E; margin: 12px 0 5px 0; }
     h4 { font-size: 12px; margin: 8px 0 4px 0; }
     h1, h2, h3, h4, .prod-title, .itinerary-title { page-break-after: avoid; }
@@ -61,7 +51,7 @@ $logo_src = is_file($logo_path) ? 'data:image/jpeg;base64,' . base64_encode(file
        cell text wraps inside the column instead of expanding it past the page
        edge (DomPDF's default auto layout grows columns to fit content). */
     table.facts { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 10px; }
-    table.facts td { width: 25%; background: #F3F6F9; border: 3px solid #fff; padding: 6px 8px; vertical-align: top; }
+    table.facts td { width: 33.33%; background: #f8fafc; border: 3px solid #fff; padding: 6px 8px; vertical-align: top; }
     table.facts .lbl { font-size: 9px; color: #8A94A6; font-weight: bold; text-transform: uppercase; }
     table.facts .val { font-size: 12px; font-weight: bold; color: #2B2B3F; }
     /* DomPDF cannot paginate a table row containing an entire long section. */
@@ -73,32 +63,31 @@ $logo_src = is_file($logo_path) ? 'data:image/jpeg;base64,' . base64_encode(file
     .tags { font-size: 11px; color: #3F4254; word-wrap: break-word; overflow-wrap: break-word; }
     .tags .t { font-weight: bold; }
     ul { margin: 2px 0 6px 0; padding-left: 16px; }
-    li { margin-bottom: 2px; }
+    li { margin-bottom: 2px; page-break-inside: avoid; }
     .box { background: #F3F6F9; padding: 7px 9px; border-radius: 4px; margin-bottom: 6px; }
-    .cmp { background: #FFF4DE; padding: 8px 10px; border-radius: 4px; white-space: pre-line; }
+    .chapter { border-bottom: 1px solid #dce8eb; margin: 12px 0; padding-bottom: 6px; page-break-after: avoid; }
+    .chapter span { color: #006c76; font-weight: bold; letter-spacing: 1px; font-size: 9px; }
+    .analysis-chapter { page-break-before: always; }
+    .chapter h2 { margin: 2px 0 0; font-size: 17px; color: #142e45; }
+    .source-link { color: #006c76; }
+    .price, .caution { background: #fffbf3; border-left: 3px solid #bd8133; }
+    .positive { background: #f4faf6; border-left: 3px solid #198058; }
+    .selling-point { background: #e8f4f4; border-left: 3px solid #087b82; }
+    .ca-accommodation { width: 100%; table-layout: fixed; border-collapse: collapse; }
+    .ca-accommodation th, .ca-accommodation td { padding: 5px 7px; border-bottom: 1px solid #dce8eb; text-align: left; vertical-align: top; }
+    .ca-accommodation th { background: #edf6f6; color: #254b62; }
+    .ca-accommodation th:first-child { width: 20%; }
+    .ca-accommodation th:nth-child(2) { width: 25%; }
+    .price strong, .selling-point { font-size: 13px; }
+    .fit-card, .day-card { border-left: 3px solid #087b82; }
+    .ranked-list { padding-left: 22px; }
+    .ranked-list li { border-bottom: 1px solid #e0e8ed; padding: 4px; }
     .pre { white-space: pre-line; }
     .kv { margin-bottom: 4px; }
     .kv .k { font-size: 9px; color: #8A94A6; font-weight: bold; }
 </style>
 </head>
 <body>
-
-<div class="company-header">
-    <table>
-        <tr>
-            <?php if ($logo_src !== '') { ?>
-            <td style="width:25%;"><img src="<?php echo $logo_src; ?>" style="width:160px;"></td>
-            <?php } ?>
-            <td style="text-align:center;">
-                <div class="company-name"><?php echo htmlspecialchars(isset($company['Name']) ? $company['Name'] : 'HolidayGoGoGo'); ?></div>
-                <p>(Co. Reg. No. - <?php echo htmlspecialchars(isset($company['RegistrationNumber']) ? $company['RegistrationNumber'] : ''); ?> | Travel Agent License No. - <?php echo htmlspecialchars(isset($company['LicenseNumber']) ? $company['LicenseNumber'] : ''); ?>)</p>
-                <p>Address : <?php echo htmlspecialchars($company_address); ?></p>
-                <p>Website : <?php echo htmlspecialchars(isset($company['Website']) ? $company['Website'] : ''); ?></p>
-            </td>
-        </tr>
-    </table>
-    <hr>
-</div>
 
 <?php
 $sv   = function ($P, $k) { $v = isset($P[$k]) ? $P[$k] : ''; return is_array($v) ? '' : trim((string) $v); };
@@ -174,12 +163,9 @@ $justified = function ($items) use ($flat) {
 ?>
 
 <h1><?php echo htmlspecialchars($doc_title); ?></h1>
-<div class="meta">
-    <?php echo htmlspecialchars($is_crawl ? $lbl('site', 'Site:') : $lbl('source', 'Source:')) . ' '; ?><?php echo htmlspecialchars((string) $a->url); ?>
-    <?php if($is_crawl) { echo ' &middot; ' . (int) $a->product_count . ' ' . htmlspecialchars($lbl('products', 'products')); } ?>
-    &middot; <?php echo htmlspecialchars($lbl('analysed', 'Analysed')); ?> <?php echo date('d M Y H:i', strtotime($a->created_at)); ?>
-    <?php if((float) $a->cost_usd > 0) { echo ' &middot; ' . htmlspecialchars($lbl('ai_cost', 'AI cost')) . ' USD ' . number_format((float) $a->cost_usd, 4); } ?>
-</div>
+<?php if ($is_crawl) { ?>
+    <div class="meta"><?php echo htmlspecialchars($lbl('site', 'Site:')) . ' ' . htmlspecialchars((string) $a->url); ?></div>
+<?php } ?>
 
 <?php foreach($products as $idx => $p) {
     $pname = $sv($p, 'product_name') ?: ($lbl('product', 'Product') . ' ' . ($idx + 1));
@@ -196,15 +182,20 @@ $justified = function ($items) use ($flat) {
 <div class="prod">
     <?php $pcode = competitor_product_code((int) $a->id, $feature, $idx + 1, $ptotal); ?>
     <?php if($is_crawl) { ?>
-        <div class="prod-title"><?php echo ($idx + 1) . '. ' . htmlspecialchars($pname); ?><?php if($pcode !== '') { ?> <span style="font-weight:normal; color:#6082B6;">(<?php echo htmlspecialchars($pcode); ?>)</span><?php } ?></div>
-        <?php if(preg_match('#^https?://#i', $sv($p, 'url'))) { ?>
-            <div class="meta"><?php echo htmlspecialchars($lbl('source', 'Source:')); ?> <?php echo htmlspecialchars($sv($p, 'url')); ?></div>
-        <?php } ?>
-    <?php } elseif($pcode !== '') { ?>
-        <div class="meta"><?php echo htmlspecialchars($lbl('product', 'Product')); ?> <?php echo htmlspecialchars($pcode); ?></div>
+        <div class="prod-title"><?php echo ($idx + 1) . '. ' . htmlspecialchars($pname); ?></div>
+    <?php } ?>
+    <div class="meta">
+        <?php echo htmlspecialchars(implode(' · ', array_filter(array($sv($p, 'destination'), $sv($p, 'duration'), $pcode), 'strlen'))); ?>
+    </div>
+    <?php $source_url = $is_crawl ? $sv($p, 'url') : (string) $a->url; ?>
+    <?php if(preg_match('#^https?://#i', $source_url)) { ?>
+        <div class="meta"><a class="source-link" href="<?php echo htmlspecialchars($source_url); ?>"><?php echo htmlspecialchars($lbl('view_original_tour', 'View original tour')); ?></a></div>
+    <?php } elseif($source_url !== '') { ?>
+        <div class="meta"><?php echo htmlspecialchars($lbl('source', 'Source:') . ' ' . $source_url); ?></div>
     <?php } ?>
 
-    <!-- Headline facts -->
+    <div class="chapter"><span>01</span><h2><?php echo htmlspecialchars($lbl('section_tour_info', 'Tour Information')); ?></h2></div>
+    <h2><?php echo htmlspecialchars($lbl('at_a_glance', 'At a Glance')); ?></h2>
     <table class="facts">
         <?php
         $facts = array(
@@ -212,52 +203,29 @@ $justified = function ($items) use ($flat) {
             $lbl('destination', 'Destination')       => $sv($p, 'destination'),
             $lbl('duration', 'Duration')             => $sv($p, 'duration'),
             $lbl('departure_city', 'Departure City') => $sv($p, 'departure_city'),
-            $lbl('price_range', 'Price Range')       => $price_range,
             $lbl('currency', 'Currency')             => $sv($p, 'currency'),
             $lbl('difficulty', 'Difficulty')         => $sv($p, 'difficulty'),
             $lbl('suitable_age', 'Suitable Age')     => $sv($p, 'suitable_age'),
         );
         $fi = 0;
         foreach($facts as $label => $val) {
-            if($fi % 4 === 0) { echo '<tr>'; }
+            if($fi % 3 === 0) { echo '<tr>'; }
             echo '<td><div class="lbl">' . $label . '</div><div class="val">' . htmlspecialchars($val !== '' ? $val : '-') . '</div></td>';
-            if($fi % 4 === 3) { echo '</tr>'; }
+            if($fi % 3 === 2) { echo '</tr>'; }
             $fi++;
         }
-        while($fi % 4 !== 0) { echo '<td></td>'; if($fi % 4 === 3) { echo '</tr>'; } $fi++; }
+        while($fi % 3 !== 0) { echo '<td></td>'; if($fi % 3 === 2) { echo '</tr>'; } $fi++; }
         ?>
     </table>
 
-    <?php if($has($sv($p, 'main_usp'))) { ?>
-        <h2><?php echo htmlspecialchars($lbl('main_usp', 'Main Selling Point')); ?></h2>
-        <div class="box"><?php echo htmlspecialchars($sv($p, 'main_usp')); ?></div>
-    <?php } ?>
-
-    <!-- Traveller fit -->
-    <?php if($has($sv($p, 'target_traveller')) || $has($sv($p, 'child_friendly')) || $has($sv($p, 'senior_friendly'))) { ?>
-        <h2><?php echo htmlspecialchars($lbl('traveller_fit', 'Traveller Fit')); ?></h2>
-        <?php
-        $fit = array($lbl('target_traveller', 'Target Traveller') => $sv($p, 'target_traveller'), $lbl('child_friendly', 'Child Friendly') => $sv($p, 'child_friendly'), $lbl('senior_friendly', 'Senior Friendly') => $sv($p, 'senior_friendly'));
-        foreach($fit as $label => $val) { if(!$has($val)) { continue; } ?>
-            <div class="kv"><span class="k"><?php echo htmlspecialchars($label); ?>:</span> <?php echo htmlspecialchars($val); ?></div>
-        <?php } ?>
-    <?php } ?>
-
-    <!-- Suitability by traveller type -->
-    <?php $tsegs = function_exists('competitor_traveller_segments') ? competitor_traveller_segments($av($p, 'traveller_segments')) : array(); if( ! empty($tsegs)) { ?>
-        <h2><?php echo htmlspecialchars($lbl('traveller_suitability', 'Suitability by Traveller Type')); ?></h2>
-        <?php foreach($tsegs as $it) {
-            $seg = $lbl('seg_' . $it['key'], $it['segment']);
-            $lvl = $it['level'] !== '' ? $lbl('suit_' . $it['level'], ucfirst($it['level'])) : $it['suitability'];
-        ?>
-            <div class="kv"><span class="k"><?php echo htmlspecialchars($seg); ?><?php echo $lvl !== '' ? ' (' . htmlspecialchars($lvl) . ')' : ''; ?>:</span> <?php echo htmlspecialchars($it['justification'] !== '' ? $it['justification'] : '-'); ?></div>
-        <?php } ?>
-    <?php } ?>
-
-    <!-- Unique selling points -->
-    <?php if($has($av($p, 'usp'))) { ?>
-        <h2><?php echo htmlspecialchars($lbl('usp', 'Unique Selling Points')); ?></h2>
-        <?php echo $bullets($av($p, 'usp')); ?>
+    <?php if($has($price_range)) { ?>
+        <h2><?php echo htmlspecialchars($lbl('package_pricing', 'Package Pricing')); ?></h2>
+        <div class="box price">
+            <strong><?php echo htmlspecialchars($price_range); ?></strong>
+            <?php if($has($sv($p, 'price')) && $sv($p, 'price') !== $price_range) { ?>
+                <div><?php echo htmlspecialchars($sv($p, 'price')); ?></div>
+            <?php } ?>
+        </div>
     <?php } ?>
 
     <!-- Coverage -->
@@ -269,7 +237,7 @@ $justified = function ($items) use ($flat) {
         'themes' => array('themes', 'Themes'),
         'tour_styles' => array('tour_style', 'Tour Style'),
         'local_transport' => array('local_transport', 'Local Transport'),
-    ) as $key => $heading) { ?>
+    ) as $key => $heading) { if (!$has($av($p, $key))) { continue; } ?>
         <div class="detail-section">
             <h4><?php echo htmlspecialchars($lbl($heading[0], $heading[1])); ?></h4>
             <?php echo $key === 'local_transport' ? $bullets($av($p, $key)) : $chips($av($p, $key)); ?>
@@ -312,14 +280,25 @@ $justified = function ($items) use ($flat) {
     <?php } ?>
 
     <!-- Stay & Highlights -->
-    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('hotels', 'Hotels')); ?></h4><?php echo $bullets($av($p, 'hotels')); ?></div>
-    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('scenic_highlights', 'Scenic Highlights')); ?></h4><?php echo $scenic($av($p, 'scenic_highlights')); ?></div>
-    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('shopping_stops', 'Shopping Stops')); ?></h4><?php echo $justified($av($p, 'shopping_stops')); ?></div>
+    <?php $hotel_entries = $flat($av($p, 'hotels')); if ($hotel_entries) { ?>
+        <h2><?php echo htmlspecialchars($lbl('hotels', 'Accommodation')); ?></h2>
+        <?php include __DIR__ . '/_accommodation.php'; ?>
+    <?php } ?>
+    <?php if($has($av($p, 'scenic_highlights'))) { ?>
+        <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('scenic_highlights', 'Scenic Highlights')); ?></h4><?php echo $scenic($av($p, 'scenic_highlights')); ?></div>
+    <?php } ?>
+    <?php if($has($av($p, 'shopping_stops'))) { ?>
+        <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('shopping_stops', 'Shopping Stops')); ?></h4><?php echo $justified($av($p, 'shopping_stops')); ?></div>
+    <?php } ?>
 
     <!-- Inclusions / Exclusions / Optional -->
-    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('inclusions', 'Inclusions')); ?></h4><?php echo $bullets($av($p, 'inclusions')); ?></div>
-    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('exclusions', 'Exclusions')); ?></h4><?php echo $bullets($av($p, 'exclusions')); ?></div>
-    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('optional_tours', 'Optional Tours')); ?></h4><?php echo $bullets($av($p, 'optional_tours')); ?></div>
+    <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('inclusions', 'Inclusions')); ?></h4><div class="box positive"><?php echo $bullets($av($p, 'inclusions')); ?></div></div>
+    <?php if($has($av($p, 'exclusions'))) { ?>
+        <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('exclusions', 'Exclusions')); ?></h4><div class="box caution"><?php echo $bullets($av($p, 'exclusions')); ?></div></div>
+    <?php } ?>
+    <?php if($has($av($p, 'optional_tours'))) { ?>
+        <div class="detail-section"><h4><?php echo htmlspecialchars($lbl('optional_tours', 'Optional Tours')); ?></h4><?php echo $bullets($av($p, 'optional_tours')); ?></div>
+    <?php } ?>
 
     <?php if($has($av($p, 'special_remarks'))) { ?>
         <h3><?php echo htmlspecialchars($lbl('special_remarks', 'Special Remarks')); ?></h3>
@@ -335,11 +314,48 @@ $justified = function ($items) use ($flat) {
             $d_title = trim((string) (isset($day['title']) ? $day['title'] : ''));
             $d_desc  = trim((string) (isset($day['description']) ? $day['description'] : ''));
         ?>
-            <div style="margin-bottom:7px;">
+            <div class="box day-card">
                 <div class="itinerary-title" style="font-weight:bold; color:#4F6D9E;"><?php echo htmlspecialchars($d_label); ?><?php if($d_title !== '') { echo ' &mdash; <span style="color:#3F4254;">' . htmlspecialchars($d_title) . '</span>'; } ?></div>
                 <?php if($d_desc !== '') { ?><div class="pre" style="color:#5E6278;"><?php echo htmlspecialchars($d_desc); ?></div><?php } ?>
             </div>
         <?php } ?>
+    <?php } ?>
+
+    <div class="chapter analysis-chapter"><span>02</span><h2><?php echo htmlspecialchars($lbl('section_ai_analysis', 'AI Analysis')); ?></h2></div>
+    <?php if($has($sv($p, 'main_usp'))) { ?>
+        <h2><?php echo htmlspecialchars($lbl('main_usp', 'Main Selling Point')); ?></h2>
+        <div class="box selling-point"><?php echo htmlspecialchars($sv($p, 'main_usp')); ?></div>
+    <?php } ?>
+
+    <!-- Traveller fit -->
+    <?php if($has($sv($p, 'target_traveller')) || $has($sv($p, 'child_friendly')) || $has($sv($p, 'senior_friendly'))) { ?>
+        <h2><?php echo htmlspecialchars($lbl('traveller_fit', 'Traveller Fit')); ?></h2>
+        <?php
+        $fit = array($lbl('target_traveller', 'Target Traveller') => $sv($p, 'target_traveller'), $lbl('child_friendly', 'Child Friendly') => $sv($p, 'child_friendly'), $lbl('senior_friendly', 'Senior Friendly') => $sv($p, 'senior_friendly'));
+        foreach($fit as $label => $val) { if(!$has($val)) { continue; } ?>
+            <div class="kv"><span class="k"><?php echo htmlspecialchars($label); ?>:</span> <?php echo htmlspecialchars($val); ?></div>
+        <?php } ?>
+    <?php } ?>
+
+    <!-- Suitability by traveller type -->
+    <?php $tsegs = function_exists('competitor_traveller_segments') ? competitor_traveller_segments($av($p, 'traveller_segments')) : array(); if( ! empty($tsegs)) { ?>
+        <h2><?php echo htmlspecialchars($lbl('traveller_suitability', 'Suitability by Traveller Type')); ?></h2>
+        <?php foreach($tsegs as $it) {
+            $seg = $lbl('seg_' . $it['key'], $it['segment']);
+            $lvl = $it['level'] !== '' ? $lbl('suit_' . $it['level'], ucfirst($it['level'])) : $it['suitability'];
+        ?>
+            <div class="box fit-card"><span class="k"><?php echo htmlspecialchars($seg); ?><?php echo $lvl !== '' ? ' (' . htmlspecialchars($lvl) . ')' : ''; ?>:</span> <?php echo htmlspecialchars($it['justification'] !== '' ? $it['justification'] : '-'); ?></div>
+        <?php } ?>
+    <?php } ?>
+
+    <!-- Unique selling points -->
+    <?php if($has($av($p, 'usp'))) { ?>
+        <h2><?php echo htmlspecialchars($lbl('usp', 'Unique Selling Points')); ?></h2>
+        <ol class="ranked-list">
+        <?php foreach ($flat($av($p, 'usp')) as $item) { ?>
+            <li><?php echo htmlspecialchars($item); ?></li>
+        <?php } ?>
+        </ol>
     <?php } ?>
 
     <?php $pdf_sum = function_exists('competitor_summary_sections') ? competitor_summary_sections($sv($p, 'summary')) : array(); ?>
@@ -359,16 +375,10 @@ $justified = function ($items) use ($flat) {
     <?php } ?>
 
     <!-- Pros / Cons -->
-    <div class="detail-section"><h4 style="color:#1BC5BD;"><?php echo htmlspecialchars($lbl('pros', 'Pros')); ?></h4><?php echo $justified($av($p, 'pros')); ?></div>
-    <div class="detail-section"><h4 style="color:#F64E60;"><?php echo htmlspecialchars($lbl('cons', 'Cons')); ?></h4><?php echo $justified($av($p, 'cons')); ?></div>
+    <div class="detail-section"><h4 style="color:#12745e;"><?php echo htmlspecialchars($lbl('pros', 'Pros')); ?></h4><div class="box positive"><?php echo $justified($av($p, 'pros')); ?></div></div>
+    <div class="detail-section"><h4 style="color:#925d22;"><?php echo htmlspecialchars($lbl('cons', 'Cons')); ?></h4><div class="box caution"><?php echo $justified($av($p, 'cons')); ?></div></div>
 
-    <?php if($has($sv($p, 'comparison'))) { ?>
-        <h2><?php echo htmlspecialchars($lbl('comparison', 'Comparison vs Our Products')); ?></h2>
-        <?php if($has($sv($p, 'matched_product'))) { ?>
-            <div class="kv"><span class="muted"><?php echo htmlspecialchars($lbl('compared_against', 'Compared against our product:')); ?></span> <strong><?php echo htmlspecialchars($sv($p, 'matched_product')); ?></strong></div>
-        <?php } ?>
-        <div class="cmp"><?php echo htmlspecialchars($sv($p, 'comparison')); ?></div>
-    <?php } ?>
+
 </div>
 <?php } ?>
 

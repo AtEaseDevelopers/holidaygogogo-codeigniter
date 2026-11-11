@@ -1447,15 +1447,11 @@ class Competitor_Product extends MY_Controller
 		$cjk_font = $this->pdf_cjk_font_path();
 		$use_cjk  = ($lang !== 'en' && $cjk_font !== '');
 
-		$this->load->model('Company_Model');
-		$this->load->helper('company_address');
 		$html = $this->load->view('competitor_product/pdf', array(
 			'a'        => $analysis,
 			'lang'     => $lang,
 			'labels'   => competitor_ui_labels($lang),
 			'pdf_font' => $use_cjk ? 'cjk, "DejaVu Sans", sans-serif' : '"DejaVu Sans", sans-serif',
-			'company'  => $this->Company_Model->Read(),
-			'company_address' => pdf_company_address_for_date($analysis->created_at),
 		), true);
 
 		require_once APPPATH . 'libraries/dompdf/autoload.inc.php';
@@ -1485,6 +1481,11 @@ class Competitor_Product extends MY_Controller
 		$dompdf->loadHtml($html, 'UTF-8');
 		$dompdf->setPaper('A4', 'portrait');
 		$dompdf->render();
+		$canvas = $dompdf->getCanvas();
+		$page_font = $dompdf->getFontMetrics()->getFont('DejaVu Sans');
+		$canvas->page_text($canvas->get_width() - 86, $canvas->get_height() - 23,
+			'{PAGE_NUM} / {PAGE_COUNT}', $page_font, 8, array(0.38, 0.45, 0.54));
+
 
 		// Emit like the other PDF endpoints (Costing_Quotation / Booking_Confirmation):
 		// explicit headers + output() + exit, instead of DomPDF's stream() which

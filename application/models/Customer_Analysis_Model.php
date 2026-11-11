@@ -26,6 +26,9 @@ class Customer_Analysis_Model extends CI_Model
 		$key_facts    = isset($data['key_facts']) && is_array($data['key_facts']) ? $data['key_facts'] : array();
 		// The structured character profile lives in details_json.
 		$profile      = isset($data['profile']) && is_array($data['profile']) ? $data['profile'] : array();
+		if ( ! empty($data['travel_assessment'])) {
+			$profile['travel_assessment'] = $data['travel_assessment'];
+		}
 		$rec_tours    = isset($data['recommended_tours']) && is_array($data['recommended_tours']) ? $data['recommended_tours'] : array();
 		// The structured customer-facing comparison (intro/options/decision_guide/…).
 		$recommendation = isset($data['recommendation']) && is_array($data['recommendation']) ? $data['recommendation'] : array();
@@ -119,10 +122,10 @@ class Customer_Analysis_Model extends CI_Model
 
 	/**
 	 * The LATEST analysis per customer (dedup_key) whose current classification is
-	 * hot or cold — powers the Hot/Cold Customers listing. Takes each customer's
+	 * hot, warm or cold — powers the customer classification listing. Takes each customer's
 	 * most recent done analysis and includes it only when that row is classified,
-	 * so a later un-classified re-run doesn't resurrect a stale hot/cold label.
-	 * Optionally filter to one bucket ('hot' | 'cold').
+	 * so a later un-classified re-run doesn't resurrect a stale label.
+	 * Optionally filter to one bucket ('hot' | 'warm' | 'cold').
 	 */
 	function Read_Classified($temperature = null, $q = '', $type = '')
 	{
@@ -134,9 +137,9 @@ class Customer_Analysis_Model extends CI_Model
 				WHERE status = 'done'
 				GROUP BY dedup_key
 			) latest ON latest.max_id = ca.id
-			WHERE ca.temperature IN ('hot','cold')";
+			WHERE ca.temperature IN ('hot','warm','cold')";
 		$bind = array();
-		if ($temperature === 'hot' || $temperature === 'cold') {
+		if (in_array($temperature, array('hot', 'warm', 'cold'), true)) {
 			$sql .= " AND ca.temperature = ?";
 			$bind[] = $temperature;
 		}
@@ -161,6 +164,8 @@ class Customer_Analysis_Model extends CI_Model
 		$this->load->helper('customer_analysis');
 		$prof = json_decode((string) $row->details_json, true);
 		$row->profile = customer_analysis_normalize_profile(is_array($prof) ? $prof : array());
+		$row->travel_assessment = isset($prof['travel_assessment']) && is_array($prof['travel_assessment'])
+			? $prof['travel_assessment'] : null;
 
 		// Recommended tours (real products the AI matched to this customer).
 		$rt = isset($row->recommended_tours) ? json_decode((string) $row->recommended_tours, true) : array();

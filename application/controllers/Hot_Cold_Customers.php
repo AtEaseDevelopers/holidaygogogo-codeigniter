@@ -3,7 +3,7 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 
 /**
  * Hot_Cold_Customers — an Owner-only (level 10) listing that buckets customers
- * into Hot and Cold based on their latest AI chat analysis (booking intent). The
+ * into Hot, Warm and Cold based on their latest AI chat analysis. The
  * classification itself is produced on-demand when the "AI Analysis" button is
  * run on a customer's Customer Profile page (see Customer_Analysis); this page
  * only reads the stored labels, so it shows customers already analysed.
@@ -30,11 +30,12 @@ class Hot_Cold_Customers extends MY_Controller
 			'f_q'    => $q,
 			'f_type' => $type,
 			'hot'    => $this->Customer_Analysis_Model->Read_Classified('hot', $q, $type),
+			'warm'   => $this->Customer_Analysis_Model->Read_Classified('warm', $q, $type),
 			'cold'   => $this->Customer_Analysis_Model->Read_Classified('cold', $q, $type),
 		);
 		$titles = array(
-			'tab_title'        => 'HolidayGoGoGo | Hot / Cold Customers',
-			'breadcrumb_title' => 'Hot / Cold Customers',
+			'tab_title'        => 'HolidayGoGoGo | Hot / Warm / Cold Customers',
+			'breadcrumb_title' => 'Hot / Warm / Cold Customers',
 		);
 		$this->load->view('layout/header', $titles);
 		$this->load->view('hot_cold_customers/index', $data);

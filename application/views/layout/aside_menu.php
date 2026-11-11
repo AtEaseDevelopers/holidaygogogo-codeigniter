@@ -81,7 +81,7 @@ $menu_icon = '<span class="svg-icon menu-icon"><svg><g>'
 				<li class="menu-item <?php if ($router === 'Hot_Cold_Customers') { echo 'menu-item-active'; } ?>">
 					<a href="<?php echo base_url('Hot_Cold_Customers'); ?>" class="menu-link">
 						<i class="menu-bullet menu-bullet-dot"><span></span></i>
-						<span class="menu-text">Hot / Cold Customers</span>
+						<span class="menu-text">Hot / Warm / Cold Customers</span>
 					</a>
 				</li>
 				<?php } ?>

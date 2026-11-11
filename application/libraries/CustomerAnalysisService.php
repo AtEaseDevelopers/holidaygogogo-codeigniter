@@ -51,6 +51,7 @@ class CustomerAnalysisService
 			throw new Exception('No chat messages to analyse for this customer.');
 		}
 
+		$references['analysis_date'] = customer_analysis_date_context($references);
 		$req  = customer_analysis_build_request($guest_name, $transcript, $our_products, $references);
 		$text = $this->request($req['instructions'], $req['input']);
 
@@ -59,7 +60,7 @@ class CustomerAnalysisService
 			throw new Exception('OpenAI returned no readable analysis. Try again.');
 		}
 
-		return $this->stamp($record, $text);
+		return $this->stamp($record, $text, $references['analysis_date']);
 	}
 
 	/**
@@ -70,21 +71,26 @@ class CustomerAnalysisService
 	public function analyze_update($guest_name, $prior, array $new_timeline, array $our_products = array(), array $references = array())
 	{
 		$new_transcript = customer_analysis_render_transcript($new_timeline, 0);
-		if (trim($new_transcript) === '') {
-			throw new Exception('No new messages to update the analysis with.');
-		}
+		$references['analysis_date'] = customer_analysis_date_context($references);
 		$req    = customer_analysis_build_update_request($guest_name, $prior, $new_transcript, $our_products, $references);
 		$text   = $this->request($req['instructions'], $req['input']);
 		$record = customer_analysis_parse_ai_response($text);
 		if ( ! is_array($record)) {
 			throw new Exception('OpenAI returned no readable analysis. Try again.');
 		}
-		return $this->stamp($record, $text);
+		return $this->stamp($record, $text, $references['analysis_date']);
 	}
 
 	/** Attach raw response, model and token/cost metadata to a parsed record. */
-	protected function stamp($record, $text)
+	protected function stamp($record, $text, $analysis_date)
 	{
+		if (empty($record['travel_assessment'])) {
+			throw new Exception('AI returned an incomplete T.R.A.V.E.L assessment. Please retry.');
+		}
+		if (empty($record['travel_assessment']['purchase_intent'])) {
+			throw new Exception('AI returned no usable purchase intent assessment. Please retry.');
+		}
+		$record['travel_assessment']['analysis_date'] = $analysis_date;
 		$record['raw_json']      = $text;
 		$record['model']         = $this->model();
 		$record['input_tokens']  = $this->last_usage['input_tokens'];

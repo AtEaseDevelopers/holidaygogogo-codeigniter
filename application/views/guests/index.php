@@ -2292,6 +2292,13 @@ div.kt-datatable__pager-container {
 	   with a viewport-independent, ID-scoped rule (same pattern as #passportModal
 	   / .lra-chat-modal elsewhere in the app). Plain block .modal-dialog +
 	   max-width + margin:auto = a centered wide modal at every width. */
+	#lead_view_modal .modal-body {
+		overflow-wrap: anywhere;
+	}
+	#lsl_list .flex-grow-1 {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
 	#ghl_lead_create_modal .modal-dialog {
 		max-width: 750px !important;
 		width: auto !important;
@@ -2635,6 +2642,7 @@ div.kt-datatable__pager-container {
 		if (problems.length) {
 			e.preventDefault();
 			$err.html(problems.join('<br>')).removeClass('d-none');
+			$err[0].scrollIntoView({ block: 'nearest' });
 			return false;
 		}
 
@@ -2745,7 +2753,7 @@ div.kt-datatable__pager-container {
 		$submit.prop('disabled', true).html('<i class="la la-spinner la-spin"></i>Loading...');
 		$('#ghl_lead_create_modal').modal('show');
 
-		$.ajax({ url: ML_EDIT_URL, method: 'GET', dataType: 'json', data: { dedup_key: dedupKey }, timeout: 30000 })
+		$.ajax({ url: ML_EDIT_URL, method: 'GET', dataType: 'json', cache: false, data: { dedup_key: dedupKey }, timeout: 30000 })
 			.done(function(res) {
 				if (editGeneration !== mlEditGeneration) { return; }
 				if (res && res.ok && res.lead) {
@@ -2971,6 +2979,8 @@ div.kt-datatable__pager-container {
 <script>
 	// ----- Lead View (read-only detail of one Manual lead) -----
 	var LV_URL = '<?php echo base_url('Manual_Leads/View_Lead'); ?>';
+	var lvGeneration = 0;
+	$('#lead_view_modal').on('hide.bs.modal', function() { lvGeneration++; });
 
 	function lvEscape(v) { return $('<span>').text(v == null ? '' : v).html(); }
 
@@ -3045,14 +3055,16 @@ div.kt-datatable__pager-container {
 
 	$(document).on('click', '.js-view-lead', function() {
 		var dedupKey = $(this).attr('data-dedup-key') || '';
+		var generation = ++lvGeneration;
 		$('#lv_name').text('');
 		$('#lv_body').hide().empty();
 		$('#lv_error').hide().text('');
 		$('#lv_loading').show();
 		$('#lead_view_modal').modal('show');
 
-		$.ajax({ url: LV_URL, method: 'GET', dataType: 'json', data: { dedup_key: dedupKey }, timeout: 30000 })
+		$.ajax({ url: LV_URL, method: 'GET', dataType: 'json', cache: false, data: { dedup_key: dedupKey }, timeout: 30000 })
 			.done(function(res) {
+				if (generation !== lvGeneration) { return; }
 				$('#lv_loading').hide();
 				if (res && res.ok && res.lead) {
 					$('#lv_name').text(res.lead.name || '');
@@ -3062,6 +3074,7 @@ div.kt-datatable__pager-container {
 				}
 			})
 			.fail(function() {
+				if (generation !== lvGeneration) { return; }
 				$('#lv_loading').hide();
 				$('#lv_error').text('Network error. Please try again.').show();
 			});

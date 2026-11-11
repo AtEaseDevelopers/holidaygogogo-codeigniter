@@ -169,47 +169,16 @@ class Booking_Confirmation extends CI_Controller
 
                 $array['Text'] = 'RINGGIT MALAYSIA ' . $negative . $ringgit . '' . $sen . ' ONLY';
 
-                if(empty($array['ProductSequence'])) {
+                $array['booking_products'] = $this->Booking_Product_Model->Read_Ordered(
+                    $array['BookingID'],
+                    $array['ProductSequence']
+                );
 
-                    $array['ProductSequence'] = explode(',', $array['ProductSequence']);
-
-                    $array['booking_products'] = $this->Booking_Product_Model->Read();
-
-                } else {
-
-                    $array['ProductSequence'] = explode(',', $array['ProductSequence']);
-
-                    $booking_products = $this->Booking_Product_Model->Read();
-
-                    $array['booking_products'] = [];
-
-                    for($i = 0; $i < count($array['ProductSequence']); $i++) {
-
-                        foreach($booking_products as $booking_product) {
-
-                            if($booking_product->BookingProductID == $array['ProductSequence'][$i]) {
-
-                                array_push($array['booking_products'], $booking_product);
-
-                            }
-
-                        }
-
-                    }
-
-
-
-                    if(isset($_GET['nick'])) {
-
-                        echo "<pre>";
-
-                        print_r($array['ProductSequence']);exit;
-
-                    }
-
+                if (!empty($array['ProductSequence']) && isset($_GET['nick'])) {
+                    echo "<pre>";
+                    print_r(explode(',', $array['ProductSequence']));
+                    exit;
                 }
-
-                
 
                 foreach($array['booking_products'] as $booking_product) {
 

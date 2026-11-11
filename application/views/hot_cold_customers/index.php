@@ -1,6 +1,6 @@
 <?php
 /**
- * Hot / Cold Customers — owner-only listing bucketed by booking intent from the
+ * Hot / Warm / Cold Customers — owner-only listing bucketed by T.R.A.V.E.L and purchase intent from the
  * latest AI chat analysis. Each row links back to the customer's Customer Profile
  * page (where the analysis is run/refreshed).
  */
@@ -30,6 +30,8 @@ function hcc_render_list($rows, $kind, $filtered = false)
                 <?php foreach ($rows as $r) {
                     $name = trim((string) $r->guest_name) !== '' ? $r->guest_name : '(unnamed)';
                     $type = trim((string) $r->source_type);
+                    $details = json_decode((string) $r->details_json, true);
+                    $has_travel = is_array($details) && ! empty($details['travel_assessment']);
                     // show_approach=1 is what reveals the "How to Approach" + "Recommended
                     // Tours" blocks on the profile — only the Hot/Cold page sets it, so the
                     // normal listing entry stays a plain character profile.
@@ -49,7 +51,9 @@ function hcc_render_list($rows, $kind, $filtered = false)
                                 <span class="text-muted">—</span>
                             <?php } ?>
                         </td>
-                        <td class="text-dark-75" style="font-size:12px;"><?php echo htmlspecialchars($r->temperature_reason ?: '—'); ?></td>
+                        <td class="text-dark-75" style="font-size:12px;"><?php echo htmlspecialchars($r->temperature_reason ?: '—'); ?>
+                            <?php if ( ! $has_travel) { ?><div class="text-muted mt-1">Legacy classification — reassess in profile.</div><?php } ?>
+                        </td>
                         <td class="text-muted" style="font-size:12px;"><?php echo date('d M Y', strtotime($r->created_at)); ?></td>
                         <td class="text-right">
                             <a href="<?php echo $profile_url; ?>" class="btn btn-light-primary btn-sm font-weight-bold" style="font-size:11px;">View Profile</a>
@@ -64,6 +68,7 @@ function hcc_render_list($rows, $kind, $filtered = false)
 }
 
 $hot_n  = count($hot);
+$warm_n = count($warm);
 $cold_n = count($cold);
 ?>
 
@@ -74,8 +79,8 @@ $cold_n = count($cold);
                 <div class="card-title">
                     <h3 class="card-label" style="color:#6082B6;">
                         <i class="la la-thermometer-half" style="color:#6082B6;"></i>
-                        <strong>Hot / Cold Customers</strong>
-                        <span class="text-dark-50 font-weight-normal ml-2" style="font-size:12px;">by booking intent from AI chat analysis</span>
+                        <strong>Hot / Warm / Cold Customers</strong>
+                        <span class="text-dark-50 font-weight-normal ml-2" style="font-size:12px;">T.R.A.V.E.L qualification · Hot: at least 3 criteria · Warm: fewer than 3 with medium purchase intent</span>
                     </h3>
                 </div>
             </div>
@@ -125,6 +130,12 @@ $cold_n = count($cold);
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link font-weight-bold" data-toggle="tab" href="#hcc_warm" role="tab">
+                            <span class="label label-warning label-dot mr-2"></span> Warm
+                            <span class="label label-light-warning label-inline font-weight-bolder ml-2"><?php echo $warm_n; ?></span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link font-weight-bold" data-toggle="tab" href="#hcc_cold" role="tab">
                             <span class="label label-info label-dot mr-2"></span> Cold
                             <span class="label label-light-info label-inline font-weight-bolder ml-2"><?php echo $cold_n; ?></span>
@@ -134,6 +145,9 @@ $cold_n = count($cold);
                 <div class="tab-content">
                     <div class="tab-pane fade show active" id="hcc_hot" role="tabpanel">
                         <?php hcc_render_list($hot, 'hot', ($f_q !== '' || $f_type !== '')); ?>
+                    </div>
+                    <div class="tab-pane fade" id="hcc_warm" role="tabpanel">
+                        <?php hcc_render_list($warm, 'warm', ($f_q !== '' || $f_type !== '')); ?>
                     </div>
                     <div class="tab-pane fade" id="hcc_cold" role="tabpanel">
                         <?php hcc_render_list($cold, 'cold', ($f_q !== '' || $f_type !== '')); ?>

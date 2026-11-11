@@ -1,0 +1,315 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "product_name",
+    "tour_code",
+    "price",
+    "price_from",
+    "price_to",
+    "currency",
+    "destination",
+    "countries",
+    "cities",
+    "destination_details",
+    "duration",
+    "travel_months",
+    "departure_city",
+    "flight_departure",
+    "flight_return",
+    "themes",
+    "tour_styles",
+    "difficulty",
+    "local_transport",
+    "inclusions",
+    "exclusions",
+    "hotels",
+    "meals",
+    "food_beverage",
+    "shopping_stops",
+    "optional_tours",
+    "special_remarks",
+    "scenic_highlights",
+    "target_traveller",
+    "suitable_age",
+    "child_friendly",
+    "senior_friendly",
+    "main_usp",
+    "usp",
+    "traveller_segments",
+    "itinerary",
+    "customer_advice",
+    "pros",
+    "cons",
+    "summary",
+    "comparison",
+    "matched_product"
+  ],
+  "properties": {
+    "product_name": {
+      "type": "string"
+    },
+    "tour_code": {
+      "type": "string"
+    },
+    "price": {
+      "type": "string"
+    },
+    "price_from": {
+      "type": "string"
+    },
+    "price_to": {
+      "type": "string"
+    },
+    "currency": {
+      "type": "string"
+    },
+    "destination": {
+      "type": "string"
+    },
+    "countries": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "destination_details": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "duration": {
+      "type": "string"
+    },
+    "travel_months": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "departure_city": {
+      "type": "string"
+    },
+    "flight_departure": {
+      "type": "string"
+    },
+    "flight_return": {
+      "type": "string"
+    },
+    "themes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tour_styles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": [
+        "Easy",
+        "Moderate",
+        "Challenging",
+        ""
+      ]
+    },
+    "local_transport": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "inclusions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hotels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "meals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breakfast",
+        "lunch",
+        "dinner"
+      ],
+      "properties": {
+        "breakfast": {
+          "type": "string"
+        },
+        "lunch": {
+          "type": "string"
+        },
+        "dinner": {
+          "type": "string"
+        }
+      }
+    },
+    "food_beverage": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "shopping_stops": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "optional_tours": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "special_remarks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "scenic_highlights": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "target_traveller": {
+      "type": "string"
+    },
+    "suitable_age": {
+      "type": "string"
+    },
+    "child_friendly": {
+      "type": "string"
+    },
+    "senior_friendly": {
+      "type": "string"
+    },
+    "main_usp": {
+      "type": "string"
+    },
+    "usp": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "traveller_segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "segment",
+          "suitability",
+          "justification"
+        ],
+        "properties": {
+          "segment": {
+            "type": "string"
+          },
+          "suitability": {
+            "type": "string",
+            "enum": [
+              "High",
+              "Medium",
+              "Low",
+              ""
+            ]
+          },
+          "justification": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "itinerary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "day",
+          "title",
+          "description"
+        ],
+        "properties": {
+          "day": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "customer_advice": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pros": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string"
+    },
+    "comparison": {
+      "type": "string"
+    },
+    "matched_product": {
+      "type": "string"
+    }
+  }
+}

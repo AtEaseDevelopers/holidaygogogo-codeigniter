@@ -3306,7 +3306,7 @@
 
         if(action == 'INSERT PRODUCT') {
 
-            if(sequence.toString() != '<?php echo implode(',', $ProductSequence); ?>') {
+            if(sequence.toString() != '<?php echo implode(',', array_unique($ProductSequence)); ?>') {
 
                 $('#product_action').val('ORGANIZE PRODUCT').change();
 
@@ -3786,11 +3786,11 @@
                                     return;
                                 }
 
-                                $('#benchmark').children().each((index, element) => {
+                                product_sequence = $('#benchmark').children().map((index, element) => {
 
-                                    product_sequence.push(parseInt(element.id));
+                                    return parseInt(element.id);
 
-                                });
+                                }).get();
 
                                 if(window.location.href == '<?php echo base_url('Booking/Create'); ?>' || window.location.href.split('?')[0] == '<?php echo base_url('Booking/Create'); ?>' || window.location.href.split('?')[0] == '<?php echo base_url('Booking/Duplicate'); ?>') {
 

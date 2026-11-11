@@ -235,7 +235,7 @@ class Manual_Leads extends MY_Controller
 	function Edit_Data()
 	{
 		$out = function ($data) {
-			$this->output->set_content_type('application/json')->set_output(json_encode($data));
+			$this->output->set_header('Cache-Control: no-store')->set_content_type('application/json')->set_output(json_encode($data));
 		};
 		$dedup_key = (string) $this->input->get('dedup_key');
 		if ($dedup_key === '') {
@@ -291,7 +291,7 @@ class Manual_Leads extends MY_Controller
 	function View_Lead()
 	{
 		$out = function ($data) {
-			$this->output->set_content_type('application/json')->set_output(json_encode($data));
+			$this->output->set_header('Cache-Control: no-store')->set_content_type('application/json')->set_output(json_encode($data));
 		};
 		$dedup_key = (string) $this->input->get('dedup_key');
 		if ($dedup_key === '') {
