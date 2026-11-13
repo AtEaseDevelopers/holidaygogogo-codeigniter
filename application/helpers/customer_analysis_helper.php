@@ -251,7 +251,7 @@ if ( ! function_exists('customer_analysis_json_shape'))
 		$lines[] = '  },';
 		$lines[] = '  "recommended_tours": [{"name": "the EXACT tour/product name copied from OUR PRODUCTS below", "tour_code": "its tour_code from OUR PRODUCTS if given, else empty", "price_myr": 0, "justification": "why THIS specific tour fits this customer — cite their destination, pax/family, budget and preferences from the chat"}],';
 		$lines[] = '  "recommendation": {';
-		$lines[] = '    "intro": "one friendly opening line in English that frames the comparison for THIS customer (who they are / their trip), or empty when there is only one option",';
+		$lines[] = '    "intro": "one or two friendly English sentences the travel agent can send directly to the customer, acknowledging their trip and making a concrete offer or suggestion even when there is only one option or no match",';
 		$lines[] = '    "options": [{"name": "EXACT product name from OUR PRODUCTS (same tours as recommended_tours)", "tour_code": "its tour_code or empty", "price_myr": 0, "dimensions": [{"label": "a comparison aspect you CHOOSE to fit the product type — use the SAME labels across every option (e.g. beach resort: Beach Vibe / Resort Vibe / Facilities / Rooms / Meals; city or multi-country tour: Itinerary / Pace / Inclusions / Hotels / Food / Budget)", "emoji": "one relevant emoji", "points": ["short bullet grounded in this product", "short bullet"]}], "overall_feel": "a one-line summary of the overall vibe and who it suits", "feel_emoji": "one emoji"}],';
 		$lines[] = '    "decision_guide": [{"emoji": "one emoji", "persona": "a type of traveller (e.g. wants comfort + resort feel)", "pick": "the option name that fits them"}],';
 		$lines[] = '    "follow_up": "one closing question in English that narrows the choice (usually pax + month + budget per person)",';
@@ -273,11 +273,12 @@ if ( ! function_exists('customer_analysis_field_guidance'))
 			"Copy each tour's name (and tour_code) EXACTLY as given in OUR PRODUCTS — NEVER invent or rename a tour, and never recommend one that is not in the list. " .
 			"ALWAYS recommend at least one tour whenever OUR PRODUCTS contains anything even loosely relevant to the customer's region or interest; only return an empty recommended_tours array when OUR PRODUCTS is empty or genuinely has nothing to offer them — do NOT invent one to fill the gap. " .
 			"For each recommended tour write a justification grounded in the chat (what the customer asked for and how this tour meets it). Include price_myr only when OUR PRODUCTS gives a price; otherwise use 0.\n" .
-			"Recommendation: ALWAYS fill the recommendation object — never leave options empty when OUR PRODUCTS has anything relevant, WHATEVER the temperature. It is the ready-to-send comparison our travel agent gives THIS customer, written in English (regardless of the customer's chat language). " .
+			"Recommendation: ALWAYS fill the recommendation object — never leave options empty when OUR PRODUCTS has anything relevant, WHATEVER the temperature. Write the customer-facing fields in natural English as a WhatsApp message from our travel agent to the customer. Speak as I or we and address the customer as you. Keep coaching, internal assessments, and reminders to the agent in tc_notes only. " .
+			"Open by acknowledging what the customer wants and offering a specific way to help. If a tour only fits part of the trip or changes their plan, present it as an optional alternative and ask whether they'd like to see it. For example: \"For your Kuala Lumpur and Langkawi trip, would you be open to a different island for the beach and snorkelling part? I can share an option for you both to compare with Langkawi.\" " .
 			"Put ONE entry in options for each tour you recommend (the SAME tours as recommended_tours), and compare them across a CONSISTENT set of dimensions you CHOOSE to fit the product type — 4-6 aspects, the SAME labels across every option so they line up (e.g. beach resorts: Beach Vibe / Resort Vibe / Facilities / Rooms / Meals; a city or multi-country tour: Itinerary / Pace / Inclusions / Hotels / Food / Budget). " .
-			"Tailor every bullet and overall_feel to what THIS customer said they care about (their pax/family, budget and preferences). When only one tour is relevant, still fill options with that one (intro and decision_guide may be brief) — the comparison degrades to a single friendly recommendation. " .
-			"decision_guide maps each likely traveller persona to the option that fits them; follow_up asks the one question that best narrows the choice (usually pax + month + budget per person). " .
-			"When the customer is HOT, lead toward booking; when WARM, help resolve the customer’s blocker or suggest a concrete next step; when COLD or unclear, keep options light and lead with a warm re-engagement intro + follow_up that re-opens the conversation. " .
+			"Tailor every bullet and overall_feel to what THIS customer said they care about (their pax/family, budget and preferences). When only one tour is relevant, introduce it directly. When there is no suitable tour, leave options and decision_guide empty and use intro and follow_up to offer help or clarify what the customer wants. " .
+			"Use decision_guide for useful trade-offs when comparing multiple options. End with one easy-to-answer follow_up that moves the conversation forward. Ask only for details the customer has yet to give. If intro already ends with the best question, leave follow_up empty. " .
+			"When the customer is HOT, offer a specific booking step such as checking availability for their dates. When WARM, address their open question or offer a useful comparison. When COLD or unclear, re-engage with a short, low-pressure message. " .
 			"NEVER over-promise things that vary by date/season (live shows, weather, specific activities) — hedge them (write \"there's often Live Music in the evening\", not \"there is guaranteed to be a Live Band every night\") and record such caveats in tc_notes for the agent, NOT in the customer-facing bullets.\n" .
 			"References: below the transcript you may be given up to three reference blocks — OUR PRODUCTS (our real tours), COMPETITOR PRODUCTS (rival tours captured via AI) and a KNOWLEDGE BASE of our internal FAQ. Base the whole approach on them together with the customer's profile. " .
 			"Use the KNOWLEDGE BASE to answer or pre-empt the customer's open or likely questions (e.g. visa, baggage, deposit, refund, what's included) with OUR real policy — quote it, never invent one; if the FAQ does not cover a question, offer to check rather than guess. " .
@@ -299,7 +300,7 @@ if ( ! function_exists('customer_analysis_output_contract'))
 			"You are a customer-insight analyst for Holidaygogogo Tours, a Malaysian tour agency. " .
 			"You are given the full chat history between our agency ('Agent') and ONE customer ('Customer'). " .
 			"Read how the CUSTOMER writes and behaves and build a rich CHARACTER PROFILE of them as a person — " .
-			"their personality, mood, expectations and preferences — NOT sales advice. " .
+			"their personality, mood, expectations and preferences, then draft a message our travel agent can send to them. " .
 			"Analyse ONLY what the transcript supports — never invent facts.\n\n" .
 			customer_analysis_json_shape() . "\n\n" .
 			customer_analysis_field_guidance();
@@ -786,9 +787,6 @@ if ( ! function_exists('customer_analysis_render_recommendation_text'))
 	function customer_analysis_render_recommendation_text($rec)
 	{
 		$rec = customer_analysis_normalize_recommendation($rec);
-		if (empty($rec['options'])) {
-			return '';
-		}
 		$blocks = array();
 
 		if ($rec['intro'] !== '') {
@@ -818,7 +816,7 @@ if ( ! function_exists('customer_analysis_render_recommendation_text'))
 			$blocks[] = implode("\n", $lines);
 		}
 
-		if ( ! empty($rec['decision_guide'])) {
+		if ( ! empty($rec['options']) && ! empty($rec['decision_guide'])) {
 			$lines = array('💡 Which to pick:');
 			foreach ($rec['decision_guide'] as $g) {
 				$prefix = $g['emoji'] !== '' ? $g['emoji'] . ' ' : '';

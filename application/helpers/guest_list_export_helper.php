@@ -1,5 +1,6 @@
 <?php
 defined('BASEPATH') OR exit('No direct script access allowed');
+require_once __DIR__ . '/manual_lead_sales_amount_helper.php';
 
 /**
  * Excel export for the Guest List / GHL Leads / Manual Leads listings.
@@ -166,6 +167,10 @@ if (!function_exists('guest_list_export_cell')) {
 		}
 
 		$raw = isset($g->$field) ? (string) $g->$field : '';
+
+		if ($field === 'PotentialSalesAmount') {
+			return manual_lead_display_sales_amount($raw);
+		}
 
 		if ($field === 'Tags') {
 			return implode(', ', ghl_lead_tags_parse($raw));

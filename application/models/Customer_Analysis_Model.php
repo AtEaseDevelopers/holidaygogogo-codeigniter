@@ -46,7 +46,7 @@ class Customer_Analysis_Model extends CI_Model
 			'temperature_reason' => isset($data['temperature_reason']) ? $data['temperature_reason'] : null,
 			'approach_suggestion' => isset($data['approach_suggestion']) ? $data['approach_suggestion'] : null,
 			'recommended_tours' => $rec_tours ? json_encode($rec_tours, JSON_UNESCAPED_UNICODE) : null,
-			'recommendation_json' => ! empty($recommendation['options']) ? json_encode($recommendation, JSON_UNESCAPED_UNICODE) : null,
+			'recommendation_json' => $recommendation ? json_encode($recommendation, JSON_UNESCAPED_UNICODE) : null,
 			'summary'       => isset($data['summary']) ? $data['summary'] : null,
 			'sales_intel'   => json_encode($sales_intel, JSON_UNESCAPED_UNICODE),
 			'next_actions'  => json_encode($next_actions, JSON_UNESCAPED_UNICODE),

@@ -1076,6 +1076,9 @@ div.kt-datatable__pager-container {
 												<td style="text-align:center; white-space:nowrap;"><?php echo $travel_display !== '' ? htmlspecialchars($travel_display) : $gl_dash; ?></td>
 												<?php foreach (array('SalesPerson', 'Op', 'LeadDestination', 'PotentialSalesAmount') as $lead_field) {
 													$lead_value = isset($g->$lead_field) ? trim((string) $g->$lead_field) : '';
+													if ($lead_field === 'PotentialSalesAmount') {
+														$lead_value = manual_lead_display_sales_amount($lead_value);
+													}
 												?>
 													<td style="text-align:center;"><?php echo $lead_value !== '' ? htmlspecialchars($lead_value) : $gl_dash; ?></td>
 												<?php } ?>
@@ -2493,8 +2496,8 @@ div.kt-datatable__pager-container {
 						<input type="text" name="destination" class="form-control" maxlength="255" required>
 					</div></div>
 					<div class="form-group row"><div class="col-md-12">
-						<label>Potential Sales Amount <span class="text-danger">*</span></label>
-						<input type="text" name="potential_sales_amount" class="form-control" maxlength="255" required>
+						<label for="manual_lead_sales_amount">Potential Sales Amount <span class="text-danger">*</span></label>
+						<input type="text" id="manual_lead_sales_amount" name="potential_sales_amount" class="form-control" inputmode="decimal" placeholder="RM100,000" maxlength="255" required>
 					</div></div>
 					<div class="form-group">
 						<label>Notes</label>
@@ -2587,6 +2590,20 @@ div.kt-datatable__pager-container {
 		$(this).val(picker.startDate.format('DD/MM/YYYY') + ' - ' + picker.endDate.format('DD/MM/YYYY'));
 	}).on('cancel.daterangepicker', function() { $(this).val(''); });
 
+	function mlFormatSalesAmount(value, maxLength) {
+		var parts = value.match(/^(?:RM\s*)?([0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.([0-9]{1,2}))?$/i);
+		if (!parts) { return null; }
+		var whole = (parts[1].replace(/,/g, '').replace(/^0+/, '') || '0').replace(/\B(?=(?:[0-9]{3})+$)/g, ',');
+		var cents = ((parts[2] || '') + '00').slice(0, 2);
+		var amount = 'RM' + whole + (cents === '00' ? '' : '.' + cents);
+		return amount.length <= maxLength ? amount : null;
+	}
+
+	var $mlSalesAmount = $('#manual_lead_sales_amount').on('blur', function() {
+		var amount = mlFormatSalesAmount($.trim(this.value), this.maxLength);
+		if (amount !== null) { this.value = amount; }
+	});
+
 	function mlTravelRange(start, end) {
 		var first = moment(start || '', 'YYYY-MM-DD', true);
 		if (!first.isValid()) { return ''; }
@@ -2622,6 +2639,15 @@ div.kt-datatable__pager-container {
 		$.each(requiredFields, function(field, label) {
 			if (!val(field)) { problems.push(label + ' is required.'); }
 		});
+		var salesAmount = val('potential_sales_amount');
+		if (salesAmount) {
+			var formattedAmount = mlFormatSalesAmount(salesAmount, $mlSalesAmount[0].maxLength);
+			if (formattedAmount !== null) {
+				$mlSalesAmount.val(formattedAmount);
+			} else if (!val('dedup_key') || salesAmount !== $mlSalesAmount.data('saved-amount')) {
+				problems.push('Enter a single Potential Sales Amount, for example RM100,000.');
+			}
+		}
 		if (!val('dedup_key')) {
 			var statusCount = 0;
 			$('#lead_log_rows .lead-log-row').each(function() {
@@ -2674,9 +2700,10 @@ div.kt-datatable__pager-container {
 	// ---- Create / Edit mode for the shared Manual Lead modal -------------------
 	// The Create modal doubles as the Edit modal: the Edit action pre-fills it and
 	// repoints the form to Update. Everything below just swaps between the two.
+	<?php $manual_lead_query = http_build_query((array) $this->input->get(), '', '&'); ?>
 	var mlEditGeneration = 0;
 	var ML_CREATE_ACTION = '<?php echo base_url('Manual_Leads/Create'); ?>';
-	var ML_UPDATE_ACTION = '<?php echo base_url('Manual_Leads/Update'); ?>';
+	var ML_UPDATE_ACTION = <?php echo json_encode(base_url('Manual_Leads/Update') . ($manual_lead_query !== '' ? '?' . $manual_lead_query : '')); ?>;
 	var ML_EDIT_URL      = '<?php echo base_url('Manual_Leads/Edit_Data'); ?>';
 
 	// Read a stored phone "+60 123456789" into { code:'+60', local:'123456789' }
@@ -2781,6 +2808,7 @@ div.kt-datatable__pager-container {
 					mlSetAssignee('op_id', d.op_id, d.op_name);
 					set('destination', d.destination);
 					set('potential_sales_amount', d.potential_sales_amount);
+					$mlSalesAmount.data('saved-amount', d.potential_sales_amount);
 						set('client_type', d.client_type);
 					set('nature_of_business', d.nature_of_business); set('number_of_pax', d.number_of_pax); set('state', d.state);
 					set('notes', d.notes);               set('lead_intro', d.lead_intro);

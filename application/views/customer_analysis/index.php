@@ -245,7 +245,7 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
                             if (trim((string) (isset($rec['follow_up']) ? $rec['follow_up'] : '')) !== '') { ?>
                                 <div class="text-dark-75 font-weight-bold" style="font-size:13px; line-height:1.7;"><i class="la la-question-circle mr-1 text-primary"></i><?php echo nl2br(htmlspecialchars($rec['follow_up'])); ?></div>
                             <?php }
-                        } else { // legacy rows: no structured recommendation, show the stored message ?>
+                        } else { // Standalone follow-up or legacy message. ?>
                             <div class="text-dark-75" style="font-size:13px; line-height:1.7; white-space:pre-wrap;"><?php echo htmlspecialchars($approach); ?></div>
                         <?php } ?>
                     </div>

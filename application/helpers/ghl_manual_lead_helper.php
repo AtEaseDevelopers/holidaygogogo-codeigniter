@@ -4,6 +4,7 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 // Country-code phone helpers (combine picker code + local number into the stored
 // "+60 123456789" shape). Pulled in here so create + bulk-import share it.
 require_once __DIR__ . '/phone_country_helper.php';
+require_once __DIR__ . '/manual_lead_sales_amount_helper.php';
 
 /**
  * Prepare a hand-entered ("Manual") GHL lead for insertion into ghl_contacts.
@@ -69,6 +70,7 @@ function ghl_manual_lead_prepare($post, $uid, $now, $created_by = null, $require
     $number_of_pax = $get('number_of_pax');
     $client_type = $get('client_type');
     $state      = $get('state');
+    $sales_amount = $get('potential_sales_amount');
     $dob_raw    = $get('date_of_birth');
     $tags_raw   = isset($post['tags']) ? (string) $post['tags'] : '';
 
@@ -164,7 +166,7 @@ function ghl_manual_lead_prepare($post, $uid, $now, $created_by = null, $require
         'sales_person_id' => $get('sales_person_id') !== '' ? (int) $get('sales_person_id') : null,
         'op_id' => $get('op_id') !== '' ? (int) $get('op_id') : null,
         'destination' => $get('destination') !== '' ? $get('destination') : null,
-        'potential_sales_amount' => $get('potential_sales_amount') !== '' ? $get('potential_sales_amount') : null,
+        'potential_sales_amount' => $sales_amount !== '' ? manual_lead_display_sales_amount($sales_amount) : null,
         'date_of_birth' => $dob,
         'tags_json'     => $tags_json,
         'date_added'    => $now,

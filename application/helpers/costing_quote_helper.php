@@ -534,10 +534,9 @@ if (!function_exists('costing_quote_prepare_level')) {
 
 if (!function_exists('costing_quote_default_footer_notes')) {
     /**
-     * The default boilerplate footer notes shown (highlighted) at the bottom of
-     * the quote. Rich-text (TinyMCE) HTML — one <p> per note so each renders in
-     * its own highlighted box. Seeded into the editor when the package has none
-     * saved yet, and used verbatim on the PDF when the field is NULL.
+     * The default footer notes shown at the bottom of the quote, with one <p>
+     * per note. Seeded into the editor and rendered in the PDF when the field
+     * has never been saved.
      *
      * @return string
      */

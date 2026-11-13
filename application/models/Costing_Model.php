@@ -101,7 +101,7 @@ class Costing_Model extends CI_Model
             $where[] = "cp.sales_admin_id = " . $sales_admin_id;
         }
 
-        // Filter by the OP person who created the quotation (admin user).
+        // Filter by the package's assigned OP person.
         $op_admin_id = isset($filters['op_admin_id']) ? (int) $filters['op_admin_id'] : 0;
         if ($op_admin_id > 0) {
             $where[] = "cp.op_admin_id = " . $op_admin_id;
@@ -790,17 +790,17 @@ class Costing_Model extends CI_Model
             return 0;
         }
 
+        if (isset($package['op_admin_id'])) {
+            $data['op_admin_id'] = $op_admin_id > 0 ? $op_admin_id : null;
+        }
+
         // Tour code is fully auto: assigned once on create (QU-YYMM-XXXX), never
         // touched on edit (there is no tour_code field on the form anymore).
         if (!empty($package['id'])) {
-            // Edit: never overwrite the creator (op_admin_id) — it is set once, at
-            // creation. All other header fields are saved.
             $this->db->where('id', (int) $package['id'])->update('costing_packages', $data);
             return (int) $package['id'];
         }
 
-        // Create: stamp the OP person = the admin creating this package.
-        $data['op_admin_id'] = $op_admin_id > 0 ? $op_admin_id : null;
         $data['tour_code'] = $this->Next_Tour_Code();
         $this->db->insert('costing_packages', $data);
         return (int) $this->db->insert_id();
@@ -850,8 +850,7 @@ class Costing_Model extends CI_Model
 
         $this->db->trans_start();
 
-        // Imported packages are "created" by whoever ran the import — stamp them as
-        // the OP person (Save_Package only applies this on insert, which an import is).
+        // Default the imported package's OP person to the admin running the import.
         $save_package = (array) $pkg['save_package'];
         $save_package['op_admin_id'] = (int) $op_admin_id;
         $package_id = $this->Save_Package($save_package);
@@ -1475,6 +1474,8 @@ class Costing_Model extends CI_Model
             $booking_id = (int) $this->db->insert_id();
         }
 
+        $this->Sync_Quote_Hotel_Names($package_id, $booking_id, $combinations);
+
         $this->db->where('booking_id', $booking_id)->delete('costing_booking_items');
 
         foreach ($snapshot_rows as $row) {
@@ -1992,6 +1993,49 @@ class Costing_Model extends CI_Model
             ->result_array();
     }
 
+    private function Sync_Quote_Hotel_Names($package_id, $booking_id, $combinations)
+    {
+        $submitted_names = array();
+        foreach ($combinations as $combo) {
+            if ($combo['id'] > 0 && !$combo['is_general']) {
+                $submitted_names[$combo['id']] = $combo['name'];
+            }
+        }
+        if (!$submitted_names) {
+            return;
+        }
+
+        // Pull from Costing copies the name without a source ID. Only rename
+        // hotel cells that still exactly match an unambiguous old option name.
+        $previous = $this->db->select('id, name')
+            ->where('costing_booking_id', $booking_id)
+            ->where('is_general', 0)
+            ->get('costing_combinations')
+            ->result_array();
+        $name_counts = array_count_values(array_column($previous, 'name'));
+        $renames = array();
+        foreach ($previous as $combo) {
+            $id = $combo['id'];
+            $name = $combo['name'];
+            if (isset($submitted_names[$id]) && $name_counts[$name] === 1 && $submitted_names[$id] !== $name) {
+                $renames[$name] = $submitted_names[$id];
+            }
+        }
+        if (!$renames) {
+            return;
+        }
+
+        foreach ($this->Read_Quote_Hotels($package_id) as $hotel) {
+            $name = (string) $hotel['hotel_name'];
+            if (isset($renames[$name])) {
+                $this->db->where('package_id', $package_id)
+                    ->where('id', $hotel['id'])
+                    ->where('hotel_name', $name)
+                    ->update('costing_quote_hotels', array('hotel_name' => $renames[$name]));
+            }
+        }
+    }
+
     /**
      * The per-package flight schedule rows shown on the Quotation PDF.
      */
@@ -2410,8 +2454,8 @@ class Costing_Model extends CI_Model
 
     private function Read_Package($package_id)
     {
-        // op_admin_name (the creator's display name) is joined for read-only display
-        // on the wizard. Deep_Copy_Package strips it before re-inserting the row.
+        // Join the current OP name for the wizard, including legacy assignments.
+        // Deep_Copy_Package strips it before re-inserting the row.
         return $this->db
             ->select('cp.*, op_admin.Name AS op_admin_name')
             ->from('costing_packages cp')
@@ -2995,7 +3039,7 @@ class Costing_Model extends CI_Model
      * included unless its include flag is explicitly 0. A combination with no
      * usable rows is dropped; a nameless-but-non-empty one gets an auto name.
      *
-     * @return array list of ['name'=>string, 'rows'=>array]
+     * @return array list of ['id'=>int, 'name'=>string, 'rows'=>array, ...]
      */
     private function Prepare_Combinations($posted)
     {
@@ -3044,7 +3088,14 @@ class Costing_Model extends CI_Model
             $headcount = costing_normalize_headcount(isset($combo['headcount']) ? $combo['headcount'] : array(), $headcount_codes);
             $headcount_json = empty($headcount) ? null : json_encode($headcount);
 
-            $out[] = array('name' => $name, 'rows' => $rows, 'selling_price_per_pax' => $selling_price_per_pax, 'is_general' => $is_general, 'headcount_json' => $headcount_json);
+            $out[] = array(
+                'id' => isset($combo['id']) ? (int) $combo['id'] : 0,
+                'name' => $name,
+                'rows' => $rows,
+                'selling_price_per_pax' => $selling_price_per_pax,
+                'is_general' => $is_general,
+                'headcount_json' => $headcount_json,
+            );
         }
 
         return $out;

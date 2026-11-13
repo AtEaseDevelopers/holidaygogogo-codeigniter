@@ -88,14 +88,12 @@ class Costing_Quotation extends CI_Controller
             );
         }
 
-        // Register the shared CJK font and wrap only the Chinese runs in a cjk-font
-        // span so Chinese a sales person types into the itinerary / notes / hotels
-        // renders, while English keeps the view's original Arial/Segoe font and the
-        // itinerary column layout stays intact. (DomPDF 1.0.2 resolves one font per
-        // text run with no per-glyph fallback — see pdf_cjk_helper.)
+        // The quotation uses the same registered font for mixed-language text
+        // throughout the document.
         $this->load->helper('pdf_cjk');
-        $dompdf = pdf_cjk_make_dompdf();
-        $dompdf->loadHtml(pdf_cjk_wrap_html($this->load->view('costing/quotation_pdf', $data, true)), 'UTF-8');
+        $dompdf = pdf_cjk_make_dompdf(true);
+        $html = $this->load->view('costing/quotation_pdf', $data, true);
+        $dompdf->loadHtml(pdf_cjk_wrap_missing_glyphs($html, $dompdf->getFontMetrics()), 'UTF-8');
         $dompdf->setPaper('A4', 'portrait');
         $dompdf->render();
 

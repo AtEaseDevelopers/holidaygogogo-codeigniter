@@ -137,6 +137,13 @@ class Manual_Leads extends MY_Controller
 		if (!$prepared['ok']) { return; }
 		$prepared['errors'] = ghl_manual_lead_required_form_errors($prepared['row']);
 		if ($prepared['errors']) { $prepared['ok'] = false; return; }
+		$amount = $prepared['row']['potential_sales_amount'];
+		if (manual_lead_format_sales_amount($amount) === null
+			&& (!$existing || $amount !== trim((string) ($existing->potential_sales_amount ?? '')))) {
+			$prepared['ok'] = false;
+			$prepared['errors'][] = 'Enter a single Potential Sales Amount, for example RM100,000.';
+			return;
+		}
 		$users = $this->Booking_Model->Read_Manual_Lead_Assignees();
 		$lists = array('sales_person_id' => $users, 'op_id' => $users);
 		foreach ($lists as $field => $users) {
@@ -171,10 +178,12 @@ class Manual_Leads extends MY_Controller
 		$this->load->helper('ghl_manual_lead');
 		$this->load->model('Ghl_Contacts_Model');
 
+		$query = http_build_query((array) $this->input->get(), '', '&');
+		$return_url = base_url('Manual_Leads') . ($query !== '' ? '?' . $query : '');
 		$dedup_key = (string) $this->input->post('dedup_key');
 		if ($dedup_key === '') {
 			$this->session->set_flashdata('ghl_lead_error', 'Missing lead reference.');
-			redirect(base_url('Manual_Leads'));
+			redirect($return_url);
 			return;
 		}
 
@@ -183,7 +192,7 @@ class Manual_Leads extends MY_Controller
 		$existing = $this->Guests_Model->Read_Manual_Lead_Detail($dedup_key);
 		if (!$existing) {
 			$this->session->set_flashdata('ghl_lead_error', 'Lead not found.');
-			redirect(base_url('Manual_Leads'));
+			redirect($return_url);
 			return;
 		}
 
@@ -195,7 +204,7 @@ class Manual_Leads extends MY_Controller
 		$this->Validate_Lead_Form($prepared, isset($existing) ? $existing : null);
 		if (!$prepared['ok']) {
 			$this->session->set_flashdata('ghl_lead_error', implode(' ', $prepared['errors']));
-			redirect(base_url('Manual_Leads'));
+			redirect($return_url);
 			return;
 		}
 
@@ -207,7 +216,7 @@ class Manual_Leads extends MY_Controller
 		);
 		if (!$changes['ok']) {
 			$this->session->set_flashdata('ghl_lead_error', $changes['error']);
-			redirect(base_url('Manual_Leads'));
+			redirect($return_url);
 			return;
 		}
 
@@ -222,7 +231,7 @@ class Manual_Leads extends MY_Controller
 			$this->db->trans_rollback();
 			$this->session->set_flashdata('ghl_lead_error', 'Could not update the lead. Please try again.');
 		}
-		redirect(base_url('Manual_Leads'));
+		redirect($return_url);
 	}
 
 	/**
@@ -234,6 +243,7 @@ class Manual_Leads extends MY_Controller
 	 */
 	function Edit_Data()
 	{
+		$this->load->helper('ghl_manual_lead');
 		$out = function ($data) {
 			$this->output->set_header('Cache-Control: no-store')->set_content_type('application/json')->set_output(json_encode($data));
 		};
@@ -260,7 +270,7 @@ class Manual_Leads extends MY_Controller
 			'sales_person_id' => $row->sales_person_id,
 			'op_id' => $row->op_id,
 			'destination' => $row->destination,
-			'potential_sales_amount' => $row->potential_sales_amount,
+			'potential_sales_amount' => manual_lead_display_sales_amount($row->potential_sales_amount),
 			'phone'         => $row->phone,
 			'email'         => $row->email,
 			'address'       => $row->address,
@@ -290,6 +300,7 @@ class Manual_Leads extends MY_Controller
 	 */
 	function View_Lead()
 	{
+		$this->load->helper('ghl_manual_lead');
 		$out = function ($data) {
 			$this->output->set_header('Cache-Control: no-store')->set_content_type('application/json')->set_output(json_encode($data));
 		};
@@ -330,7 +341,7 @@ class Manual_Leads extends MY_Controller
 			'sales_person_id' => $row->sales_person_id,
 			'op_id' => $row->op_id,
 			'destination' => $row->destination,
-			'potential_sales_amount' => $row->potential_sales_amount,
+			'potential_sales_amount' => manual_lead_display_sales_amount($row->potential_sales_amount),
 			'phone'         => $row->phone,
 			'email'         => $row->email,
 			'address'       => $row->address,

@@ -34,6 +34,8 @@ $margin_percentage = isset($financials['margin_percentage']) ? (float) $financia
 $sales_agents = isset($sales_agents) ? $sales_agents : array();
 $sales_admin_id = isset($package['sales_admin_id']) ? (int) $package['sales_admin_id'] : 0;
 $sales_admin_mobile = isset($package['sales_admin_mobile']) ? (string) $package['sales_admin_mobile'] : '';
+$op_assignees = isset($op_assignees) ? $op_assignees : array();
+$op_admin_id = isset($package['op_admin_id']) ? (int) $package['op_admin_id'] : 0;
 $op_admin_name = isset($package['op_admin_name']) ? trim((string) $package['op_admin_name']) : '';
 $related_tour_code = isset($package['related_tour_code']) ? trim((string) $package['related_tour_code']) : '';
 $validity_date = !empty($package['validity_date']) && strtotime($package['validity_date']) ? date('Y-m-d', strtotime($package['validity_date'])) : '';
@@ -268,9 +270,17 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
                     </div>
                     <div class="col-md-3">
                         <div class="form-group">
-                            <label>OP Person</label>
-                            <input type="text" class="form-control" value="<?php echo html_escape($op_admin_name); ?>" placeholder="Set to you when saved" readonly style="background:#f3f6f9;">
-                            <span class="form-text text-muted" style="font-size:11px;">Automatically recorded as whoever created this package. Internal use only.</span>
+                            <label for="cw-op-admin">OP Person</label>
+                            <select name="op_admin_id" id="cw-op-admin" class="form-control"<?php echo $package_id === 0 ? ' required' : ''; ?>>
+                                <?php if (!isset($op_assignees[$op_admin_id])) { ?>
+                                    <option value="" selected><?php echo $package_id > 0 && $op_admin_id > 0
+                                        ? html_escape($op_admin_name !== '' ? $op_admin_name . ' (current assignment)' : 'Keep current assignment')
+                                        : '— Select OP person —'; ?></option>
+                                <?php } ?>
+                                <?php foreach ($op_assignees as $assignee_id => $assignee_name) { ?>
+                                    <option value="<?php echo (int) $assignee_id; ?>"<?php echo $op_admin_id === (int) $assignee_id ? ' selected' : ''; ?>><?php echo html_escape($assignee_name); ?></option>
+                                <?php } ?>
+                            </select>
                         </div>
                     </div>
                     <div class="col-md-3">
@@ -636,7 +646,7 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
             </div>
             <div class="cw-panel" id="cw-itin-intro">
                 <div class="cw-panel-title">Tour Intro</div>
-                <div class="cw-panel-sub">Shown once at the TOP of the Itinerary section on the Quotation PDF — a header/intro for the whole tour.</div>
+                <div class="cw-panel-sub">Shown directly below the Tour Quotation details table on the PDF.</div>
                 <div class="cw-itin-field mb-4">
                     <textarea id="cw-ed-meta-tour_intro" class="form-control cw-itin-editor" name="itinerary_tour_intro"><?php echo html_escape(isset($itinerary_tour_intro) ? (string) $itinerary_tour_intro : ''); ?></textarea>
                 </div>
@@ -818,7 +828,7 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
             <!-- Boilerplate footer notes -->
             <div class="cw-panel">
                 <div class="cw-panel-title">Footer Notes</div>
-                <div class="cw-panel-sub">Shown (highlighted) at the bottom of the quotation — each paragraph is its own highlighted note.</div>
+                <div class="cw-panel-sub">Shown at the bottom of the quotation.</div>
                 <textarea class="form-control cw-itin-editor" name="quote_footer_notes"><?php echo html_escape($footer_notes_val); ?></textarea>
             </div>
 
@@ -915,6 +925,7 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
     // Saved combinations to re-render on load (edit mode). Each: name + its items.
     var EXISTING_COMBOS = <?php echo json_encode(array_map(function ($combo) {
         return array(
+            'id' => (int) $combo['id'],
             'name' => isset($combo['name']) ? $combo['name'] : '',
             'is_general' => !empty($combo['is_general']) ? 1 : 0,
             // Per-category headcount counts (category code => count) for this combo.
@@ -1457,7 +1468,7 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
     // isGeneral = the single "General Combination" whose common items (Tour Leader,
     // Flight, …) are added to every other combination (item 6). It has no selling
     // price / profit of its own and cannot be removed or duplicated.
-    function addComboCard(name, items, sellingPerPax, isGeneral, headcount) {
+    function addComboCard(name, items, sellingPerPax, isGeneral, headcount, id) {
         var c = comboSeq++;
         var card = document.createElement('div');
         card.className = 'cw-combo-card' + (isGeneral ? ' cw-combo-general' : '');
@@ -1471,6 +1482,7 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
               '</div>' +
               '<div class="cw-panel-sub" style="margin:-4px 0 8px;">Common items entered here (Tour Leader, Flight, …) are automatically added to every combination below — no need to re-key them.</div>'
             : '<div class="cw-combo-head">' +
+                  (id ? '<input type="hidden" name="combinations[' + c + '][id]" value="' + id + '">' : '') +
                   '<input type="text" class="form-control cw-combo-name" name="combinations[' + c + '][name]" placeholder="Combination name (e.g. Premium)" value="">' +
                   '<button type="button" class="btn btn-icon btn-light-primary cw-combo-dup" title="Duplicate this combination (copy all cost items into a new one)"><i class="la la-copy"></i></button>' +
                   '<button type="button" class="btn btn-icon btn-light-danger cw-combo-remove" title="Remove combination"><i class="la la-trash"></i></button>' +
@@ -1663,7 +1675,7 @@ $no_multiply_category_codes = $CI->Costing_Category_Model->Read_No_Multiply_Code
         else { regularCombos.push(combo); }
     });
     addComboCard(generalExisting ? generalExisting.name : '', generalExisting ? generalExisting.items : [], null, true, generalExisting ? generalExisting.headcount : {});
-    regularCombos.forEach(function (combo) { addComboCard(combo.name, combo.items, combo.selling_price_per_pax, false, combo.headcount); });
+    regularCombos.forEach(function (combo) { addComboCard(combo.name, combo.items, combo.selling_price_per_pax, false, combo.headcount, combo.id); });
 
     // ---- Supplier Quotations: drag-and-drop upload / delete ----------------
     (function () {

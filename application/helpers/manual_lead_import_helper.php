@@ -125,7 +125,7 @@ function manual_lead_import_example($users)
         'LEAD STATUS'=>'FOLLOW UP 1', 'STATUS DATE'=>'05 Nov 2026',
         'LEAD STATUS UPDATES'=>"2026-11-04 NEW LEADS (Received enquiry)\n2026-11-05 FOLLOW UP 1 (Sent package)",
         'TRAVEL DATE'=>'10 Dec 2026 - 15 Dec 2026', 'SALES PERSON'=>$name, 'OP'=>$name,
-        'DESTINATION'=>'Redang', 'POTENTIAL SALES AMOUNT'=>'RM 10,000 approx.',
+        'DESTINATION'=>'Redang', 'POTENTIAL SALES AMOUNT'=>'RM10,000',
         'CONTACT NUM'=>'+60 123456789', 'EMAIL'=>'ali@example.com', 'ADDRESS'=>'No 1, Jalan Besar, 50000 KL',
         'COUNTRY'=>'Malaysia', 'GENDER'=>'Male', 'LANGUAGE'=>'Malay', 'RACE'=>'Malay', 'NATIONALITY'=>'Malaysia',
         'SOURCE'=>'Facebook', 'NATURE OF BUSINESS'=>'Travel Agency', 'NUMBER OF PAX'=>'11-20',
@@ -146,7 +146,7 @@ function manual_lead_import_template($users)
         'LEAD STATUS UPDATES'=>"2026-11-04 NEW LEADS (Received enquiry)\n2026-11-05 FOLLOW UP 1 (Sent package)",
         'TRAVEL DATE'=>'10 Dec 2026 - 15 Dec 2026','SALES PERSON'=>isset($users[0]) ? $users[0]->Name : 'BC user name',
         'OP'=>isset($users[0]) ? $users[0]->Name : 'BC user name','DESTINATION'=>'Redang',
-        'POTENTIAL SALES AMOUNT'=>'RM 10,000 approx.','CONTACT NUM'=>'+60 123456789','NUMBER OF PAX'=>'11-20',
+        'POTENTIAL SALES AMOUNT'=>'RM10,000','CONTACT NUM'=>'+60 123456789','NUMBER OF PAX'=>'11-20',
         'LEAD INTRO'=>'Referred by an existing client. Planning a company trip.');
     $system = array('NO.', 'CREATED DATE', 'CREATED BY');
     $guide = $book->createSheet(); $guide->setTitle('Instructions');

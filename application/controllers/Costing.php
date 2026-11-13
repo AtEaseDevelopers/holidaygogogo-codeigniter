@@ -388,6 +388,8 @@ class Costing extends MY_Controller
         $array['active_step'] = 'details';
         $array['has_snapshot'] = false;
         $array['wizard_steps'] = $this->Wizard_Steps();
+        $array['op_assignees'] = $this->Package_OP_Assignees();
+        $array['package']['op_admin_id'] = (int) $this->session->userdata('admin_id');
 
         $titles = array(
             'tab_title' => 'HolidayGoGoGo | New Costing Package',
@@ -428,6 +430,9 @@ class Costing extends MY_Controller
         $array['active_step'] = $step;
         $array['has_snapshot'] = $existing_booking_id > 0;
         $array['wizard_steps'] = $this->Wizard_Steps();
+        if ($step === 'details') {
+            $array['op_assignees'] = $this->Package_OP_Assignees();
+        }
 
         // A saved snapshot's quotation link is minted on demand (e.g. a duplicated
         // package carries no token). The wizard's final step needs it to show the
@@ -461,10 +466,34 @@ class Costing extends MY_Controller
         $this->load->view('layout/footer');
     }
 
+    private function Package_OP_Assignees()
+    {
+        $this->load->model('Booking_Model');
+        return array_column($this->Booking_Model->Read_Manual_Lead_Assignees(), 'Name', 'AdminID');
+    }
+
     public function Save_Package()
     {
+        $existing_package_id = (int) $this->input->post('package_id');
+        $requested_op = $this->input->post('op_admin_id');
+        if ($existing_package_id <= 0 && $requested_op === null) {
+            $requested_op = $this->session->userdata('admin_id');
+        }
+        $op_admin_id = null;
+        // An empty value on an edit preserves the stored assignment, including
+        // an older assignment that no longer appears in the eligible staff list.
+        if ($existing_package_id <= 0 || ($requested_op !== null && $requested_op !== '')) {
+            $op_admin_id = filter_var($requested_op, FILTER_VALIDATE_INT, array('options' => array('min_range' => 1)));
+            $assignees = $this->Package_OP_Assignees();
+            if ($op_admin_id === false || !isset($assignees[$op_admin_id])) {
+                $this->session->set_flashdata('message_error', 'Please select an eligible OP Person.');
+                redirect($existing_package_id > 0 ? 'Costing/Package/' . $existing_package_id . '?step=details' : 'Costing/Create');
+                return;
+            }
+        }
+
         $package_id = $this->Costing_Model->Save_Package(array(
-            'id' => (int) $this->input->post('package_id'),
+            'id' => $existing_package_id,
             'name' => $this->input->post('name'),
             'customer_name' => $this->input->post('customer_name'),
             'customer_contact' => $this->input->post('customer_contact'),
@@ -472,9 +501,7 @@ class Costing extends MY_Controller
             'sales_admin_id' => $this->input->post('sales_admin_id'),
             'sales_admin_mobile' => $this->input->post('sales_admin_mobile'),
             'related_tour_code' => $this->input->post('related_tour_code'),
-            // OP person = whoever creates the package. Stamped from the logged-in
-            // admin on insert only; the model preserves it untouched on edit.
-            'op_admin_id' => (int) $this->session->userdata('admin_id'),
+            'op_admin_id' => $op_admin_id,
             'validity_date' => $this->input->post('validity_date'),
             'duration_days' => $this->input->post('duration_days'),
             'duration_nights' => $this->input->post('duration_nights'),
@@ -483,7 +510,7 @@ class Costing extends MY_Controller
         ));
 
         if ($package_id > 0) {
-            $this->session->set_flashdata('message_success', ((int) $this->input->post('package_id') > 0)
+            $this->session->set_flashdata('message_success', ($existing_package_id > 0)
                 ? 'Package details saved.'
                 : 'Package created. Continue with the costing.');
             $next = $this->Normalize_Wizard_Step($this->input->post('wizard_next'));
@@ -492,7 +519,6 @@ class Costing extends MY_Controller
         }
 
         $this->session->set_flashdata('message_error', 'Package name is required.');
-        $existing_package_id = (int) $this->input->post('package_id');
         redirect($existing_package_id > 0 ? 'Costing/Package/' . $existing_package_id . '?step=details' : 'Costing');
     }
 

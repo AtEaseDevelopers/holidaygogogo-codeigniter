@@ -1,6 +1,7 @@
 <?php
 defined('BASEPATH') OR exit('No direct script access allowed');
 require_once __DIR__ . '/guest_contact_helper.php';
+require_once __DIR__ . '/manual_lead_sales_amount_helper.php';
 
 /** Manual-only filters shared by the listing, count and full Excel export. */
 function manual_lead_filter_sql($get)
@@ -23,11 +24,23 @@ function manual_lead_filter_sql($get)
             $params[] = $pattern($word);
         }
     }
-    foreach (array('company_name' => 'gc.company_name', 'manual_destination' => 'gc.destination', 'potential_sales_amount' => 'gc.potential_sales_amount') as $key => $column) {
+    foreach (array('company_name' => 'gc.company_name', 'manual_destination' => 'gc.destination') as $key => $column) {
         if ($text($key) !== '') {
             $sql .= " AND LOWER({$column}) LIKE ? ESCAPE '!' ";
             $params[] = $pattern($text($key));
         }
+    }
+    $amount = $text('potential_sales_amount');
+    if ($amount !== '') {
+        $formatted = manual_lead_format_sales_amount($amount);
+        $sql .= " AND (LOWER(gc.potential_sales_amount) LIKE ? ESCAPE '!'";
+        $params[] = $pattern($amount);
+        if ($formatted !== null) {
+            // Compare digits across formatted and unformatted records.
+            $sql .= " OR REPLACE(gc.potential_sales_amount, ',', '') LIKE ? ESCAPE '!'";
+            $params[] = $pattern(str_replace(',', '', substr($formatted, 2)));
+        }
+        $sql .= ') ';
     }
     foreach (array('manual_sales_person' => 'gc.sales_person_id', 'manual_op' => 'gc.op_id') as $key => $column) {
         $values = guest_list_multi_values(isset($get[$key]) ? $get[$key] : null);

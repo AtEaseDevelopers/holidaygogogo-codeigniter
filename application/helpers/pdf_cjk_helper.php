@@ -99,9 +99,10 @@ if ( ! function_exists('pdf_cjk_wrap_html')) {
      *
      * Only text nodes are touched — tags, attributes and <style>/<script> bodies
      * are left untouched (CSS/markup never carry CJK we need to render anyway). No-op
-     * when no CJK font is available, or when the HTML has no CJK characters.
+     * when no CJK font is available. A custom pattern can select other glyphs
+     * and matches their literal and HTML entity forms.
      */
-    function pdf_cjk_wrap_html($html, $family = 'cjk')
+    function pdf_cjk_wrap_html($html, $family = 'cjk', $pattern = null)
     {
         if ($html === '' || $html === null || pdf_cjk_font_path() === '') {
             return (string) $html;
@@ -109,9 +110,10 @@ if ( ! function_exists('pdf_cjk_wrap_html')) {
 
         // CJK symbols/punctuation, Hiragana, Katakana, CJK Ext-A, CJK Unified,
         // Compatibility Ideographs, and Fullwidth/Halfwidth forms.
-        $cjk = '/[\x{3000}-\x{303F}\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}\x{FF00}-\x{FFEF}]+/u';
-        if ( ! preg_match($cjk, $html)) {
-            return (string) $html; // English-only — nothing to wrap.
+        $match_entities = $pattern !== null;
+        $pattern = $pattern ?? '/[\x{3000}-\x{303F}\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}\x{FF00}-\x{FFEF}]+/u';
+        if (!$match_entities && !preg_match($pattern, $html)) {
+            return (string) $html;
         }
 
         // Split into tags (captured) and the text between them so we only ever
@@ -123,9 +125,9 @@ if ( ! function_exists('pdf_cjk_wrap_html')) {
                 continue;
             }
             if ($part[0] === '<') {
-                if (preg_match('/^<\s*(style|script)\b/i', $part)) {
+                if (preg_match('/^<\s*(style|script|title)\b/i', $part)) {
                     $in_skip = true;
-                } elseif (preg_match('/^<\s*\/\s*(style|script)\s*>/i', $part)) {
+                } elseif (preg_match('/^<\s*\/\s*(style|script|title)\s*>/i', $part)) {
                     $in_skip = false;
                 }
                 continue; // never modify a tag
@@ -133,7 +135,13 @@ if ( ! function_exists('pdf_cjk_wrap_html')) {
             if ($in_skip) {
                 continue; // inside <style>/<script>
             }
-            $part = preg_replace_callback($cjk, function ($m) use ($family) {
+            if ($match_entities && strpos($part, '&') !== false) {
+                $decoded = html_entity_decode($part, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                if (preg_match($pattern, $decoded)) {
+                    $part = htmlspecialchars($decoded, ENT_NOQUOTES, 'UTF-8');
+                }
+            }
+            $part = preg_replace_callback($pattern, function ($m) use ($family) {
                 // !important is REQUIRED: the PDF views set `font-family: ... !important`
                 // on <body>, and DomPDF lets that author-important rule override a
                 // normal inline style — so a plain inline font-family on this span
@@ -148,24 +156,68 @@ if ( ! function_exists('pdf_cjk_wrap_html')) {
     }
 }
 
+/**
+ * DomPDF selects a font per run. Give characters missing from the quotation's
+ * main font a fallback that has both regular and bold glyphs.
+ */
+function pdf_cjk_wrap_missing_glyphs($html, $font_metrics)
+{
+    $glyphs = array();
+    foreach (array('cjk', 'DejaVu Sans') as $family) {
+        $weights = array('normal', 'bold');
+        if ($font_metrics->getFont($family, '900') !== null) {
+            $weights[] = '900';
+        }
+        foreach ($weights as $weight) {
+            $path = $font_metrics->getFont($family, $weight) . '.ttf';
+            if (!is_readable($path)) {
+                return $html;
+            }
+            $font = \FontLib\Font::load($path);
+            $glyphs[$family][$weight] = $font->getUnicodeCharMap();
+            $font->close();
+            if (!is_array($glyphs[$family][$weight])) {
+                return $html;
+            }
+        }
+    }
+
+    $primary = call_user_func_array('array_intersect_key', array_values($glyphs['cjk']));
+    $fallback = call_user_func_array('array_intersect_key', array_values($glyphs['DejaVu Sans']));
+    $characters = '';
+    foreach (array_diff_key($fallback, $primary) as $codepoint => $glyph) {
+        if ($codepoint > 127) {
+            $characters .= '\x{' . dechex($codepoint) . '}';
+        }
+    }
+    return $characters === '' ? $html : pdf_cjk_wrap_html($html, 'DejaVu Sans', '/[' . $characters . ']+/u');
+}
+
 if ( ! function_exists('pdf_cjk_make_dompdf')) {
     /**
      * Build a \Dompdf\Dompdf with remote + font subsetting enabled and, when a CJK
-     * .ttf is available, the "cjk" family registered (normal + bold) with a
+     * .ttf is available, the "cjk" family registered (normal, bold, and optional
+     * 900 weight for quotations) with a
      * per-font writable cache dir and a symlink-safe chroot. Callers still set any
      * extra options (e.g. enable_html5_parser), setPaper(), loadHtml(..., 'UTF-8')
      * and render().
      */
-    function pdf_cjk_make_dompdf()
+    function pdf_cjk_make_dompdf($use_black_weight = false)
     {
         require_once APPPATH . 'libraries/dompdf/autoload.inc.php';
 
         $cjk_font  = pdf_cjk_font_path();
+        $regular_font = FCPATH . 'assets/fonts/pdf/NotoSansSC-Regular.ttf';
+        if ($use_black_weight && is_readable($regular_font)) {
+            $cjk_font = $regular_font;
+        }
         $use_cjk   = ($cjk_font !== '');
         // Genuine bold face for the "cjk" bold slot; fall back to the normal face
         // (legacy behaviour — bold renders at regular weight) when unavailable.
         $bold_font = $use_cjk ? pdf_cjk_bold_font_path() : '';
         if ($bold_font === '') { $bold_font = $cjk_font; }
+        $black_font = FCPATH . 'assets/fonts/pdf/NotoSansSC-Black.ttf';
+        if (!$use_black_weight || !is_readable($black_font)) { $black_font = $bold_font; }
 
         $options = new \Dompdf\Options();
         $options->setIsRemoteEnabled(true);
@@ -173,8 +225,8 @@ if ( ! function_exists('pdf_cjk_make_dompdf')) {
         if ($use_cjk) {
             // Namespace the (writable) font cache per font file so switching the
             // configured font never mixes stale glyph metrics from a previous one.
-            // Keyed by both faces so adding/swapping the bold font busts the cache.
-            $font_dir = APPPATH . 'cache/dompdf_fonts/' . md5($cjk_font . '|' . $bold_font) . '/';
+            $font_key = $cjk_font . '|' . $bold_font . ($use_black_weight ? '|' . $black_font : '');
+            $font_dir = APPPATH . 'cache/dompdf_fonts/' . md5($font_key) . '/';
             if ( ! is_dir($font_dir)) { @mkdir($font_dir, 0755, true); }
             $options->setFontDir($font_dir);
             $options->setFontCache($font_dir);
@@ -193,6 +245,16 @@ if ( ! function_exists('pdf_cjk_make_dompdf')) {
             $fm = $dompdf->getFontMetrics();
             $fm->registerFont(array('family' => 'cjk', 'style' => 'normal', 'weight' => 'normal'), $cjk_font);
             $fm->registerFont(array('family' => 'cjk', 'style' => 'normal', 'weight' => 'bold'), $bold_font);
+            if ($use_black_weight) {
+                $fm->registerFont(array('family' => 'cjk', 'style' => 'normal', 'weight' => '900'), $black_font);
+            }
+        }
+        if ($use_black_weight) {
+            // Missing glyphs still need a usable face when they occur in a heading.
+            $fm = $dompdf->getFontMetrics();
+            $fallback = $fm->getFamily('DejaVu Sans');
+            $fallback['900'] = $fallback['bold'];
+            $fm->setFontFamily('DejaVu Sans', $fallback);
         }
         return $dompdf;
     }

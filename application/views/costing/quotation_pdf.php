@@ -46,6 +46,7 @@ $ValidUntil = !empty($package['validity_date']) && strtotime($package['validity_
     : '';
 // Step 1 free-text description, shown under the Pricing per person table. Blank = hidden.
 $PackageDescription = isset($package['description']) ? trim((string) $package['description']) : '';
+$TourIntro = isset($itinerary_tour_intro) ? (string) $itinerary_tour_intro : '';
 $DurationDays  = (int) (isset($package['duration_days']) ? $package['duration_days'] : 0);
 $DurationNights = (int) (isset($package['duration_nights']) ? $package['duration_nights'] : 0);
 $TotalPax      = (int) (isset($booking['total_pax']) ? $booking['total_pax'] : 0);
@@ -195,9 +196,15 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
     <meta charset="utf-8">
     <title>Quotation <?php echo html_escape($TourCode); ?></title>
 </head><style type="text/css">
+    /* Use one font for mixed-language text, including pasted rich text. */
+    body, body * {
+        font-family: cjk, "DejaVu Sans", sans-serif !important;
+        /* An italic request would fall back to a different font. */
+        font-style: normal !important;
+    }
     body {
-        font-family: "Segoe UI", Arial, sans-serif !important;
         font-size: 13px;
+        font-weight: 400;
         padding-left: 10px;
         padding-right: 10px;
         /* break-word is inherited, so this makes every rich-text block (tour intro,
@@ -220,19 +227,30 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
        a whole sentence is one unbreakable "word" that overflows the cell/page edge
        unless break-word lets it wrap between characters (verified multibyte-safe). */
     table.kv td { border: 1px solid #444; padding: 5px 8px; font-size: 12px; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
-    table.kv td.k { width: 26%; font-weight: bold; background: #f2f2f2; }
+    table.kv td.k { width: 26%; background: #f2f2f2; }
     table.data th, table.data td { border: 1px solid #444; padding: 5px 8px; font-size: 12px; word-wrap: break-word; overflow-wrap: break-word; }
-    table.data th { background: #d9d9d9; text-align: center; font-weight: bold; }
-    .section-title { font-weight: bold; text-align: center; margin: 14px 0 6px 0; }
-    .note-row td { background: #f7f7f7; font-style: italic; }
+    table.data th { background: #d9d9d9; text-align: center; }
+    .section-title { text-align: center; margin: 14px 0 6px 0; }
+    .note-row td { background: #f7f7f7; }
     /* Hotel note is rich-text now; drop the editor's <p> margins so it stays a tight note line. */
     .note-row td p { margin: 0; }
     .pricing-description { margin-top: 6px; font-size: 11px; line-height: 1.4; }
+    .tour-intro { margin-top: 8px; font-size: 11px; page-break-inside: avoid; }
+    .tour-intro, .tour-intro *,
+    .hotel-pricing, .hotel-pricing * { color: #000 !important; }
+    .flight-option { page-break-inside: avoid; }
+    .flight-option .section-title { page-break-after: avoid; }
     .footer-notes { margin-top: 14px; }
-    .footer-notes p { background: #fff3a3; font-style: italic; font-size: 11px; padding: 2px 4px; margin-bottom: 4px; }
-    /* Reserve top/bottom margin on every page for the repeating header/footer. */
-    @page { margin: 165px 40px 95px 40px; }
-    #pdf-header { position: fixed; top: -145px; left: 0px; right: 0px; height: 135px; }
+    .footer-notes p { font-size: 11px; margin-bottom: 4px; }
+    body * { font-weight: inherit; }
+    h1, h3, th, strong, b, table.kv td.k, .section-title,
+    .itinerary-table thead, .fare-price-label { font-weight: 900 !important; }
+    .quote-content, .quote-content *,
+    .tour-intro, .tour-intro *,
+    .hotel-pricing .note-row td, .hotel-pricing .note-row td * { font-weight: 400 !important; }
+    /* Leave room for the company address to wrap above the repeating divider. */
+    @page { margin: 182px 40px 95px 40px; }
+    #pdf-header { position: fixed; top: -162px; left: 0px; right: 0px; height: 152px; }
     #pdf-footer { position: fixed; bottom: -78px; left: 0px; right: 0px; height: 68px; }
 </style><body>
     <!-- Repeats on every page (fixed) -->
@@ -256,14 +274,14 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
     <!-- Repeats on every page (fixed) -->
     <div id="pdf-footer">
         <hr style="margin-bottom:5px;">
-        <p style="font-size:12px; text-align:center;"><i>This Is A Computer Generated Quotation. No Signature Required.</i></p>
+        <p style="font-size:12px; text-align:center;">This Is A Computer Generated Quotation. No Signature Required.</p>
     </div>
 
     <table style="width:100%;">
         <tr>
             <th style="width:30%;"></th>
             <th style="width:40%;"><h3 class="text-center">Tour Quotation</h3></th>
-            <th style="width:30%; font-weight:700; text-align:right;">No : <?php echo html_escape($TourCode); ?></th>
+            <th style="width:30%; text-align:right;">No : <span class="quote-content"><?php echo html_escape($TourCode); ?></span></th>
         </tr>
     </table>
 
@@ -330,12 +348,16 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
             <?php } ?>
         </table>
 
+        <?php if (!costing_itinerary_html_is_blank($TourIntro)) { ?>
+            <div class="tour-intro"><?php echo $TourIntro; ?></div>
+        <?php } ?>
+
         <!-- Hotel pricing (dynamic columns — 4.2) -->
         <div class="section-title">
-            Pricing per person<?php if ($PricingBasis !== '') { ?> (Quoted based on <span class="red"><?php echo html_escape($PricingBasis); ?></span>)<?php } ?>
+            Pricing per person<?php if ($PricingBasis !== '') { ?> <span class="quote-content">(Quoted based on <span class="red"><?php echo html_escape($PricingBasis); ?></span>)</span><?php } ?>
         </div>
         <?php $hotel_colspan = 1 + $HotelColCount + ($ShowSingleSupp ? 1 : 0); ?>
-        <table class="data">
+        <table class="data hotel-pricing">
             <thead>
                 <tr>
                     <th style="text-align:left;"><?php echo html_escape($HotelTitleLabel); ?></th>
@@ -376,57 +398,50 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
             $opt_heading = $opt['title'] !== '' ? $opt['title'] : ('Flight Option ' . $opt_no);
             if ($opt['airline'] !== '') { $opt_heading .= ' — ' . $opt['airline']; }
         ?>
-        <div class="section-title"><?php echo html_escape(strtoupper($opt_heading)); ?></div>
-        <table class="data">
-            <thead>
-                <tr>
-                    <th>Travel Date</th>
-                    <th>Sector</th>
-                    <th>Flight No</th>
-                    <th>Timing</th>
-                    <th>Duration</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (empty($opt['rows'])) { ?>
-                    <tr><td colspan="5" class="text-center">Flight schedule to be confirmed.</td></tr>
-                <?php } else { foreach ($opt['rows'] as $cells) { ?>
+        <div class="flight-option">
+            <div class="section-title"><?php echo html_escape(strtoupper($opt_heading)); ?></div>
+            <table class="data">
+                <thead>
                     <tr>
-                        <?php foreach ($cells as $c) { ?>
-                            <td class="text-center"><?php echo html_escape(trim((string) $c) !== '' ? $c : '-'); ?></td>
-                        <?php } ?>
+                        <th>Travel Date</th>
+                        <th>Sector</th>
+                        <th>Flight No</th>
+                        <th>Timing</th>
+                        <th>Duration</th>
                     </tr>
-                <?php } } ?>
-                <?php if ($FlightPricing) { ?>
-                    <?php if ($opt['price'] !== null) { ?>
+                </thead>
+                <tbody>
+                    <?php if (empty($opt['rows'])) { ?>
+                        <tr><td colspan="5" class="text-center">Flight schedule to be confirmed.</td></tr>
+                    <?php } else { foreach ($opt['rows'] as $cells) { ?>
                         <tr>
-                            <td colspan="4" style="font-weight:bold; text-align:right;">Price per person (Adult / Child)</td>
-                            <td class="text-center" style="font-weight:bold;"><?php echo $money2($opt['price']); ?></td>
+                            <?php foreach ($cells as $c) { ?>
+                                <td class="text-center"><?php echo html_escape(trim((string) $c) !== '' ? $c : '-'); ?></td>
+                            <?php } ?>
                         </tr>
+                    <?php } } ?>
+                    <?php if ($FlightPricing) { ?>
+                        <?php if ($opt['price'] !== null) { ?>
+                            <tr>
+                                <td colspan="4" class="fare-price-label text-right">Price per person (Adult / Child)</td>
+                                <td class="text-center"><?php echo $money2($opt['price']); ?></td>
+                            </tr>
+                        <?php } ?>
+                        <?php if ($opt['fare_includes'] !== '') { ?>
+                            <tr class="note-row"><td colspan="5" class="text-center">Fare quote includes <?php echo html_escape($opt['fare_includes']); ?></td></tr>
+                        <?php } ?>
+                        <?php if ($opt['fare_expiry'] !== '') { ?>
+                            <tr class="note-row"><td colspan="5" class="text-center"><?php echo html_escape($opt['fare_expiry']); ?></td></tr>
+                        <?php } ?>
                     <?php } ?>
-                    <?php if ($opt['fare_includes'] !== '') { ?>
-                        <tr class="note-row"><td colspan="5" class="text-center">Fare quote includes <?php echo html_escape($opt['fare_includes']); ?></td></tr>
-                    <?php } ?>
-                    <?php if ($opt['fare_expiry'] !== '') { ?>
-                        <tr class="note-row"><td colspan="5" class="text-center" style="font-weight:bold; font-style:normal;"><?php echo html_escape($opt['fare_expiry']); ?></td></tr>
-                    <?php } ?>
-                <?php } ?>
-            </tbody>
-        </table>
+                </tbody>
+            </table>
+        </div>
         <?php } } ?>
 
-        <?php
-        // Tour Intro header — a standalone rich-text block shown once directly under
-        // the pricing section. Prints only when it carries visible content; an
-        // <img>-only block still counts (matches the Notes & Terms blank check).
-        $tour_intro = isset($itinerary_tour_intro) ? (string) $itinerary_tour_intro : '';
-        if (trim(strip_tags($tour_intro, '<img>')) !== '' || stripos($tour_intro, '<img') !== false) { ?>
-            <div style="font-size:11px; margin-top:8px;"><?php echo $tour_intro; ?></div>
-        <?php } ?>
-
-        <!-- Boilerplate footer notes (highlighted) — rich-text HTML -->
+        <!-- Rich-text footer notes -->
         <?php if ($FooterNotesHtml !== '') { ?>
-            <div class="footer-notes"><?php echo $FooterNotesHtml; ?></div>
+            <div class="footer-notes quote-content"><?php echo $FooterNotesHtml; ?></div>
         <?php } ?>
     </div>
     <?php } ?>
@@ -445,9 +460,9 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
              from splitting mid-row. The content cells set word-wrap:break-word so
              long Chinese (CJK) itinerary text — which has no spaces for DomPDF to
              break on — wraps inside the column instead of overflowing the page. -->
-        <table style="width:100%; table-layout:fixed; border-collapse:collapse;">
+        <table class="itinerary-table" style="width:100%; table-layout:fixed; border-collapse:collapse;">
             <thead>
-                <tr style="font-weight:700; font-size:13px;">
+                <tr style="font-size:13px;">
                     <td style="width:8%; border-top:1px solid #000; border-bottom:1px solid #000; padding:4px 5px;">Day</td>
                     <td style="width:32%; border-top:1px solid #000; border-bottom:1px solid #000; padding:4px 5px;">Itinerary</td>
                     <td style="width:60%; border-top:1px solid #000; border-bottom:1px solid #000; padding:4px 5px;">Details</td>
@@ -461,12 +476,12 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
             foreach ($itinerary as $day) {
                 $meals = costing_meal_plan_labels(isset($day['meal_plan']) ? $day['meal_plan'] : ''); ?>
                 <tr style="vertical-align:baseline; font-size:11px; page-break-inside:avoid;">
-                    <td style="padding:6px 5px;">Day <?php echo (int) $day['day_number']; ?></td>
+                    <td style="padding:6px 5px;"><strong>Day <?php echo (int) $day['day_number']; ?></strong></td>
                     <td style="padding:6px 5px; word-wrap:break-word; overflow-wrap:break-word;"><strong><?php echo html_escape(isset($day['title']) ? $day['title'] : ''); ?></strong></td>
                     <td style="padding:6px 5px; word-wrap:break-word; overflow-wrap:break-word;">
-                        <div><?php echo isset($day['description']) ? $day['description'] : ''; ?></div>
+                        <div class="quote-content"><?php echo isset($day['description']) ? $day['description'] : ''; ?></div>
                         <?php if (!empty($meals)) { ?>
-                            <div style="margin-top:4px;"><strong style="color:#2b3a55;">Meal Plan:</strong> <?php echo html_escape(implode(', ', $meals)); ?></div>
+                            <div style="margin-top:4px;">Meal Plan: <?php echo html_escape(implode(', ', $meals)); ?></div>
                         <?php } ?>
                     </td>
                 </tr>
@@ -498,7 +513,7 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
                 // flow/split, unlike an unbreakable one-row table), so no blank pages.
                 $itin_section_rows[] = '<div style="page-break-inside:avoid; margin-top:8px;">'
                     . '<p style="margin:6px 0 2px;"><strong>' . $sec_label . '</strong></p>'
-                    . $sec_html . '</div>';
+                    . '<div class="quote-content">' . $sec_html . '</div></div>';
             }
         }
         // Render as plain block divs, NOT a single-row table. A one-<tr> table holding
