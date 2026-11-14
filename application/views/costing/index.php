@@ -68,6 +68,17 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
     .costing-action-buttons form {
         margin: 0;
     }
+    .btn.revision-action-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+    }
+    .btn.revision-action-toggle::after {
+        margin: 0;
+    }
     .revision-action-menu {
         min-width: 0;
         padding: 0.5rem;
@@ -310,32 +321,32 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                                     <span class="text-muted">(<?php echo html_escape(ucfirst((string) $rev['status'])); ?>)</span>
                                                                 </span>
                                                                 <div class="btn-group ml-2">
-                                                                    <button type="button" class="btn btn-light-primary btn-xs dropdown-toggle" data-toggle="dropdown" data-boundary="window" aria-expanded="false" aria-label="Actions for <?php echo $revision_label; ?>"></button>
+                                                                    <button type="button" class="btn btn-light-primary btn-xs dropdown-toggle revision-action-toggle" data-toggle="dropdown" data-boundary="window" aria-expanded="false" aria-label="Actions for <?php echo $revision_label; ?>"></button>
                                                                     <div class="dropdown-menu dropdown-menu-right revision-action-menu">
                                                                         <div class="d-flex align-items-center">
-                                                                            <a href="<?php echo base_url('Costing/Package/' . (int) $rev['id']); ?>" class="btn btn-icon btn-light-primary btn-xs" title="View this version" aria-label="View this version">
+                                                                            <a href="<?php echo base_url('Costing/Package/' . (int) $rev['id']); ?>" class="btn btn-icon btn-light-primary btn-sm" title="View this version" aria-label="View this version">
                                                                                 <i class="la la-eye"></i>
                                                                             </a>
                                                                             <?php if (!empty($rev['quotation_token']) && strtolower((string) $rev['status']) !== 'inactive') { ?>
-                                                                                <a href="<?php echo base_url('Costing/Quotation/' . $rev['quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-xs" title="Open Quotation PDF" aria-label="Open Quotation PDF">
+                                                                                <a href="<?php echo base_url('Costing/Quotation/' . $rev['quotation_token']); ?>" target="_blank" class="btn btn-icon btn-light-success btn-sm" title="Open Quotation PDF" aria-label="Open Quotation PDF">
                                                                                     <i class="la la-file-pdf"></i>
                                                                                 </a>
                                                                             <?php } ?>
                                                                             <form method="post" action="<?php echo base_url('Costing/Duplicate_Package'); ?>" class="duplicate-package-form d-inline">
                                                                                 <input type="hidden" name="package_id" value="<?php echo (int) $rev['id']; ?>">
-                                                                                <button type="button" class="btn btn-icon btn-light-primary btn-xs duplicate-package-button" data-name="<?php echo $revision_label; ?>" title="Duplicate Package" aria-label="Duplicate Package">
+                                                                                <button type="button" class="btn btn-icon btn-light-primary btn-sm duplicate-package-button" data-name="<?php echo $revision_label; ?>" title="Duplicate Package" aria-label="Duplicate Package">
                                                                                     <i class="la la-copy"></i>
                                                                                 </button>
                                                                             </form>
                                                                             <form method="post" action="<?php echo base_url('Costing/Create_Revision'); ?>" class="revision-package-form d-inline">
                                                                                 <input type="hidden" name="package_id" value="<?php echo (int) $rev['id']; ?>">
-                                                                                <button type="button" class="btn btn-icon btn-light-warning btn-xs revision-package-button" data-name="<?php echo $revision_label; ?>" title="Create Revision" aria-label="Create Revision">
+                                                                                <button type="button" class="btn btn-icon btn-light-warning btn-sm revision-package-button" data-name="<?php echo $revision_label; ?>" title="Create Revision" aria-label="Create Revision">
                                                                                     <i class="la la-code-branch"></i>
                                                                                 </button>
                                                                             </form>
                                                                             <form method="post" action="<?php echo base_url('Costing/Delete_Package'); ?>" class="delete-package-form d-inline">
                                                                                 <input type="hidden" name="package_id" value="<?php echo (int) $rev['id']; ?>">
-                                                                                <button type="button" class="btn btn-icon btn-light-danger btn-xs delete-package-button" data-name="<?php echo $revision_label; ?>" title="Delete this version" aria-label="Delete this version">
+                                                                                <button type="button" class="btn btn-icon btn-light-danger btn-sm delete-package-button" data-name="<?php echo $revision_label; ?>" title="Delete this version" aria-label="Delete this version">
                                                                                     <i class="la la-trash"></i>
                                                                                 </button>
                                                                             </form>
