@@ -20,7 +20,7 @@ class EditSaveDb {
     private $where = array(), $snapshot, $ok = true, $lastId = 0;
     function __construct() {
         $this->rows = array(
-            'ghl_contacts' => array(array('id' => 42, 'lead_source' => 'manual', 'first_name' => 'Old', 'notes' => 'Old notes', 'lead_intro' => 'Old lead description', 'sales_person_id' => null, 'op_id' => null)),
+            'ghl_contacts' => array(array('id' => 42, 'lead_source' => 'manual', 'first_name' => 'Old', 'notes' => 'Old notes', 'lead_intro' => 'Old lead description', 'high_chance' => 0, 'sales_person_id' => null, 'op_id' => null)),
             'lead_status_log' => array(array('LogID' => 10, 'dedup_key' => 'ghl:42', 'Status' => 'Y', 'CreatedBy' => 7, 'Note' => 'Old status note', 'StatusDate' => '2026-11-04', 'LeadStatus' => 'NEW')),
         );
     }
@@ -72,7 +72,9 @@ function make_controller($failInsert = false) {
     return $controller;
 }
 $filters = array('q' => 'Ali & Co', 'manual_sales_person' => array('7', '9'), 'page' => '2');
-$success = make_controller(); $success->input->query = $filters; $success->Update();
+$success = make_controller(); $success->input->query = $filters;
+$success->input->data['high_chance'] = '1';
+$success->Update();
 check(isset($success->session->flash['ghl_lead_success']), 'Successful edit not acknowledged');
 check(strpos($edit_save_redirect, 'Manual_Leads?') === 0, 'Save did not return to Manual Leads');
 parse_str(parse_url($edit_save_redirect, PHP_URL_QUERY), $saved_filters);
@@ -81,7 +83,25 @@ check($success->db->rows['ghl_contacts'][0]['notes'] === 'Updated lead notes', '
 check($success->Guests_Model->Read_Manual_Lead_Detail('ghl:42')->lead_intro === "Updated lead description\nSecond line", 'Lead detail returned the old introduction');
 check($success->db->rows['lead_status_log'][0]['Note'] === 'Updated status note', 'Existing status note lost');
 check($success->db->rows['lead_status_log'][1]['Note'] === 'New status note', 'New status note lost');
-$failed = make_controller(true); $before = $failed->db->rows; $failed->Update();
+check($success->db->rows['ghl_contacts'][0]['high_chance'] === 1, 'High Chance Yes did not save');
+
+$priorityOnly = make_controller();
+$priorityOnly->db->rows = $success->db->rows;
+$priorityOnly->input->data['status_changes'] = '{}';
+$priorityOnly->Update();
+check($priorityOnly->db->rows['ghl_contacts'][0]['high_chance'] === 1, 'Omitted High Chance cleared the flag');
+$priorityOnly->input->data['high_chance'] = '0';
+$priorityOnly->Update();
+check($priorityOnly->db->rows['ghl_contacts'][0]['high_chance'] === 0, 'High Chance No did not clear the flag');
+check($priorityOnly->db->rows['lead_status_log'] === $success->db->rows['lead_status_log'], 'Priority-only edit changed status history');
+$before = $priorityOnly->db->rows;
+$priorityOnly->input->data['high_chance'] = array('1');
+$priorityOnly->Update();
+check(isset($priorityOnly->session->flash['ghl_lead_error']) && $priorityOnly->db->rows === $before, 'Invalid High Chance saved');
+
+$failed = make_controller(true); $before = $failed->db->rows;
+$failed->input->data['high_chance'] = '1';
+$failed->Update();
 check(isset($failed->session->flash['ghl_lead_error']), 'Failed edit reported success');
 check($edit_save_redirect === 'Manual_Leads', 'Unfiltered edit did not return to the listing');
 check($failed->db->rows === $before, 'Status failure did not roll back lead and notes');

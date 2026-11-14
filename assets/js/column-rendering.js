@@ -12,12 +12,15 @@ var KTDatatablesAdvancedColumnRendering = function() {
 		}
 
 		// begin first table
+		var priorityColumn = table.find('thead th.manual-lead-priority').index();
 		table.DataTable({
 			deferRender: true,
 			responsive: table.data('responsive') !== false,
 			autoWidth: !table.hasClass('manual-leads-table'),
 			paging: true,
+			orderFixed: priorityColumn >= 0 ? [[priorityColumn, 'desc']] : [],
 			columnDefs: [
+				{ targets: 'manual-lead-priority', visible: false, searchable: false },
 				{
 					targets: ['booking_checkbox', 'test', 'gl_status', 'status', 'autocount_sync_status','action'],
 					orderable: false

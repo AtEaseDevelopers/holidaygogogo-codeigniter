@@ -199,7 +199,7 @@ class Ghl_Contacts_Model extends CI_Model
             'lead_intro', 'chat_language',
             'nature_of_business', 'number_of_pax', 'client_type', 'state',
             'travel_date', 'travel_end_date', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount',
-            'tags_json',
+            'tags_json', 'high_chance',
         );
 
         $update = array();

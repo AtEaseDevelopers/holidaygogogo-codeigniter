@@ -870,6 +870,7 @@ WHERE 1 = 1
 		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS Op,
 		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS LeadDestination,
 		CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS PotentialSalesAmount,
+		0 AS HighChance,
 		MAX(b.InsertDate) AS RecencyAt
 	{$from}
 	GROUP BY {$key}
@@ -932,6 +933,7 @@ SELECT
 	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS Op,
 	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS LeadDestination,
 	CAST(NULL AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS PotentialSalesAmount,
+	0 AS HighChance,
 	MAX(BookingDate) AS RecencyAt
 FROM (
 	{$this->Booking_Windowed_Select($dedup, $booking['from'])}
@@ -944,6 +946,7 @@ GROUP BY group_key
 
 		if($ghl !== null) {
 			$gc_dedup = $ghl['dedup'];
+			$high_chance = $this->mode === 'manual' ? 'gc.high_chance' : '0';
 			$parts[] = "
 SELECT
 	{$gc_dedup} AS dedup_key,
@@ -999,6 +1002,7 @@ SELECT
 	CONVERT((SELECT op.Name FROM admin op WHERE op.AdminID = gc.op_id) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS Op,
 	CONVERT(gc.destination USING utf8mb4) COLLATE utf8mb4_unicode_ci AS LeadDestination,
 	CONVERT(gc.potential_sales_amount USING utf8mb4) COLLATE utf8mb4_unicode_ci AS PotentialSalesAmount,
+	{$high_chance} AS HighChance,
 	COALESCE(gc.date_added, gc.created_at) AS RecencyAt
 {$ghl['from']}
 			";
@@ -1096,6 +1100,7 @@ SELECT
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.Op END) AS Op,
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.LeadDestination END) AS LeadDestination,
 	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.PotentialSalesAmount END) AS PotentialSalesAmount,
+	MAX(CASE WHEN mm.rep_rn = 1 THEN mm.HighChance END) AS HighChance,
 	MAX(mm.RecencyAt) AS RecencyAt
 FROM (
 	SELECT m.*,
@@ -1122,8 +1127,12 @@ GROUP BY mm.merge_key";
 		// aggregated output columns (RecencyAt/Name) — referencing them directly on
 		// the grouped query makes MySQL bind to the non-aggregated columns and trip
 		// only_full_group_by.
+		$order = "RecencyAt IS NULL ASC, RecencyAt DESC, (Name IS NULL OR Name = '') ASC, Name ASC";
+		if ($this->mode === 'manual') {
+			$order = "HighChance DESC, " . $order . ", merge_key ASC";
+		}
 		$sql = "SELECT * FROM (" . $this->Merged_Wrapped_Sql($inner) . ") final"
-			. " ORDER BY RecencyAt IS NULL ASC, RecencyAt DESC, (Name IS NULL OR Name = '') ASC, Name ASC LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
+			. " ORDER BY " . $order . " LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
 		return $this->db->query($sql, $params)->result();
 	}
 
@@ -2327,7 +2336,7 @@ GROUP BY mm.merge_key";
 		$sql = "SELECT gc.id, gc.first_name, gc.last_name, gc.company_name, gc.phone,
 				gc.email, gc.address, gc.gender, gc.chat_language, gc.race, gc.nationality,
 				gc.country, gc.source, gc.notes, gc.customer_type, gc.lead_intro,
-				gc.nature_of_business, gc.number_of_pax, gc.client_type, gc.state,
+				gc.nature_of_business, gc.number_of_pax, gc.client_type, gc.state, gc.high_chance,
 				gc.travel_date, gc.travel_end_date, gc.sales_person_id, gc.op_id, gc.destination, gc.potential_sales_amount,
 				(SELECT sp.Name FROM admin sp WHERE sp.AdminID = gc.sales_person_id) AS SalesPersonName,
 				(SELECT op.Name FROM admin op WHERE op.AdminID = gc.op_id) AS OpName,

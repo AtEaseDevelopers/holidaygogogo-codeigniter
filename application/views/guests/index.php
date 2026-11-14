@@ -113,6 +113,8 @@ div.kt-datatable__pager-container {
 }
 #kt_datatable.manual-leads-table tbody tr:nth-child(even) td { background: #fbfcfe; }
 #kt_datatable.manual-leads-table tbody tr:hover td { background: #f2f7ff; }
+#kt_datatable.manual-leads-table tbody tr.manual-lead-high-chance td { background: #fff2cc; }
+#kt_datatable.manual-leads-table tbody tr.manual-lead-high-chance:hover td { background: #ffe8a3; }
 #kt_datatable.manual-leads-table th:nth-child(3),
 #kt_datatable.manual-leads-table th:nth-child(4),
 #kt_datatable.manual-leads-table th:nth-child(12),
@@ -140,22 +142,22 @@ div.kt-datatable__pager-container {
     left: 0;
     z-index: 1;
 }
-#kt_datatable.manual-leads-table th:last-child,
-#kt_datatable.manual-leads-table td:last-child {
+#kt_datatable.manual-leads-table th.action,
+#kt_datatable.manual-leads-table td.action {
     position: sticky;
     right: 0;
     z-index: 2;
     box-shadow: -3px 0 6px -4px rgba(45, 60, 85, .3);
 }
 #kt_datatable.manual-leads-table th:first-child,
-#kt_datatable.manual-leads-table th:last-child { z-index: 3; }
-#kt_datatable.manual-leads-table th:last-child {
+#kt_datatable.manual-leads-table th.action { z-index: 3; }
+#kt_datatable.manual-leads-table th.action {
     padding: 10px 8px !important;
     white-space: nowrap;
     letter-spacing: 0;
 }
 #kt_datatable.manual-leads-table td:nth-child(9) { white-space: normal !important; }
-#kt_datatable.manual-leads-table td:last-child .dropdown-toggle {
+#kt_datatable.manual-leads-table td.action .dropdown-toggle {
     min-width: 30px;
     height: 30px;
     padding: 4px 8px !important;
@@ -835,7 +837,7 @@ div.kt-datatable__pager-container {
 
 				<br><br>
 				<div class="dataTables_wrapper dt-bootstrap4 no-footer<?php if($list_base === 'Manual_Leads') { echo ' manual-leads-table-wrap'; } ?>" style="overflow-x:auto;">
-					<table id="kt_datatable" class="table table-bordered table-head-custom table-checkable dataTable no-footer<?php echo $list_base === 'Manual_Leads' ? ' manual-leads-table' : ' dtr-inline'; ?>"<?php if($list_base === 'Customer') { echo ' data-no-datatable="1"'; } if($list_base === 'Manual_Leads') { echo ' data-responsive="false"'; } ?>>
+					<table id="kt_datatable" class="table table-bordered table-head-custom table-checkable dataTable no-footer<?php echo $list_base === 'Manual_Leads' ? ' manual-leads-table' : ' dtr-inline'; ?>"<?php if($list_base === 'Customer' || ($list_base === 'Manual_Leads' && empty($guests))) { echo ' data-no-datatable="1"'; } if($list_base === 'Manual_Leads') { echo ' data-responsive="false"'; } ?>>
 						<?php if($list_base === 'Manual_Leads') { ?>
 						<colgroup>
 							<col style="width:52px;">
@@ -928,6 +930,9 @@ div.kt-datatable__pager-container {
 									<th style="text-align:center;">AutoCount Sync</th>
 								<?php } ?>
 								<th class="action" style="text-align:center;">Action</th>
+								<?php if($list_base === 'Manual_Leads' && !empty($guests)) { ?>
+									<th class="manual-lead-priority" hidden>High Chance</th>
+								<?php } ?>
 							</tr>
 						</thead>
 						<tbody>
@@ -936,7 +941,8 @@ div.kt-datatable__pager-container {
 							<?php } else { ?>
 								<?php $count = 1; foreach($guests as $g) { ?>
 									<?php $is_ghl_row = isset($g->Type) && ($g->Type === 'GHL' || $g->Type === 'Manual'); ?>
-									<tr>
+									<?php $high_chance = $list_base === 'Manual_Leads' && (int) $g->HighChance === 1; ?>
+									<tr<?php if($high_chance) { echo ' class="manual-lead-high-chance"'; } ?>>
 										<td style="text-align:center; padding-top:15px; padding-bottom:15px;"><?php echo $count; ?></td>
 										<?php if($list_base === 'Manual_Leads') {
 											$created_raw = isset($g->RecencyAt) ? (string) $g->RecencyAt : '';
@@ -1212,7 +1218,7 @@ div.kt-datatable__pager-container {
 												<?php } ?>
 											</td>
 										<?php } ?>
-										<td style="text-align:center;">
+										<td class="action" style="text-align:center;">
 											<?php $chat_c = isset($chat_counts[$g->dedup_key]) ? (int) $chat_counts[$g->dedup_key] : 0; ?>
 											<div class="btn-group">
 												<button type="button" data-toggle="dropdown" class="btn btn-light-primary btn-sm dropdown-toggle" style="padding-left:3px;"></button>
@@ -1274,6 +1280,9 @@ div.kt-datatable__pager-container {
 												</div>
 											</div>
 										</td>
+										<?php if($list_base === 'Manual_Leads') { ?>
+											<td hidden><?php echo (int) $high_chance; ?></td>
+										<?php } ?>
 									</tr>
 									<?php $count++; ?>
 								<?php } ?>
@@ -2539,11 +2548,11 @@ div.kt-datatable__pager-container {
 						<div class="separator separator-dashed my-3"></div>
 						<label class="font-weight-bold">Lead Status Updates <span class="text-muted font-size-xs">(date, status and note required)</span></label>
 						<div class="form-group row mb-2">
-							<div class="col-md-4">
+							<div class="col-md-3">
 								<label class="font-weight-bold" style="font-size:12px;">Date</label>
 								<input type="date" id="lsl_status_date" class="form-control">
 							</div>
-							<div class="col-md-4">
+							<div class="col-md-3">
 								<label class="font-weight-bold" style="font-size:12px;">Status</label>
 								<select id="lsl_status" class="form-control">
 									<option value="">-- Select --</option>
@@ -2552,7 +2561,14 @@ div.kt-datatable__pager-container {
 									<?php } } ?>
 								</select>
 							</div>
-							<div class="col-md-4 d-flex align-items-end">
+							<div class="col-md-3">
+								<label for="manual_lead_high_chance" class="font-weight-bold" style="font-size:12px;">High Chance</label>
+								<select id="manual_lead_high_chance" name="high_chance" class="form-control" disabled>
+									<option value="0">No</option>
+									<option value="1">Yes</option>
+								</select>
+							</div>
+							<div class="col-md-3 d-flex align-items-end">
 								<button type="button" id="lsl_add" class="btn btn-light-success font-weight-bold btn-block">
 									<i class="la la-plus"></i> Add
 								</button>
@@ -2749,6 +2765,7 @@ div.kt-datatable__pager-container {
 		$('#lead_seed_block').show();
 		// The staged status editor is Edit-only.
 		$('#lead_edit_status_block').hide();
+		$('#manual_lead_high_chance').prop('disabled', true);
 	}
 
 	// The "Create Lead" toolbar button always opens a clean Create form.
@@ -2811,6 +2828,8 @@ div.kt-datatable__pager-container {
 						set('client_type', d.client_type);
 					set('nature_of_business', d.nature_of_business); set('number_of_pax', d.number_of_pax); set('state', d.state);
 					set('notes', d.notes);               set('lead_intro', d.lead_intro);
+					set('high_chance', d.high_chance);
+					$('#manual_lead_high_chance').prop('disabled', false);
 					$submit.prop('disabled', false).html('<i class="la la-save"></i>Save Changes');
 				} else {
 					$('#ghl_lead_create_error').html((res && res.message) || 'Could not load lead.').removeClass('d-none');
