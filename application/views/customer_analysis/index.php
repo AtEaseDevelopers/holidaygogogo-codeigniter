@@ -2,8 +2,8 @@
 /**
  * Customer Profile — per-customer page reached from the listing Action menu.
  * Shows the available chat sources (GHL + uploaded WhatsApp), an "AI Analysis"
- * button, the latest report expanded, and prior reports as a collapsed history.
- * Owner-only (the controller enforces level 10).
+ * button for profile editors, the latest report expanded, and prior reports as
+ * a collapsed history.
  *
  * Renders a customer character profile from customer_analysis_parse_ai_response():
  *   summary (characteristics / mood / communication style) · temperature (hot/warm/cold).
@@ -17,7 +17,7 @@ $show_approach = ! empty($show_approach);
 
 /** Render one saved analysis row (object from Customer_Analysis_Model). */
 if ( ! function_exists('ca_render_analysis')) {
-function ca_render_analysis($a, $expanded = true, $show_approach = false)
+function ca_render_analysis($a, $expanded, $show_approach, $can_edit_profile)
 {
     $si = is_array($a->sales_intel) ? $a->sales_intel : array();
     $profile = isset($a->profile) && is_array($a->profile) ? $a->profile : array();
@@ -61,11 +61,13 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
                     </span>
                 </h3>
             </div>
-            <div class="card-toolbar">
-                <button type="button" class="btn btn-icon btn-light-danger btn-sm js-ca-delete" data-id="<?php echo (int) $a->id; ?>" data-toggle="tooltip" title="Delete this analysis">
-                    <i class="la la-trash"></i>
-                </button>
-            </div>
+            <?php if ($can_edit_profile) { ?>
+                <div class="card-toolbar">
+                    <button type="button" class="btn btn-icon btn-light-danger btn-sm js-ca-delete" data-id="<?php echo (int) $a->id; ?>" data-toggle="tooltip" title="Delete this analysis">
+                        <i class="la la-trash"></i>
+                    </button>
+                </div>
+            <?php } ?>
         </div>
         <div class="card-body">
             <?php if ($a->status === 'error') { ?>
@@ -320,20 +322,22 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
                     <button type="button" class="btn btn-light-primary font-weight-bold mr-3" onclick="history.back();">
                         <i class="la la-arrow-left"></i> Back
                     </button>
-                    <button type="button" id="ca_run" class="btn btn-primary font-weight-bold" <?php echo $can_analyse ? '' : 'disabled'; ?>>
-                        <i class="la la-robot"></i> AI Analysis
-                    </button>
+                    <?php if ($can_edit_profile) { ?>
+                        <button type="button" id="ca_run" class="btn btn-primary font-weight-bold" <?php echo $can_analyse ? '' : 'disabled'; ?>>
+                            <i class="la la-robot"></i> AI Analysis
+                        </button>
+                    <?php } ?>
                 </div>
             </div>
             <div class="card-body py-4">
                 <span class="text-muted font-weight-bold mr-2">Chat sources for this customer:</span>
                 <span class="label label-light-success label-inline font-weight-bold mr-2" style="font-size:12px;">GHL messages: <?php echo (int) $ghl_count; ?></span>
                 <span class="label label-light-info label-inline font-weight-bold mr-2" style="font-size:12px;">Uploaded chat: <?php echo (int) $upload_count; ?></span>
-                <?php if ( ! $can_analyse) { ?>
+                <?php if ($can_edit_profile && ! $can_analyse) { ?>
                     <div class="text-danger font-weight-bold mt-3" style="font-size:12px;">
                         <i class="la la-info-circle"></i> No chat messages found for this customer. Add a GHL conversation or upload a WhatsApp export (Action &raquo; Chat History) before analysing.
                     </div>
-                <?php } else { ?>
+                <?php } elseif ($can_edit_profile) { ?>
                     <div class="text-muted mt-2" style="font-size:11px;">
                         <?php if (empty($has_prior)) { ?>
                             <strong>AI Analysis</strong> reads the full chat and assesses the six T.R.A.V.E.L criteria.
@@ -356,15 +360,17 @@ function ca_render_analysis($a, $expanded = true, $show_approach = false)
                 <div class="card-body text-center text-muted py-10">
                     <i class="la la-comments" style="font-size:42px; opacity:.4;"></i>
                     <div class="mt-3 font-weight-bold">No analysis yet</div>
-                    <div style="font-size:12px;">Click <strong>AI Analysis</strong> to generate the first report for this customer.</div>
+                    <?php if ($can_edit_profile) { ?>
+                        <div style="font-size:12px;">Click <strong>AI Analysis</strong> to generate the first report for this customer.</div>
+                    <?php } ?>
                 </div>
             </div>
         <?php } else { ?>
-            <?php ca_render_analysis($analyses[0], true, $show_approach); ?>
+            <?php ca_render_analysis($analyses[0], true, $show_approach, $can_edit_profile); ?>
 
             <?php if (count($analyses) > 1) { ?>
                 <div class="font-weight-bolder text-dark-50 mb-3 ml-1" style="font-size:12px; text-transform:uppercase;">History</div>
-                <?php for ($i = 1; $i < count($analyses); $i++) { ca_render_analysis($analyses[$i], false, $show_approach); } ?>
+                <?php for ($i = 1; $i < count($analyses); $i++) { ca_render_analysis($analyses[$i], false, $show_approach, $can_edit_profile); } ?>
             <?php } ?>
         <?php } ?>
 

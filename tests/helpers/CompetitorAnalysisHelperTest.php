@@ -1748,6 +1748,17 @@ $multi = array('output' => array(array('type' => 'message', 'content' => array(
     array('type' => 'output_text', 'text' => 'bar'),
 ))));
 check('extract_responses_text concatenates parts', 'foobar', competitor_extract_responses_text($multi));
+
+$phased = array('output' => array(
+    array('type' => 'message', 'phase' => 'commentary', 'content' => array(
+        array('type' => 'output_text', 'text' => '{"product_name":"Draft"}'),
+    )),
+    array('type' => 'message', 'phase' => 'final_answer', 'content' => array(
+        array('type' => 'output_text', 'text' => '{"product_name":"Penang Tour"}'),
+    )),
+));
+check('structured response ignores commentary before the final JSON', '{"product_name":"Penang Tour"}',
+    competitor_extract_responses_text($phased, true));
 check('extract_responses_text empty on junk', '', competitor_extract_responses_text('nope'));
 check('extract_responses_text empty when no message', '',
     competitor_extract_responses_text(array('output' => array(array('type' => 'web_search_call')))));
@@ -2135,6 +2146,23 @@ $seg_cn = competitor_traveller_segments(array(
     array('key' => 'couple', 'segment' => 'Couple', 'suitability' => '高', 'level' => 'high', 'justification' => '浪漫。'),
 ));
 check('segments preserves explicit level (colour survives translation)', 'high', $seg_cn[0]['level']);
+
+$skill_segments = array(
+    array('segment' => 'Scenic transport seekers', 'suitability' => 'High', 'justification' => 'Ride the funicular.'),
+    array('segment' => 'Couples who enjoy architecture', 'suitability' => 'Medium', 'justification' => 'Explore heritage buildings.'),
+    array('segment' => 'Couples interested in street food', 'suitability' => '', 'justification' => ''),
+);
+$skill_record = competitor_parse_ai_response(json_encode(array('traveller_segments' => $skill_segments)), true);
+$stored_segments = json_decode(json_encode($skill_record['traveller_segments']), true);
+check('skill parser keeps distinct free-text segment names in API order',
+    array_column($skill_segments, 'segment'), array_column($stored_segments, 'segment'));
+check('render normalization preserves stored skill segments',
+    $stored_segments, competitor_traveller_segments($stored_segments));
+check('skill segments retain source suitability and justification',
+    $skill_segments, array_map(function ($entry) {
+        unset($entry['key'], $entry['level']);
+        return $entry;
+    }, $stored_segments));
 
 // ---- translation helpers ----------------------------------------------------
 check('normalize_lang clamps unknown to en', 'en', competitor_normalize_lang('fr'));

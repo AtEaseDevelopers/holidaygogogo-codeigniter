@@ -8,7 +8,7 @@ class MY_Controller {
 }
 function lc_block_edit($module) { return false; }
 function base_url($path) { return $path; }
-function redirect($path) {}
+function redirect($path) { $GLOBALS['edit_save_redirect'] = $path; }
 require FCPATH . 'application/helpers/ghl_manual_lead_helper.php';
 require FCPATH . 'application/helpers/manual_lead_status_changes_helper.php';
 require FCPATH . 'application/models/Ghl_Contacts_Model.php';
@@ -20,7 +20,7 @@ class EditSaveDb {
     private $where = array(), $snapshot, $ok = true, $lastId = 0;
     function __construct() {
         $this->rows = array(
-            'ghl_contacts' => array(array('id' => 42, 'lead_source' => 'manual', 'first_name' => 'Old', 'notes' => 'Old notes', 'sales_person_id' => null, 'op_id' => null)),
+            'ghl_contacts' => array(array('id' => 42, 'lead_source' => 'manual', 'first_name' => 'Old', 'notes' => 'Old notes', 'lead_intro' => 'Old lead description', 'sales_person_id' => null, 'op_id' => null)),
             'lead_status_log' => array(array('LogID' => 10, 'dedup_key' => 'ghl:42', 'Status' => 'Y', 'CreatedBy' => 7, 'Note' => 'Old status note', 'StatusDate' => '2026-11-04', 'LeadStatus' => 'NEW')),
         );
     }
@@ -61,26 +61,36 @@ function make_controller($failInsert = false) {
     $controller->load = new class { function helper($name) {} function model($name) {} };
     $controller->session = new EditSaveSession();
     $controller->input = new class {
-        public $data;
+        public $data, $query = array();
+        function get() { return $this->query; }
         function post($key = null) { return $key === null ? $this->data : ($this->data[$key] ?? null); }
     };
     $controller->input->data = array('dedup_key' => 'ghl:42', 'first_name' => 'Updated', 'phone' => '+60 123456789', 'company_name' => 'Company', 'client_type' => 'Company trip',
-        'travel_date_range' => '10/12/2026 - 15/12/2026', 'sales_person_id' => '7', 'op_id' => '7', 'destination' => 'Redang', 'potential_sales_amount' => 'RM 10,000', 'notes' => 'Updated lead notes',
+        'travel_date_range' => '10/12/2026 - 15/12/2026', 'sales_person_id' => '7', 'op_id' => '7', 'destination' => 'Redang', 'potential_sales_amount' => 'RM 10,000', 'notes' => 'Updated lead notes', 'lead_intro' => "Updated lead description\nSecond line",
         'status_changes' => json_encode(array('notes' => array(array('id' => 10, 'note' => 'Updated status note')),
             'add' => array(array('status_date' => '2026-11-05', 'lead_status' => 'FOLLOW UP', 'note' => 'New status note')))));
     return $controller;
 }
-$success = make_controller(); $success->Update();
+$filters = array('q' => 'Ali & Co', 'manual_sales_person' => array('7', '9'), 'page' => '2');
+$success = make_controller(); $success->input->query = $filters; $success->Update();
 check(isset($success->session->flash['ghl_lead_success']), 'Successful edit not acknowledged');
+check(strpos($edit_save_redirect, 'Manual_Leads?') === 0, 'Save did not return to Manual Leads');
+parse_str(parse_url($edit_save_redirect, PHP_URL_QUERY), $saved_filters);
+check($saved_filters === $filters, 'Save lost filters or page number');
 check($success->db->rows['ghl_contacts'][0]['notes'] === 'Updated lead notes', 'Lead notes lost');
+check($success->Guests_Model->Read_Manual_Lead_Detail('ghl:42')->lead_intro === "Updated lead description\nSecond line", 'Lead detail returned the old introduction');
 check($success->db->rows['lead_status_log'][0]['Note'] === 'Updated status note', 'Existing status note lost');
 check($success->db->rows['lead_status_log'][1]['Note'] === 'New status note', 'New status note lost');
 $failed = make_controller(true); $before = $failed->db->rows; $failed->Update();
 check(isset($failed->session->flash['ghl_lead_error']), 'Failed edit reported success');
+check($edit_save_redirect === 'Manual_Leads', 'Unfiltered edit did not return to the listing');
 check($failed->db->rows === $before, 'Status failure did not roll back lead and notes');
 $foreign = make_controller(); $before = $foreign->db->rows;
+$foreign->input->query = $filters;
 $foreign->input->data['status_changes'] = json_encode(array('notes' => array(array('id' => 999, 'note' => 'Foreign'))));
 $foreign->Update();
+parse_str(parse_url($edit_save_redirect, PHP_URL_QUERY), $failed_filters);
+check($failed_filters === $filters, 'Validation error lost filters or page number');
 check($foreign->db->rows === $before && isset($foreign->session->flash['ghl_lead_error']), 'Invalid status wrote partial changes');
 foreach (array('first_name', 'phone', 'company_name', 'client_type', 'travel_date_range', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount') as $field) {
     $missing = make_controller(); $before = $missing->db->rows;

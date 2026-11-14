@@ -134,7 +134,8 @@ check_true('update request does NOT ask for key_facts (dropped)', strpos($reqUpd
 // ---- customer_analysis_normalize_temperature --------------------------------
 check('temperature normalises HOT -> hot', 'hot', customer_analysis_normalize_temperature('HOT'));
 check('temperature normalises  Cold  -> cold', 'cold', customer_analysis_normalize_temperature('  Cold '));
-check('temperature rejects unknown -> empty', '', customer_analysis_normalize_temperature('warm'));
+check('temperature normalises WARM -> warm', 'warm', customer_analysis_normalize_temperature(' WARM '));
+check('temperature rejects unknown -> empty', '', customer_analysis_normalize_temperature('unknown'));
 check('temperature rejects empty -> empty', '', customer_analysis_normalize_temperature(''));
 $reqNoName = customer_analysis_build_request('', 'x');
 check_true('request falls back to (unknown) name', strpos($reqNoName['input'], '(unknown)') !== false);
@@ -233,7 +234,7 @@ check_true('render carries the overall feel', strpos($msg, 'Resort feel + comfy 
 check_true('render carries the decision guide', strpos($msg, 'Which to pick') !== false && strpos($msg, 'Wants comfort → Laguna') !== false);
 check_true('render carries the follow-up', strpos($msg, 'budget per person?') !== false);
 check_true('render NEVER leaks agent-only tc_notes into the message', strpos($msg, 'do not promise') === false);
-check('render empty when no options', '', customer_analysis_render_recommendation_text(array('intro' => 'hi', 'options' => array())));
+check('render empty when there is no customer message', '', customer_analysis_render_recommendation_text(array('tc_notes' => array('Check dates first'))));
 
 // A parsed AI reply with a real recommendation object derives approach_suggestion
 // from it (structured), and keeps the structure under 'recommendation'.
@@ -244,6 +245,18 @@ $recResp = customer_analysis_parse_ai_response(json_encode(array(
 check_true('parse keeps the structured recommendation', is_array($recResp['recommendation']) && count($recResp['recommendation']['options']) === 2);
 check_true('parse derives approach_suggestion from the recommendation', strpos($recResp['approach_suggestion'], '1. Laguna Redang Island Resort') !== false);
 check_true('derived approach_suggestion excludes tc_notes', strpos($recResp['approach_suggestion'], 'do not promise') === false);
+$noMatch = customer_analysis_parse_ai_response(json_encode(array(
+    'summary' => 'Customer asked about Langkawi.',
+    'recommendation' => array(
+        'intro' => 'Hi! I can help you explore options for Langkawi.',
+        'options' => array(),
+        'follow_up' => 'What month are you hoping to travel?',
+        'tc_notes' => array('Check the catalogue first.'),
+    ),
+)));
+check('no matching tour still produces a copyable customer follow-up',
+    "Hi! I can help you explore options for Langkawi.\n\nWhat month are you hoping to travel?",
+    $noMatch['approach_suggestion']);
 // Back-compat: an old-shape reply with only a flat approach_suggestion still works.
 $legacy = customer_analysis_parse_ai_response('{"summary":"ok","approach_suggestion":"Hi! 帮你比较 Redang 😊"}');
 check('legacy flat approach_suggestion preserved', 'Hi! 帮你比较 Redang 😊', $legacy['approach_suggestion']);

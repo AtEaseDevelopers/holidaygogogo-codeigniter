@@ -2,7 +2,7 @@
 defined('BASEPATH') OR exit('No direct script access allowed');
 
 /**
- * Customer_Analysis — an Owner-only (level 10) tool. For one customer (a listing
+ * Customer_Analysis — for one customer (a listing
  * row identified by its dedup_key), it merges the GHL synced chat and any
  * manually-uploaded WhatsApp exports into a single chronological transcript,
  * asks OpenAI to produce a structured customer character profile (personality,
@@ -29,12 +29,10 @@ class Customer_Analysis extends MY_Controller
 	function __construct()
 	{
 		parent::__construct();
-		// Access is granted per-admin on the Leads/Customer > Access Settings grid
-		// (module 'customer_profile'). Owner (level 10) keeps implicit full access.
-		// View gates opening the page; the paid/mutating endpoints below also
-		// require Edit. leads_customer_access helper is autoloaded.
+		// Customer View opens the page and Customer Edit enables analysis actions.
+		// Existing Customer Profile grants also apply.
 		if (lc_block_view('customer_profile')) {
-			return;
+			exit;
 		}
 		$this->load->model('Customer_Analysis_Model');
 		$this->load->model('Ghl_Messages_Model');
@@ -92,6 +90,7 @@ class Customer_Analysis extends MY_Controller
 			'last_analysed_at' => $prior ? $prior->created_at : '',
 			'run_mode'         => $mode,           // full | incremental | unchanged
 			'show_approach'    => $show_approach,  // reveal approach + tours (Hot/Cold entry only)
+			'can_edit_profile' => lc_can_edit('customer_profile'),
 			'analyses'         => $this->Customer_Analysis_Model->Read_By_Dedup($dedup_key),
 		);
 

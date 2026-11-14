@@ -129,6 +129,10 @@ if ( ! function_exists('lc_can_view'))
 {
     function lc_can_view($module)
     {
+        // Customer view also opens profiles.
+        if ($module === 'customer_profile' && lc_can_view('customer')) {
+            return true;
+        }
         $CI = & get_instance();
         if (function_exists('nav_override_for')) {
             $override = nav_override_for($module);
@@ -144,6 +148,10 @@ if ( ! function_exists('lc_can_edit'))
 {
     function lc_can_edit($module)
     {
+        // Customer edit also allows running and deleting profile analyses.
+        if ($module === 'customer_profile' && lc_can_edit('customer')) {
+            return true;
+        }
         $CI = & get_instance();
         if (function_exists('nav_override_for')) {
             $override = nav_override_for($module);

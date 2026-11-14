@@ -1,8 +1,7 @@
 <?php
 /**
- * Hot / Warm / Cold Customers — owner-only listing bucketed by T.R.A.V.E.L and purchase intent from the
- * latest AI chat analysis. Each row links back to the customer's Customer Profile
- * page (where the analysis is run/refreshed).
+ * Hot / Warm / Cold Customers — listing bucketed by T.R.A.V.E.L and purchase intent from the
+ * latest AI chat analysis.
  */
 if ( ! function_exists('hcc_render_list')) {
 function hcc_render_list($rows, $kind, $filtered = false)
@@ -14,6 +13,7 @@ function hcc_render_list($rows, $kind, $filtered = false)
         echo '<div class="text-center text-muted py-10"><i class="la la-inbox" style="font-size:38px; opacity:.4;"></i><div class="mt-2 font-weight-bold">No ' . htmlspecialchars($kind) . ' customers' . ($filtered ? ' found' : ' yet') . '</div><div style="font-size:12px;">' . $sub . '</div></div>';
         return;
     }
+    $can_view_profile = lc_can_view('customer_profile');
     ?>
     <div class="table-responsive">
         <table class="table table-head-custom table-vertical-center">
@@ -23,7 +23,9 @@ function hcc_render_list($rows, $kind, $filtered = false)
                     <th style="min-width:110px;">Type</th>
                     <th style="min-width:260px;">Why <?php echo htmlspecialchars(ucfirst($kind)); ?></th>
                     <th style="min-width:110px;">Analysed</th>
-                    <th class="text-right" style="min-width:110px;">Action</th>
+                    <?php if ($can_view_profile) { ?>
+                        <th class="text-right" style="min-width:110px;">Action</th>
+                    <?php } ?>
                 </tr>
             </thead>
             <tbody>
@@ -52,12 +54,14 @@ function hcc_render_list($rows, $kind, $filtered = false)
                             <?php } ?>
                         </td>
                         <td class="text-dark-75" style="font-size:12px;"><?php echo htmlspecialchars($r->temperature_reason ?: '—'); ?>
-                            <?php if ( ! $has_travel) { ?><div class="text-muted mt-1">Legacy classification — reassess in profile.</div><?php } ?>
+                            <?php if ( ! $has_travel) { ?><div class="text-muted mt-1">Legacy classification<?php if ($can_view_profile) { ?> — reassess in profile<?php } ?>.</div><?php } ?>
                         </td>
                         <td class="text-muted" style="font-size:12px;"><?php echo date('d M Y', strtotime($r->created_at)); ?></td>
-                        <td class="text-right">
-                            <a href="<?php echo $profile_url; ?>" class="btn btn-light-primary btn-sm font-weight-bold" style="font-size:11px;">View Profile</a>
-                        </td>
+                        <?php if ($can_view_profile) { ?>
+                            <td class="text-right">
+                                <a href="<?php echo $profile_url; ?>" class="btn btn-light-primary btn-sm font-weight-bold" style="font-size:11px;">View Profile</a>
+                            </td>
+                        <?php } ?>
                     </tr>
                 <?php } ?>
             </tbody>

@@ -17,3 +17,7 @@ tools/competitor_render/node_modules/
 application/logs/competitor_crawl/
 application/logs/*
 application/logs-old/*
+
+.DS_Store
+tests/*
+docs/*
