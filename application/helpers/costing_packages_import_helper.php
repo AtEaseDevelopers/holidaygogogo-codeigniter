@@ -934,11 +934,8 @@ if (!function_exists('costing_import_revision_name')) {
     /**
      * Pick the package name an import-as-revision should save.
      *
-     * Unlike the "Create Revision" button (which supplies no name, so the family's
-     * base name is retained), an Excel import carries an explicit PACKAGE NAME the
-     * user may have updated — so the imported name wins. Only when the imported cell
-     * is blank do we fall back to the existing root package's name, so a revision is
-     * never left nameless.
+     * Use the imported PACKAGE NAME when supplied. When the imported cell is blank,
+     * fall back to the existing root package's name.
      *
      * Guards the bug where importing a renamed revision silently inherited the old
      * (sometimes corrupted) family name instead of the name typed in the spreadsheet.

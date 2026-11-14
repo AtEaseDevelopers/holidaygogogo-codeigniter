@@ -293,6 +293,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                     </a>
                                                     <div id="revisions-<?php echo (int) $package['id']; ?>" class="revision-history-list text-left mt-2" style="display:none;">
                                                         <?php foreach ($package['revisions'] as $rev) { ?>
+                                                            <?php $revision_label = html_escape(!empty($rev['tour_code']) ? $rev['tour_code'] : $rev['name']); ?>
                                                             <div class="d-flex align-items-center justify-content-between py-1" style="border-top:1px solid #ebedf3;">
                                                                 <span class="font-size-sm">
                                                                     <?php echo html_escape($rev['tour_code']); ?>
@@ -307,9 +308,21 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                                             <i class="la la-file-pdf"></i>
                                                                         </a>
                                                                     <?php } ?>
+                                                                    <form method="post" action="<?php echo base_url('Costing/Duplicate_Package'); ?>" class="duplicate-package-form d-inline">
+                                                                        <input type="hidden" name="package_id" value="<?php echo (int) $rev['id']; ?>">
+                                                                        <button type="button" class="btn btn-icon btn-light-primary btn-xs mr-1 duplicate-package-button" data-name="<?php echo $revision_label; ?>" title="Duplicate Package" aria-label="Duplicate Package">
+                                                                            <i class="la la-copy"></i>
+                                                                        </button>
+                                                                    </form>
+                                                                    <form method="post" action="<?php echo base_url('Costing/Create_Revision'); ?>" class="revision-package-form d-inline">
+                                                                        <input type="hidden" name="package_id" value="<?php echo (int) $rev['id']; ?>">
+                                                                        <button type="button" class="btn btn-icon btn-light-warning btn-xs mr-1 revision-package-button" data-name="<?php echo $revision_label; ?>" title="Create Revision" aria-label="Create Revision">
+                                                                            <i class="la la-code-branch"></i>
+                                                                        </button>
+                                                                    </form>
                                                                     <form method="post" action="<?php echo base_url('Costing/Delete_Package'); ?>" class="delete-package-form d-inline">
                                                                         <input type="hidden" name="package_id" value="<?php echo (int) $rev['id']; ?>">
-                                                                        <button type="button" class="btn btn-icon btn-light-danger btn-xs delete-package-button" data-name="<?php echo html_escape($rev['tour_code'] !== '' ? $rev['tour_code'] : $package['name']); ?>" title="Delete this version">
+                                                                        <button type="button" class="btn btn-icon btn-light-danger btn-xs delete-package-button" data-name="<?php echo $revision_label; ?>" title="Delete this version">
                                                                             <i class="la la-trash"></i>
                                                                         </button>
                                                                     </form>
@@ -461,7 +474,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
 
                 swalWithBootstrapButtons.fire({
                     title: 'Create Revision of: ' + packageName + '?',
-                    text: 'This creates a new editable version (REVnn) that keeps the base quotation number, copied from the latest version.',
+                    text: 'This copies the selected version into the next revision (REVnn) under the same base quotation number.',
                     icon: 'question',
                     showCancelButton: true,
                     confirmButtonText: 'Yes, Create Revision',

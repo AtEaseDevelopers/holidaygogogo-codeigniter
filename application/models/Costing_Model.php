@@ -1025,10 +1025,8 @@ class Costing_Model extends CI_Model
     /**
      * Create the next revision of a costing package. A revision keeps the base
      * quotation number and appends "-REVnn" (QU-YYMM-XXXX-REV01, -REV02, ...), stays
-     * linked to the family via revision_root_id, and is a full, independently-editable
-     * deep copy. Revisions always branch from the family's latest version (linear
-     * history), regardless of which member was passed in. Returns the new package id
-     * (0 on failure).
+     * linked to the family via revision_root_id, and is an independently editable
+     * deep copy of the selected version. Returns the new package id (0 on failure).
      */
     public function Create_Revision($package_id, $op_admin_id = 0)
     {
@@ -1037,16 +1035,7 @@ class Costing_Model extends CI_Model
             return 0;
         }
 
-        // Copy from the latest member (re-read via Read_Package so the row shape matches
-        // Deep_Copy_Package's expectations).
-        $copy_source = $this->Read_Package((int) $state['latest']['id']);
-        if (empty($copy_source)) {
-            return 0;
-        }
-
         $overrides = array(
-            // Keep the base package name — a revision is the same quote, not a copy.
-            'name' => trim((string) $state['root']['name']),
             'tour_code' => $state['next_code'],
             'revision_root_id' => $state['root_id'],
             'revision_number' => $state['next'],
@@ -1055,18 +1044,17 @@ class Costing_Model extends CI_Model
         if ((int) $op_admin_id > 0) {
             $overrides['op_admin_id'] = (int) $op_admin_id;
         }
-        return $this->Deep_Copy_Package($copy_source, $overrides);
+        return $this->Deep_Copy_Package($state['source'], $overrides);
     }
 
     /**
-     * Resolve the revision-family state for any member of a family: its root row, the
-     * base tour code, the latest member (highest revision number), and the next
-     * revision number + code. Returns null when the package (or its root) is missing.
+     * Resolve the selected member, its root row and the family's next revision
+     * number and tour code. Returns null when the package or its root is missing.
      * Shared by Create_Revision (deep-copy source) and Import_Package_As_Revision
      * (import a new member) so revision numbering stays in one place.
      *
      * @param int $package_id any member of the family (root or a revision).
-     * @return array|null ['root','root_id','base_code','latest','next','next_code']
+     * @return array|null ['source','root','root_id','next','next_code']
      */
     private function Revision_Family_State($package_id)
     {
@@ -1081,15 +1069,15 @@ class Costing_Model extends CI_Model
         // The family root owns the base tour code. The base itself has no root set, so
         // it is its own root.
         $root_id = !empty($source['revision_root_id']) ? (int) $source['revision_root_id'] : (int) $source['id'];
-        $root = $this->Read_Package($root_id);
+        $root = $root_id === $package_id ? $source : $this->Read_Package($root_id);
         if (empty($root)) {
             return null;
         }
         $base_code = costing_tour_code_base((string) $root['tour_code']);
 
-        // Gather every member of the family (root + its revisions) to find both the
-        // latest version and the next revision number.
+        // Include every member, including deleted versions, when numbering revisions.
         $members = $this->db
+            ->select('tour_code')
             ->where('id', $root_id)
             ->or_where('revision_root_id', $root_id)
             ->get('costing_packages')
@@ -1098,22 +1086,17 @@ class Costing_Model extends CI_Model
             return null;
         }
 
-        $latest = null;
         $existing_codes = array();
         foreach ($members as $member) {
             $existing_codes[] = (string) $member['tour_code'];
-            if ($latest === null || (int) $member['revision_number'] > (int) $latest['revision_number']) {
-                $latest = $member;
-            }
         }
 
         $next = costing_tour_code_next_revision($existing_codes, $base_code);
 
         return array(
+            'source'    => $source,
             'root'      => $root,
             'root_id'   => $root_id,
-            'base_code' => $base_code,
-            'latest'    => $latest,
             'next'      => $next,
             'next_code' => costing_tour_code_revision($base_code, $next),
         );
@@ -1201,10 +1184,8 @@ class Costing_Model extends CI_Model
 
         $save_package = (array) $pkg['save_package'];
         $save_package['op_admin_id'] = (int) $op_admin_id;
-        // Unlike the "Create Revision" button (which supplies no name, so it keeps
-        // the family's base name), an Excel import carries an explicit PACKAGE NAME
-        // the user may have updated — honour it, falling back to the root's name
-        // only when the imported cell is blank.
+        // Use the spreadsheet's package name, falling back to the root's name
+        // when the imported cell is blank.
         $this->load->helper('costing_packages_import');
         $save_package['name'] = costing_import_revision_name(
             isset($save_package['name']) ? $save_package['name'] : '',

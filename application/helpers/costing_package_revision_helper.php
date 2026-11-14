@@ -14,7 +14,7 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 if (!function_exists('costing_group_package_revisions')) {
     /**
      * @param array<int,array> $packages enriched dashboard rows (need id,
-     *        revision_root_id, revision_number, tour_code, status,
+     *        revision_root_id, revision_number, name, tour_code, status,
      *        latest_quotation_token, updated_at).
      * @return array<int,array> latest-per-family rows, each with a ['revisions'] list.
      *         Family order follows first appearance in $packages (preserves the query's
@@ -37,6 +37,7 @@ if (!function_exists('costing_group_package_revisions')) {
 
             $families[$family_key]['revisions'][] = array(
                 'id' => (int) $package['id'],
+                'name' => isset($package['name']) ? $package['name'] : '',
                 'tour_code' => isset($package['tour_code']) ? $package['tour_code'] : '',
                 'revision_number' => (int) $package['revision_number'],
                 'status' => isset($package['status']) ? $package['status'] : '',

@@ -9,8 +9,9 @@
  * Covers:
  *   - Create_Revision builds QU-...-REVnn, links revision_root_id/revision_number,
  *     deep-copies the snapshot and mints NO shared quotation token.
- *   - A second revision branches from the latest (REV02), still rooted at the base.
- *   - Duplicate_Package stays a fresh, independent family (revision_number 0, no root).
+ *   - Revising the base or an older revision copies the selected version and uses
+ *     the next family revision number.
+ *   - Duplicating an older revision copies its content into an independent family.
  *   - Read_Packages_Dashboard groups the family into a single latest-row with the full
  *     revision history attached.
  */
@@ -70,10 +71,13 @@ try {
         $ci->db->query("INSERT INTO `$t` SELECT * FROM `_seed_$t`");
     }
 
-    // Pick a base package that has a tour code and a snapshot.
-    $base = $ci->db->query("SELECT * FROM costing_packages WHERE tour_code IS NOT NULL AND tour_code <> '' AND id IN (SELECT package_id FROM costing_bookings) ORDER BY id DESC LIMIT 1")->row_array();
-    expect(!empty($base), 'seed: found a base package with tour code + snapshot (id=' . ($base['id'] ?? '?') . ', code=' . ($base['tour_code'] ?? '?') . ')');
-    $base_id = (int) $base['id'];
+    // Start a fresh family so revisions already present in the seed data do not
+    // affect the expected revision numbers.
+    $seed = $ci->db->query("SELECT id FROM costing_packages WHERE status <> 'deleted' AND id IN (SELECT package_id FROM costing_bookings) ORDER BY id DESC LIMIT 1")->row_array();
+    expect(!empty($seed), 'seed: found a package with a snapshot');
+    $base_id = $ci->Costing_Model->Duplicate_Package((int) $seed['id']);
+    expect($base_id > 0, 'seed: created an independent base package');
+    $base = $ci->db->where('id', $base_id)->get('costing_packages')->row_array();
     $base_code = (string) $base['tour_code'];
     $base_bookings = (int) $ci->db->query("SELECT COUNT(*) c FROM costing_bookings WHERE package_id = $base_id")->row()->c;
 
@@ -84,36 +88,48 @@ try {
     expect($rev1['tour_code'] === $base_code . '-REV01', 'rev1: tour_code = base-REV01 (' . $rev1['tour_code'] . ')');
     expect((int) $rev1['revision_root_id'] === $base_id, 'rev1: revision_root_id points at base');
     expect((int) $rev1['revision_number'] === 1, 'rev1: revision_number = 1');
-    expect(trim((string) $rev1['name']) === trim((string) $base['name']), 'rev1: keeps base package name (no "(Copy)")');
+    expect($rev1['name'] === $base['name'], 'rev1: keeps the source package name');
     $rev1_bookings = (int) $ci->db->query("SELECT COUNT(*) c FROM costing_bookings WHERE package_id = " . (int) $rev1_id)->row()->c;
     expect($rev1_bookings === $base_bookings, 'rev1: snapshot deep-copied (' . $rev1_bookings . ' booking(s))');
     $shared_token = (int) $ci->db->query("SELECT COUNT(*) c FROM costing_bookings WHERE package_id = " . (int) $rev1_id . " AND quotation_token IS NOT NULL")->row()->c;
     expect($shared_token === 0, 'rev1: no shared quotation token (minted on demand)');
 
-    /* ---- 2) Second revision branches from the latest ------------------------ */
-    // Revise from the base id again — it must still resolve to the latest (REV01) and
-    // produce REV02 rooted at the base.
+    /* ---- 2) Copy the selected version --------------------------------------- */
+    $ci->db->where('id', $rev1_id)->update('costing_packages', array(
+        'name' => 'Updated REV01 package',
+        'duration_days' => (int) $base['duration_days'] + 1,
+    ));
+    $rev1_travel_date = '2031-01-15';
+    $ci->db->where('package_id', $rev1_id)->update('costing_bookings', array('travel_date' => $rev1_travel_date));
+
     $rev2_id = $ci->Costing_Model->Create_Revision($base_id);
     expect($rev2_id > 0, 'rev2: created (id=' . $rev2_id . ')');
     $rev2 = $ci->db->query("SELECT * FROM costing_packages WHERE id = " . (int) $rev2_id)->row_array();
     expect($rev2['tour_code'] === $base_code . '-REV02', 'rev2: tour_code = base-REV02 (' . $rev2['tour_code'] . ')');
     expect((int) $rev2['revision_root_id'] === $base_id, 'rev2: still rooted at base');
     expect((int) $rev2['revision_number'] === 2, 'rev2: revision_number = 2');
+    expect($rev2['duration_days'] === $base['duration_days'], 'rev2: copies the selected base duration');
 
-    // Revising the REV01 row (not the base) must also yield REV03 (family-wide max+1).
     $rev3_id = $ci->Costing_Model->Create_Revision($rev1_id);
+    expect($rev3_id > 0, 'rev3: created from REV01');
     $rev3 = $ci->db->query("SELECT * FROM costing_packages WHERE id = " . (int) $rev3_id)->row_array();
     expect($rev3['tour_code'] === $base_code . '-REV03', 'rev3: revising any member -> next family REV (' . $rev3['tour_code'] . ')');
     expect((int) $rev3['revision_root_id'] === $base_id, 'rev3: still rooted at base');
+    expect($rev3['name'] === 'Updated REV01 package', 'rev3: copies the selected REV01 name');
+    expect((int) $rev3['duration_days'] === (int) $base['duration_days'] + 1, 'rev3: copies the selected REV01 duration');
+    $rev3_booking = $ci->db->where('package_id', $rev3_id)->get('costing_bookings')->row_array();
+    expect($rev3_booking['travel_date'] === $rev1_travel_date, 'rev3: copies the selected REV01 snapshot');
 
     /* ---- 3) Duplicate stays an independent family --------------------------- */
-    $dup_id = $ci->Costing_Model->Duplicate_Package($base_id);
+    $dup_id = $ci->Costing_Model->Duplicate_Package($rev1_id);
     expect($dup_id > 0, 'dup: created (id=' . $dup_id . ')');
     $dup = $ci->db->query("SELECT * FROM costing_packages WHERE id = " . (int) $dup_id)->row_array();
     expect($dup['revision_root_id'] === null, 'dup: revision_root_id NULL (independent family)');
     expect((int) $dup['revision_number'] === 0, 'dup: revision_number 0');
     expect(strpos((string) $dup['tour_code'], '-REV') === false, 'dup: fresh monthly code, no REV suffix (' . $dup['tour_code'] . ')');
-    expect(substr((string) $dup['name'], -7) === ' (Copy)', 'dup: name gets "(Copy)"');
+    expect($dup['name'] === 'Updated REV01 package (Copy)', 'dup: copies the selected REV01 name and appends "(Copy)"');
+    $dup_booking = $ci->db->where('package_id', $dup_id)->get('costing_bookings')->row_array();
+    expect($dup_booking['travel_date'] === $rev1_travel_date, 'dup: copies the selected REV01 snapshot');
 
     /* ---- 4) Dashboard groups the family ------------------------------------- */
     // Read_Packages_Dashboard's SQL references the same table several times, which
