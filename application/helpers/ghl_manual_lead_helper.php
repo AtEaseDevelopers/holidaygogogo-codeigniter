@@ -75,6 +75,10 @@ function ghl_manual_lead_prepare($post, $uid, $now, $created_by = null, $require
     $tags_raw   = isset($post['tags']) ? (string) $post['tags'] : '';
 
     $errors = array();
+    $high_chance = $post['high_chance'] ?? null;
+    if ($high_chance !== null && !in_array($high_chance, array('0', '1'), true)) {
+        $errors[] = 'Please select Yes or No for High Chance.';
+    }
 
     // A lead must carry at least one identifying value, else it is a blank row.
     if ($first_name === '' && $last_name === '' && $phone === '' && $email === '') {
@@ -173,6 +177,10 @@ function ghl_manual_lead_prepare($post, $uid, $now, $created_by = null, $require
         // Server-supplied creator (session admin id), not a $post field.
         'created_by'    => $created_by !== null ? (int) $created_by : null,
     );
+
+    if ($high_chance !== null) {
+        $row['high_chance'] = (int) $high_chance;
+    }
 
     return array('ok' => true, 'errors' => array(), 'row' => $row);
 }

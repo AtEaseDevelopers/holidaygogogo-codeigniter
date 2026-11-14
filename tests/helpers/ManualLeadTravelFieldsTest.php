@@ -21,7 +21,7 @@ function check($ok, $message) {
 $prepared = ghl_manual_lead_prepare(array(
     'first_name' => 'Guest', 'travel_date_range' => '15/12/2026 - 20/12/2026',
     'sales_person_id' => '12', 'op_id' => '34', 'destination' => 'Redang',
-    'potential_sales_amount' => 'RM 10,000 approx.', 'client_type' => 'Company trip',
+    'potential_sales_amount' => 'RM 10,000 approx.', 'client_type' => 'Company trip', 'high_chance' => '1',
 ), 'travel', '2026-11-05 09:00:00', 7);
 check($prepared['ok'], 'Valid range rejected');
 check($prepared['row']['travel_date'] === '2026-12-15', 'Range start lost');
@@ -37,6 +37,7 @@ check($same['ok'] && $same['row']['travel_date'] === $same['row']['travel_end_da
 $model = new Ghl_Contacts_Model();
 $model->db = new ManualLeadTravelTestDb();
 check($model->create_manual_lead($prepared['row']) === 42, 'Create failed');
+check($model->db->inserted['high_chance'] === 1, 'Create lost High Chance');
 check($model->update_manual_lead(42, $prepared['row']), 'Update failed');
 foreach (array('travel_date', 'travel_end_date', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount') as $field) {
     check($model->db->inserted[$field] === $prepared['row'][$field], 'Insert lost ' . $field);

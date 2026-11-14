@@ -90,6 +90,7 @@ if (!function_exists('guest_list_export_columns')) {
 				array('NOTES', 'Notes'),
 				array('LEAD INTRO', 'LeadIntro'),
 				array('DATE OF BIRTH', 'DOB'),
+				array('HIGH CHANCE', 'HighChance'),
 			);
 		}
 
@@ -167,6 +168,10 @@ if (!function_exists('guest_list_export_cell')) {
 		}
 
 		$raw = isset($g->$field) ? (string) $g->$field : '';
+
+		if ($field === 'HighChance') {
+			return $raw === '1' ? 'Yes' : 'No';
+		}
 
 		if ($field === 'PotentialSalesAmount') {
 			return manual_lead_display_sales_amount($raw);

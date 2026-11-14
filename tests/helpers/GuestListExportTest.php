@@ -61,6 +61,13 @@ $assertions['manual summary values'] = array_slice($manual_mx['rows'][0], 2, 7) 
 );
 $assertions['manual blank status date'] = guest_list_export_cell((object) array('LeadStatusDate' => '0000-00-00'), 'LeadStatusDate') === '';
 $assertions['manual matrix width'] = count($manual_mx['rows'][0]) === count($manual_headers);
+$priority_column = array_search('HIGH CHANCE', $manual_headers, true);
+$priority_row = clone $manual_row;
+$priority_row->HighChance = '1';
+$manual_row->HighChance = 0;
+$priority_matrix = guest_list_export_matrix(array($priority_row, $manual_row), 'manual');
+$assertions['manual exports High Chance as Yes or No'] = $priority_column !== false
+    && array_column($priority_matrix['rows'], $priority_column) === array('Yes', 'No');
 
 // ---- phone cell: merged multi-number row -------------------------------
 $multi = (object) array('ContactNumbers' => '+60' . $US . '0169546738' . $RS . '+60' . $US . '0198887777');

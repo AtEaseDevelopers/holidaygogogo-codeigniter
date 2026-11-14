@@ -153,7 +153,7 @@ class Ghl_Contacts_Model extends CI_Model
             'address', 'country', 'source', 'notes', 'customer_type', 'lead_intro',
             'nature_of_business', 'number_of_pax', 'client_type', 'state',
             'travel_date', 'travel_end_date', 'sales_person_id', 'op_id', 'destination', 'potential_sales_amount',
-            'chat_language', 'date_of_birth', 'tags_json', 'date_added',
+            'chat_language', 'date_of_birth', 'tags_json', 'date_added', 'high_chance',
         );
 
         $insert = array();

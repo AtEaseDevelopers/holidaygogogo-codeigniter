@@ -1221,6 +1221,7 @@ GROUP BY mm.merge_key";
 				WHERE lsl.Status = 'Y' AND lsl.dedup_key = {$gc_dedup}
 				ORDER BY lsl.StatusDate DESC, lsl.LogID DESC LIMIT 1) AS LeadStatusDate,
 			{$status_updates}    AS StatusUpdates,
+			gc.high_chance      AS HighChance,
 			gc.lead_intro        AS LeadIntro,
 			gc.notes             AS Notes,
 			(SELECT a2.Name FROM admin a2 WHERE a2.AdminID = gc.created_by) AS CreatedBy,

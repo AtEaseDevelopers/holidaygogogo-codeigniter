@@ -2519,27 +2519,38 @@ div.kt-datatable__pager-container {
 					     history is managed there via the Lead Status action instead). -->
 					<div id="lead_seed_block">
 					<div class="separator separator-dashed my-3"></div>
-					<label class="font-weight-bold">Lead Status Updates <span class="text-muted font-size-xs">(date, status and note required)</span></label>
-					<div id="lead_log_rows">
-						<div class="form-group row lead-log-row mb-2">
-							<div class="col-md-4">
-								<input type="date" name="log_date[]" class="form-control" autocomplete="off" placeholder="Date">
+					<div class="row">
+						<div class="col-md-9">
+							<label class="font-weight-bold">Lead Status Updates <span class="text-muted font-size-xs">(date, status and note required)</span></label>
+							<div id="lead_log_rows">
+								<div class="form-group row lead-log-row mb-2">
+									<div class="col-md-4">
+										<input type="date" name="log_date[]" class="form-control" autocomplete="off" placeholder="Date">
+									</div>
+									<div class="col-md-4">
+										<select name="log_status[]" class="form-control">
+											<option value="">-- Status --</option>
+											<?php if(!empty($lead_statuses)) { foreach($lead_statuses as $ls) { ?>
+											<option value="<?php echo htmlspecialchars($ls->Name, ENT_QUOTES); ?>"><?php echo htmlspecialchars($ls->Name); ?></option>
+											<?php } } ?>
+										</select>
+									</div>
+									<div class="col-md-4 d-flex">
+										<input type="text" name="log_note[]" class="form-control" maxlength="1000" autocomplete="off" placeholder="Note (required)">
+										<button type="button" class="btn btn-icon btn-light-danger ml-1 lead-log-remove" title="Remove"><i class="la la-trash"></i></button>
+									</div>
+								</div>
 							</div>
-							<div class="col-md-4">
-								<select name="log_status[]" class="form-control">
-									<option value="">-- Status --</option>
-									<?php if(!empty($lead_statuses)) { foreach($lead_statuses as $ls) { ?>
-									<option value="<?php echo htmlspecialchars($ls->Name, ENT_QUOTES); ?>"><?php echo htmlspecialchars($ls->Name); ?></option>
-									<?php } } ?>
-								</select>
-							</div>
-							<div class="col-md-4 d-flex">
-								<input type="text" name="log_note[]" class="form-control" maxlength="1000" autocomplete="off" placeholder="Note (required)">
-								<button type="button" class="btn btn-icon btn-light-danger ml-1 lead-log-remove" title="Remove"><i class="la la-trash"></i></button>
-							</div>
+							<button type="button" id="lead_log_add" class="btn btn-light-primary btn-sm font-weight-bold"><i class="la la-plus"></i> Add update</button>
+						</div>
+						<div class="col-md-3">
+							<label for="manual_lead_create_high_chance" class="font-weight-bold">High Chance</label>
+							<select id="manual_lead_create_high_chance" name="high_chance" class="form-control">
+								<option value="0">No</option>
+								<option value="1">Yes</option>
+							</select>
 						</div>
 					</div>
-					<button type="button" id="lead_log_add" class="btn btn-light-primary btn-sm font-weight-bold"><i class="la la-plus"></i> Add update</button>
 					</div><!-- /#lead_seed_block -->
 
 					<!-- Edit-only: status changes are staged until Save Changes. -->
@@ -2763,6 +2774,7 @@ div.kt-datatable__pager-container {
 		$('#lead_log_rows .lead-log-row:gt(0)').remove();
 		$('#lead_log_rows .lead-log-row').find('input,select').val('');
 		$('#lead_seed_block').show();
+		$('#manual_lead_create_high_chance').prop('disabled', false);
 		// The staged status editor is Edit-only.
 		$('#lead_edit_status_block').hide();
 		$('#manual_lead_high_chance').prop('disabled', true);
@@ -2784,6 +2796,7 @@ div.kt-datatable__pager-container {
 		// Swap the create-only seed rows for the staged status editor, and load
 		// this lead's existing status history; changes wait for Save Changes.
 		$('#lead_seed_block').hide();
+		$('#manual_lead_create_high_chance').prop('disabled', true);
 		$('#lead_edit_status_block').show();
 		lslEntries = []; lslLoaded = false; lslLoadGeneration++;
 		$('#manual_lead_status_changes').val('');
@@ -2828,8 +2841,7 @@ div.kt-datatable__pager-container {
 						set('client_type', d.client_type);
 					set('nature_of_business', d.nature_of_business); set('number_of_pax', d.number_of_pax); set('state', d.state);
 					set('notes', d.notes);               set('lead_intro', d.lead_intro);
-					set('high_chance', d.high_chance);
-					$('#manual_lead_high_chance').prop('disabled', false);
+					$('#manual_lead_high_chance').val(d.high_chance).prop('disabled', false);
 					$submit.prop('disabled', false).html('<i class="la la-save"></i>Save Changes');
 				} else {
 					$('#ghl_lead_create_error').html((res && res.message) || 'Could not load lead.').removeClass('d-none');

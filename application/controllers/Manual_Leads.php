@@ -202,15 +202,6 @@ class Manual_Leads extends MY_Controller
 		$now = date('Y-m-d H:i:s');
 		$prepared = ghl_manual_lead_prepare($this->input->post(), '', $now, null, true);
 		$this->Validate_Lead_Form($prepared, isset($existing) ? $existing : null);
-		$high_chance = $this->input->post('high_chance');
-		if ($high_chance !== null) {
-			if (in_array($high_chance, array('0', '1'), true)) {
-				$prepared['row']['high_chance'] = (int) $high_chance;
-			} else {
-				$prepared['ok'] = false;
-				$prepared['errors'][] = 'Please select Yes or No for High Chance.';
-			}
-		}
 		if (!$prepared['ok']) {
 			$this->session->set_flashdata('ghl_lead_error', implode(' ', $prepared['errors']));
 			redirect($return_url);

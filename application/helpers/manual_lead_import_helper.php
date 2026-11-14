@@ -4,11 +4,11 @@ require_once __DIR__ . '/ghl_manual_lead_helper.php';
 require_once __DIR__ . '/guest_list_export_helper.php';
 require_once __DIR__ . '/manual_lead_status_changes_helper.php';
 
-/** Export field order, excluding the automatic number and created date. */
+/** Importable fields in export order. */
 function manual_lead_import_columns()
 {
     $columns = array_column(guest_list_export_columns('manual'), 1, 0);
-    unset($columns['NO.'], $columns['CREATED DATE']);
+    unset($columns['NO.'], $columns['CREATED DATE'], $columns['HIGH CHANCE']);
     return $columns;
 }
 function manual_lead_import_required_headers()
