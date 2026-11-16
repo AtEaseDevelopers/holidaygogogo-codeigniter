@@ -185,9 +185,11 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             <label for="costing-sales-filter" class="font-weight-bold">Sales Person</label>
                                             <select id="costing-sales-filter" name="sales_admin_id" class="form-control">
                                                 <option value="">All</option>
-                                                <?php foreach ($sales_agents as $agent) { ?>
-                                                    <option value="<?php echo (int) $agent['AdminID']; ?>" <?php echo ($filter_sales_admin_id === (int) $agent['AdminID']) ? 'selected' : ''; ?>><?php echo html_escape($agent['Name']); ?></option>
-                                                <?php } ?>
+                                                <optgroup id="costing-active-sales" label="Active"<?php echo $show_deactivated_sales ? ' hidden disabled' : ''; ?>>
+                                                    <?php foreach ($sales_agents as $agent) { ?>
+                                                        <option value="<?php echo (int) $agent['AdminID']; ?>" <?php echo ($filter_sales_admin_id === (int) $agent['AdminID']) ? 'selected' : ''; ?>><?php echo html_escape($agent['Name']); ?></option>
+                                                    <?php } ?>
+                                                </optgroup>
                                                 <optgroup id="costing-deactivated-sales" label="Deactivated"<?php echo $show_deactivated_sales ? '' : ' hidden disabled'; ?>>
                                                     <?php foreach ($deactivated_sales_agents as $admin_id => $name) { ?>
                                                         <option value="<?php echo (int) $admin_id; ?>" <?php echo ($filter_sales_admin_id === (int) $admin_id) ? 'selected' : ''; ?>><?php echo html_escape($name); ?> (deactivated)</option>
@@ -201,7 +203,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                         <span></span>
                                                     </label>
                                                 </span>
-                                                <label id="costing-show-deactivated-sales-label" for="costing-show-deactivated-sales" class="mb-0 font-size-sm">Show deactivated admins</label>
+                                                <label id="costing-show-deactivated-sales-label" for="costing-show-deactivated-sales" class="mb-0 font-size-sm">Show only deactivated admins</label>
                                             </div>
                                         </div>
                                         <div class="col-md-2">
@@ -423,21 +425,22 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
 <script>
     (function () {
         var salesFilter = document.getElementById('costing-sales-filter');
+        var activeSales = document.getElementById('costing-active-sales');
         var deactivatedSales = document.getElementById('costing-deactivated-sales');
         var showDeactivatedSales = document.getElementById('costing-show-deactivated-sales');
 
         function updateSalesOptions() {
-            if (showDeactivatedSales.checked) {
-                deactivatedSales.hidden = false;
-                deactivatedSales.disabled = false;
-                if (!deactivatedSales.parentNode) {
-                    salesFilter.appendChild(deactivatedSales);
-                }
-            } else {
-                if (deactivatedSales.contains(salesFilter.selectedOptions[0])) {
-                    salesFilter.value = '';
-                }
-                deactivatedSales.remove();
+            var visibleGroup = showDeactivatedSales.checked ? deactivatedSales : activeSales;
+            var hiddenGroup = showDeactivatedSales.checked ? activeSales : deactivatedSales;
+
+            if (hiddenGroup.contains(salesFilter.selectedOptions[0])) {
+                salesFilter.value = '';
+            }
+            hiddenGroup.remove();
+            visibleGroup.hidden = false;
+            visibleGroup.disabled = false;
+            if (!visibleGroup.parentNode) {
+                salesFilter.appendChild(visibleGroup);
             }
         }
 

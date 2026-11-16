@@ -50,8 +50,8 @@ class Costing extends MY_Controller
                 $array['sales_agents'][] = $agent;
             }
         }
-        $array['show_deactivated_sales'] = $this->input->get('show_deactivated_sales') === '1'
-            || isset($array['deactivated_sales_agents'][$filters['sales_admin_id']]);
+        $array['show_deactivated_sales'] = isset($array['deactivated_sales_agents'][$filters['sales_admin_id']])
+            || ($filters['sales_admin_id'] <= 0 && $this->input->get('show_deactivated_sales') === '1');
 
         $this->load->view('layout/header', $titles);
         $this->load->view('costing/index', $array);
