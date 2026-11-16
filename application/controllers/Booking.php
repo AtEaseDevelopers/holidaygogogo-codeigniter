@@ -5917,14 +5917,20 @@ class Booking extends MY_Controller
 		$spreadsheet->getActiveSheet()->setCellValue('T1', 'SOURCE');
 		$spreadsheet->getActiveSheet()->setCellValue('U1', 'CANCELLATION REASON');
 		$spreadsheet->getActiveSheet()->setCellValue('V1', 'CANCELLATION REMARK');
+		$spreadsheet->getActiveSheet()->setCellValue('W1', 'PRODUCT CODE');
+		$spreadsheet->getActiveSheet()->setCellValue('X1', 'PRODUCT NAME');
+		$spreadsheet->getActiveSheet()->setCellValue('Y1', 'TAG');
 		$row = 2;
 		$bookings = $this->Booking_Model->Read_Bookings_With_Guest_Lists('Y');
+		// Grouped-team label (Inbound / Corporate & Outbound / Transport /
+		// Management) derived from each booking's frozen team.
+		$this->load->helper('booking_team_group');
 		if(isset($_GET['nick'])) {
 			print_r($this->db->last_query());exit;
 		}
-		$spreadsheet->getActiveSheet()->getStyle('A1:V1')->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_BLACK);
-		$spreadsheet->getActiveSheet()->getStyle('A1:V1')->getFont()->getColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE);
-		$spreadsheet->getActiveSheet()->getStyle('A1:V1')->getFont()->setBold(true);
+		$spreadsheet->getActiveSheet()->getStyle('A1:Y1')->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_BLACK);
+		$spreadsheet->getActiveSheet()->getStyle('A1:Y1')->getFont()->getColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE);
+		$spreadsheet->getActiveSheet()->getStyle('A1:Y1')->getFont()->setBold(true);
 		if(!empty($bookings)) {
 			$total_subtotal = 0;
 			$total_discount = 0;
@@ -6076,6 +6082,10 @@ class Booking extends MY_Controller
 				$spreadsheet->getActiveSheet()->setCellValueExplicit('T' . $row, $booking->SourceName, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$spreadsheet->getActiveSheet()->setCellValueExplicit('U' . $row, booking_export_cancellation_reason($booking), \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$spreadsheet->getActiveSheet()->setCellValueExplicit('V' . $row, booking_export_cancellation_remark($booking), \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+				$spreadsheet->getActiveSheet()->setCellValueExplicit('W' . $row, $booking->ProductCodes, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+				$spreadsheet->getActiveSheet()->setCellValueExplicit('X' . $row, $booking->ProductNames, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+				$spreadsheet->getActiveSheet()->setCellValueExplicit('Y' . $row, booking_team_group($booking->TeamName), \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+				$spreadsheet->getActiveSheet()->getStyle('W' . $row . ':Y' . $row)->getAlignment()->setWrapText(true);
 				$row++;
 			}
 			$total_profit = $total_profit != 0 && $total_net_total != 0 ? number_format($total_profit, 2, '.', ',') . ' (' . round(($total_profit / $total_net_total) * 100) . '%)' : number_format($total_profit, 2, '.', ',') . ' (0%)';
@@ -6094,11 +6104,11 @@ class Booking extends MY_Controller
 				$spreadsheet->getActiveSheet()->setCellValue('P' . ($row + 2), $total_profit);
 			}
 			$spreadsheet->getActiveSheet()->getStyle('M' . ($row + 2) . ':' . 'P' . ($row + 2))->getBorders()->getBottom()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_DOUBLE);
-			$spreadsheet->getActiveSheet()->getStyle('A:V')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
+			$spreadsheet->getActiveSheet()->getStyle('A:Y')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
 		} else {
-			$spreadsheet->getActiveSheet()->mergeCells('A2:V2');
+			$spreadsheet->getActiveSheet()->mergeCells('A2:Y2');
 			$spreadsheet->getActiveSheet()->getCell('A2')->setValue('Booking Records Not Found');
-			$spreadsheet->getActiveSheet()->getStyle('A:V')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
+			$spreadsheet->getActiveSheet()->getStyle('A:Y')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
 		}
 		$spreadsheet->getActiveSheet()->getColumnDimension('A')->setWidth(35);
 		$spreadsheet->getActiveSheet()->getColumnDimension('B')->setWidth(35);
@@ -6122,6 +6132,9 @@ class Booking extends MY_Controller
 		$spreadsheet->getActiveSheet()->getColumnDimension('T')->setWidth(35);
 		$spreadsheet->getActiveSheet()->getColumnDimension('U')->setWidth(35);
 		$spreadsheet->getActiveSheet()->getColumnDimension('V')->setWidth(35);
+		$spreadsheet->getActiveSheet()->getColumnDimension('W')->setWidth(35);
+		$spreadsheet->getActiveSheet()->getColumnDimension('X')->setWidth(45);
+		$spreadsheet->getActiveSheet()->getColumnDimension('Y')->setWidth(35);
 		if($hide_profit) {
 			// Profit column left empty for Sales Agents / Marketing — hide it so the
 			// sheet reads NET TOTAL -> STATUS with no blank gap.
