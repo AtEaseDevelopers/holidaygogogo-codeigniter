@@ -14,7 +14,9 @@ $filter_created_to = isset($filters['created_to']) ? $filters['created_to'] : ''
 $filter_validity_from = isset($filters['validity_from']) ? $filters['validity_from'] : '';
 $filter_validity_to = isset($filters['validity_to']) ? $filters['validity_to'] : '';
 $sales_agents = isset($sales_agents) ? $sales_agents : array();
-$has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0 || $filter_op_admin_id > 0 || $filter_created_from !== '' || $filter_created_to !== '' || $filter_validity_from !== '' || $filter_validity_to !== '');
+$deactivated_sales_agents = $deactivated_sales_agents ?? array();
+$show_deactivated_sales = !empty($show_deactivated_sales);
+$has_filter = ($filter_search !== '' || $filter_tour_code !== '' || $filter_status !== '' || $filter_customer_name !== '' || $filter_customer_contact !== '' || $filter_customer_email !== '' || $filter_sales_admin_id > 0 || $filter_op_admin_id > 0 || $filter_created_from !== '' || $filter_created_to !== '' || $filter_validity_from !== '' || $filter_validity_to !== '' || $show_deactivated_sales);
 
 // Carry the active listing filters onto the Excel export link so the download
 // mirrors exactly what is on screen.
@@ -180,13 +182,27 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             </select>
                                         </div>
                                         <div class="col-md-2">
-                                            <label class="font-weight-bold">Sales Person</label>
-                                            <select name="sales_admin_id" class="form-control">
+                                            <label for="costing-sales-filter" class="font-weight-bold">Sales Person</label>
+                                            <select id="costing-sales-filter" name="sales_admin_id" class="form-control">
                                                 <option value="">All</option>
                                                 <?php foreach ($sales_agents as $agent) { ?>
                                                     <option value="<?php echo (int) $agent['AdminID']; ?>" <?php echo ($filter_sales_admin_id === (int) $agent['AdminID']) ? 'selected' : ''; ?>><?php echo html_escape($agent['Name']); ?></option>
                                                 <?php } ?>
+                                                <optgroup id="costing-deactivated-sales" label="Deactivated"<?php echo $show_deactivated_sales ? '' : ' hidden disabled'; ?>>
+                                                    <?php foreach ($deactivated_sales_agents as $admin_id => $name) { ?>
+                                                        <option value="<?php echo (int) $admin_id; ?>" <?php echo ($filter_sales_admin_id === (int) $admin_id) ? 'selected' : ''; ?>><?php echo html_escape($name); ?> (deactivated)</option>
+                                                    <?php } ?>
+                                                </optgroup>
                                             </select>
+                                            <div class="d-flex align-items-center mt-2">
+                                                <span class="switch switch-sm mr-2">
+                                                    <label>
+                                                        <input type="checkbox" id="costing-show-deactivated-sales" name="show_deactivated_sales" value="1" aria-labelledby="costing-show-deactivated-sales-label" aria-controls="costing-sales-filter"<?php echo $show_deactivated_sales ? ' checked' : ''; ?>>
+                                                        <span></span>
+                                                    </label>
+                                                </span>
+                                                <label id="costing-show-deactivated-sales-label" for="costing-show-deactivated-sales" class="mb-0 font-size-sm">Show deactivated admins</label>
+                                            </div>
                                         </div>
                                         <div class="col-md-2">
                                             <label class="font-weight-bold">OP Person</label>
@@ -406,6 +422,28 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
 
 <script>
     (function () {
+        var salesFilter = document.getElementById('costing-sales-filter');
+        var deactivatedSales = document.getElementById('costing-deactivated-sales');
+        var showDeactivatedSales = document.getElementById('costing-show-deactivated-sales');
+
+        function updateSalesOptions() {
+            if (showDeactivatedSales.checked) {
+                deactivatedSales.hidden = false;
+                deactivatedSales.disabled = false;
+                if (!deactivatedSales.parentNode) {
+                    salesFilter.appendChild(deactivatedSales);
+                }
+            } else {
+                if (deactivatedSales.contains(salesFilter.selectedOptions[0])) {
+                    salesFilter.value = '';
+                }
+                deactivatedSales.remove();
+            }
+        }
+
+        showDeactivatedSales.addEventListener('change', updateSalesOptions);
+        updateSalesOptions();
+
         document.querySelectorAll('.delete-package-button').forEach(function (button) {
             button.addEventListener('click', function () {
                 var form = button.closest('form');

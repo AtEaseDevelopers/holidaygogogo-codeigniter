@@ -41,8 +41,17 @@ class Costing extends MY_Controller
 
         $array = $this->Costing_Model->Read_Packages_Dashboard($filters);
         $array['filters'] = $filters;
-        // Listing filter lists only currently-active sales people.
-        $array['sales_agents'] = $this->Costing_Model->Read_Active_Sales_Agents();
+        $array['sales_agents'] = array();
+        $array['deactivated_sales_agents'] = array();
+        foreach ($this->Costing_Model->Read_Sales_Agents_For_Filter() as $agent) {
+            if ($agent['Status'] === 'D') {
+                $array['deactivated_sales_agents'][(int) $agent['AdminID']] = $agent['Name'];
+            } else {
+                $array['sales_agents'][] = $agent;
+            }
+        }
+        $array['show_deactivated_sales'] = $this->input->get('show_deactivated_sales') === '1'
+            || isset($array['deactivated_sales_agents'][$filters['sales_admin_id']]);
 
         $this->load->view('layout/header', $titles);
         $this->load->view('costing/index', $array);

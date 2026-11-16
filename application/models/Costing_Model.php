@@ -921,19 +921,15 @@ class Costing_Model extends CI_Model
     }
 
     /**
-     * Only currently-active (Status = 'Y') admins — deactivated ('D') and deleted
-     * ('N') users are excluded. Used for the listing's Sales Person filter so it
-     * lists live sales people only; the package form keeps Read_Sales_Agents so an
-     * existing package assigned to a since-deactivated person still shows them.
-     *
-     * @return array list of ['AdminID','Name']
+     * Active and deactivated staff for the listing's Sales Person filter.
+     * @return array list of ['AdminID','Name','Status']
      */
-    public function Read_Active_Sales_Agents()
+    public function Read_Sales_Agents_For_Filter()
     {
         return $this->db
-            ->select('AdminID, Name')
+            ->select('AdminID, Name, Status')
             ->where('AdminID !=', 8)
-            ->where('Status', 'Y')
+            ->where_in('Status', array('Y', 'D'))
             ->order_by('Name', 'ASC')
             ->get('admin')
             ->result_array();
