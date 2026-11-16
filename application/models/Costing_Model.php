@@ -152,6 +152,7 @@ class Costing_Model extends CI_Model
                 cp.related_tour_code,
                 cp.revision_root_id,
                 cp.revision_number,
+                (cp.revision_number > 0 OR revised_family.revision_root_id IS NOT NULL) AS has_revisions,
                 cp.duration_days,
                 cp.duration_nights,
                 cp.description,
@@ -177,6 +178,11 @@ class Costing_Model extends CI_Model
             FROM costing_packages cp
             LEFT JOIN admin sales_admin ON sales_admin.AdminID = cp.sales_admin_id
             LEFT JOIN admin op_admin ON op_admin.AdminID = cp.op_admin_id
+            LEFT JOIN (
+                SELECT DISTINCT revision_root_id
+                FROM costing_packages
+                WHERE revision_root_id IS NOT NULL AND status != 'deleted'
+            ) revised_family ON revised_family.revision_root_id = cp.id
             LEFT JOIN costing_bookings cb ON cb.id = (
                 SELECT cb_latest.id
                 FROM costing_bookings cb_latest

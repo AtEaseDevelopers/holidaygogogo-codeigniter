@@ -193,7 +193,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                 </button>
                                             </div>
                                             <input type="hidden" id="costing-sales-filter-mode" name="show_deactivated_sales" value="<?php echo $show_deactivated_sales ? '1' : '0'; ?>">
-                                            <select id="costing-sales-filter" name="sales_admin_id" class="form-control">
+                                            <select id="costing-sales-filter" name="sales_admin_id" class="form-control<?php echo $show_deactivated_sales ? ' bg-light-danger' : ''; ?>">
                                                 <option value="">All</option>
                                                 <optgroup id="costing-active-sales" label="Active"<?php echo $show_deactivated_sales ? ' hidden disabled' : ''; ?>>
                                                     <?php foreach ($sales_agents as $agent) { ?>
@@ -308,6 +308,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                             <?php } else { ?>
                                 <?php $count = 1; ?>
                                 <?php foreach ($packages as $package) { ?>
+                                    <?php $has_revisions = !empty($package['has_revisions']); ?>
                                     <tr>
                                         <td style="text-align:center; padding-top:15px; padding-bottom:15px;"><?php echo $count; ?></td>
                                         <td class="costing-pkg-name-cell">
@@ -326,10 +327,10 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             <?php if (!empty($package['revision_number'])) { ?>
                                                 <span class="costing-tourcode-rev"><span class="label label-sm label-light-warning label-inline">REV<?php echo str_pad((string) (int) $package['revision_number'], 2, '0', STR_PAD_LEFT); ?></span></span>
                                             <?php } ?>
-                                            <?php if (!empty($package['revisions']) && count($package['revisions']) > 1) { ?>
+                                            <?php if ($has_revisions) { ?>
                                                 <div class="mt-2">
                                                     <a href="#" class="text-muted font-size-sm revision-history-toggle" data-target="revisions-<?php echo (int) $package['id']; ?>">
-                                                        <i class="la la-history"></i> <?php echo count($package['revisions']); ?> versions
+                                                        <i class="la la-history"></i> <?php echo count($package['revisions']) > 1 ? count($package['revisions']) . ' versions' : 'Version actions'; ?>
                                                     </a>
                                                     <div id="revisions-<?php echo (int) $package['id']; ?>" class="revision-history-list text-left mt-2" style="display:none;">
                                                         <?php foreach ($package['revisions'] as $rev) { ?>
@@ -390,20 +391,22 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             <div class="btn-group costing-action-buttons">
                                                 <button type="button" data-toggle="dropdown" data-boundary="window" class="btn btn-light-primary btn-sm dropdown-toggle" style="padding-left:3px;"></button>
                                                 <div class="dropdown-menu dropdown-menu-right">
-                                                    <a href="<?php echo base_url('Costing/Package/' . (int) $package['id']); ?>" class="dropdown-item" style="font-size:11px;">View Package</a>
-                                                    <?php if (!empty($package['latest_quotation_token']) && strtolower((string) $package['status']) !== 'inactive') { ?>
-                                                        <a href="<?php echo base_url('Costing/Quotation/' . $package['latest_quotation_token']); ?>" target="_blank" class="dropdown-item" style="font-size:11px;">Open Quotation PDF</a>
+                                                    <?php if (!$has_revisions) { ?>
+                                                        <a href="<?php echo base_url('Costing/Package/' . (int) $package['id']); ?>" class="dropdown-item" style="font-size:11px;">View Package</a>
+                                                        <?php if (!empty($package['latest_quotation_token']) && strtolower((string) $package['status']) !== 'inactive') { ?>
+                                                            <a href="<?php echo base_url('Costing/Quotation/' . $package['latest_quotation_token']); ?>" target="_blank" class="dropdown-item" style="font-size:11px;">Open Quotation PDF</a>
+                                                        <?php } ?>
+                                                        <div class="dropdown-divider"></div>
+                                                        <form method="post" action="<?php echo base_url('Costing/Duplicate_Package'); ?>" class="duplicate-package-form">
+                                                            <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
+                                                            <button type="button" class="dropdown-item duplicate-package-button" data-name="<?php echo html_escape($package['name']); ?>" style="font-size:11px;">Duplicate Package</button>
+                                                        </form>
+                                                        <form method="post" action="<?php echo base_url('Costing/Create_Revision'); ?>" class="revision-package-form">
+                                                            <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
+                                                            <button type="button" class="dropdown-item revision-package-button" data-name="<?php echo html_escape($package['tour_code'] !== '' ? $package['tour_code'] : $package['name']); ?>" style="font-size:11px;">Create Revision</button>
+                                                        </form>
+                                                        <div class="dropdown-divider"></div>
                                                     <?php } ?>
-                                                    <div class="dropdown-divider"></div>
-                                                    <form method="post" action="<?php echo base_url('Costing/Duplicate_Package'); ?>" class="duplicate-package-form">
-                                                        <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
-                                                        <button type="button" class="dropdown-item duplicate-package-button" data-name="<?php echo html_escape($package['name']); ?>" style="font-size:11px;">Duplicate Package</button>
-                                                    </form>
-                                                    <form method="post" action="<?php echo base_url('Costing/Create_Revision'); ?>" class="revision-package-form">
-                                                        <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
-                                                        <button type="button" class="dropdown-item revision-package-button" data-name="<?php echo html_escape($package['tour_code'] !== '' ? $package['tour_code'] : $package['name']); ?>" style="font-size:11px;">Create Revision</button>
-                                                    </form>
-                                                    <div class="dropdown-divider"></div>
                                                     <form method="post" action="<?php echo base_url('Costing/Delete_Package'); ?>" class="delete-package-form">
                                                         <input type="hidden" name="package_id" value="<?php echo (int) $package['id']; ?>">
                                                         <button type="button" class="dropdown-item delete-package-button" data-name="<?php echo html_escape($package['name']); ?>" style="color:#E37383; font-size:11px;">Delete Package</button>
@@ -440,6 +443,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
             showDeactivatedSales.title = showDeactivated ? 'Show active admins' : 'Show deactivated admins';
             showDeactivatedSales.classList.toggle('btn-primary', showDeactivated);
             showDeactivatedSales.classList.toggle('btn-clean', !showDeactivated);
+            salesFilter.classList.toggle('bg-light-danger', showDeactivated);
 
             if (hiddenGroup.contains(salesFilter.selectedOptions[0])) {
                 salesFilter.value = '';
