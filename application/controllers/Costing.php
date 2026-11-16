@@ -67,8 +67,8 @@ class Costing extends MY_Controller
 
     /**
      * The lookup lists the import template + parser need: currency codes/map,
-     * active category codes (code => canonical) + a display map, and sales-person
-     * names. Built once so Import_Template and Import stay in sync.
+     * active category codes and display names, plus Sales Person and OP Person
+     * names. Shared by the template download and both stages of the import.
      */
     private function Import_Lookups()
     {
@@ -101,6 +101,16 @@ class Costing extends MY_Controller
             $sales_names[] = $name;
         }
 
+        $op_by_name = array();
+        $op_names = array();
+        foreach ($this->Package_OP_Assignees() as $admin_id => $name) {
+            $name = trim((string) $name);
+            if ($name === '') { continue; }
+            $key = strtolower($name);
+            $op_by_name[$key][] = (int) $admin_id;
+            $op_names[$key] = $name;
+        }
+
         return array(
             'currency_by_code' => $currency_by_code,
             'currency_codes'   => $currency_codes,
@@ -108,13 +118,15 @@ class Costing extends MY_Controller
             'category_map'     => $category_map,
             'sales_by_name'    => $sales_by_name,
             'sales_names'      => $sales_names,
+            'op_by_name'       => $op_by_name,
+            'op_names'         => $op_names,
         );
     }
 
     /**
      * Download the multi-sheet Costing Package import template (Packages / Cost
      * Items / Combinations / Hotels / Flights + an Instructions sheet listing the
-     * valid category/currency codes and sales-person names).
+     * valid category/currency codes and Sales Person and OP Person names).
      */
     public function Import_Template()
     {
@@ -166,16 +178,13 @@ class Costing extends MY_Controller
         $parsed = array();
         foreach (costing_import_sheets_meta() as $meta) {
             list($key, $title, $columns) = $meta;
-            // The Packages sheet is parsed with a Tour-Code-aware column map so an
-            // EXPORT's TOUR CODE column is captured (to match an existing revision
-            // family). The template itself has no such column — header-aware parsing
-            // then just leaves tour_code blank.
+            // Both template and export include TOUR CODE for matching revision families.
             if ($key === 'packages') {
                 $columns = costing_import_package_columns_with_tour_code();
             }
             $ws = $spreadsheet->getSheetByName($title);
             $rows = $ws ? $ws->toArray(null, true, true, false) : array();
-            $parsed[$key] = costing_import_sheet_to_records($rows, $columns);
+            $parsed[$key] = costing_import_sheet_to_records($rows, $columns, array('op_person'));
         }
 
         return costing_import_assemble_packages($parsed, $this->Import_Lookups());

@@ -37,6 +37,7 @@ if (!function_exists('costing_import_package_columns')) {
             'EMAIL ADDRESS'          => 'customer_email',
             'SALES PERSON'           => 'sales_person',
             'SALES PERSON MOBILE'    => 'sales_person_mobile',
+            'OP PERSON'              => 'op_person',
             'DURATION DAYS'          => 'duration_days',
             'DURATION NIGHTS'        => 'duration_nights',
             'STATUS'                 => 'status',
@@ -201,9 +202,10 @@ if (!function_exists('costing_import_sheet_to_records')) {
      *
      * @param array $sheet   list of 0-indexed cell arrays
      * @param array $columns label => key map (costing_import_*_columns())
+     * @param array $header_only_keys fields that don't occupy a legacy positional column
      * @return array list of record assoc arrays
      */
-    function costing_import_sheet_to_records($sheet, $columns)
+    function costing_import_sheet_to_records($sheet, $columns, $header_only_keys = array())
     {
         $labels = array_keys($columns);
         $keys   = array_values($columns);
@@ -228,8 +230,9 @@ if (!function_exists('costing_import_sheet_to_records')) {
         // each key is re-pointed at the column whose header matches its label (or
         // null when that label is absent, yielding a blank cell for that key).
         $pos = array();
-        foreach ($keys as $i => $key) {
-            $pos[$key] = $i;
+        $i = 0;
+        foreach ($keys as $key) {
+            $pos[$key] = in_array($key, $header_only_keys, true) ? null : $i++;
         }
         if (is_array($header)) {
             $label_to_pos = array();
@@ -341,7 +344,8 @@ if (!function_exists('costing_import_assemble_packages')) {
      *                        'hotels'=>[], 'flights'=>[]] (each a record list)
      * @param array $lookups ['currency_by_code'=>[UPPERCODE=>id],
      *                         'category_codes'=>[lowercode=>canonicalCode],
-     *                         'sales_by_name'=>[lowername=>AdminID]]
+     *                         'sales_by_name'=>[lowername=>AdminID],
+     *                         'op_by_name'=>[lowername=>[AdminID, ...]]]
      * @return array ['packages'=>[ {name, save_package, snapshot_payload, hotels,
      *                  flight_options, quote_level, errors[]} ], 'global_errors'=>[]]
      */
@@ -350,6 +354,7 @@ if (!function_exists('costing_import_assemble_packages')) {
         $currency_by_code = isset($lookups['currency_by_code']) ? (array) $lookups['currency_by_code'] : array();
         $category_codes   = isset($lookups['category_codes']) ? (array) $lookups['category_codes'] : array();
         $sales_by_name    = isset($lookups['sales_by_name']) ? (array) $lookups['sales_by_name'] : array();
+        $op_by_name       = isset($lookups['op_by_name']) ? (array) $lookups['op_by_name'] : array();
 
         $package_records = isset($parsed['packages']) ? (array) $parsed['packages'] : array();
         $item_records    = isset($parsed['cost_items']) ? (array) $parsed['cost_items'] : array();
@@ -414,6 +419,12 @@ if (!function_exists('costing_import_assemble_packages')) {
                 $warnings[] = 'Sales Person "' . trim((string) $rec['sales_person']) . '" not found — will be left unset.';
             }
 
+            $op_name = trim((string) ($rec['op_person'] ?? ''));
+            $op_matches = $op_by_name[strtolower($op_name)] ?? array();
+            if ($op_name !== '' && count($op_matches) !== 1) {
+                $errors[] = 'OP Person "' . $op_name . '" must match exactly one eligible staff member.';
+            }
+
             $status_raw = trim((string) $rec['status']);
             if ($status_raw !== '' && !in_array(strtolower($status_raw), array('active', 'inactive'), true)) {
                 $warnings[] = 'Status "' . $status_raw . '" not recognised — will default to active.';
@@ -438,6 +449,7 @@ if (!function_exists('costing_import_assemble_packages')) {
                 'customer_email'  => trim((string) $rec['customer_email']),
                 'sales_admin_id'  => $sales_admin_id,
                 'sales_admin_mobile' => trim((string) (isset($rec['sales_person_mobile']) ? $rec['sales_person_mobile'] : '')),
+                'op_admin_id'     => count($op_matches) === 1 ? $op_matches[0] : null,
                 'duration_days'   => (int) costing_import_num($rec['duration_days']),
                 'duration_nights' => (int) costing_import_num($rec['duration_nights']),
                 'description'     => trim((string) $rec['description']),
@@ -1003,7 +1015,7 @@ if (!function_exists('costing_import_template_samples')) {
         return array(
             'packages' => array(array(
                 'Japan Spring 2027', 'Tan Family', '+60 123456789', 'tan@example.com',
-                '', '6', '5', 'active', '2027-03-15', 'Sakura season highlights',
+                '', '', '', '6', '5', 'active', '2027-03-15', 'Sakura season highlights',
                 '2027-04-01', '2027-04-06', '4', '0', '15', '0', '0',
                 'FIT', 'Twin|Triple', 'Hotel', 'Y',
                 "5 nights hotel\nDaily breakfast\nEnglish-speaking tour guide",
@@ -1052,6 +1064,7 @@ if (!function_exists('costing_import_instruction_rows')) {
         $rows[] = array('REQUIRED FIELDS', '(blank/invalid = package skipped)');
         $rows[] = array('Packages', 'PACKAGE NAME (unique), TRAVEL DATE, DURATION DAYS (>=1), and ADULT PAX + CHILD PAX summing to 1 or more.');
         $rows[] = array('Cost Items', 'Optional — a package with no cost items still imports. But if you add a row: ITEM, CATEGORY, UNIT PRICE and CURRENCY are required.');
+        $rows[] = array('OP Person', 'Optional. Enter an eligible OP Person name. Leave blank to assign the person running the import.');
         $rows[] = array('Optional (nullable)', 'Customer fields, Sales Person, Duration Nights, Status, Validity Date (quotation "valid until", Y-m-d), Description, Travel Date End, Margin %, Commissionable, Ad Hoc, Supplier, Quantity, Unit Count, Pax Type, Multiplier Type, all Hotels/Flights/Itinerary fields, Include, Exclude, Important Notes, Terms & Conditions.');
         $rows[] = array('', '');
 
@@ -1078,6 +1091,11 @@ if (!function_exists('costing_import_instruction_rows')) {
         $rows[] = array('SALES PERSON NAMES', '');
         foreach ((array) (isset($lookups['sales_names']) ? $lookups['sales_names'] : array()) as $sn) {
             $rows[] = array((string) $sn, '');
+        }
+        $rows[] = array('', '');
+        $rows[] = array('OP PERSON NAMES', '');
+        foreach ((array) ($lookups['op_names'] ?? array()) as $name) {
+            $rows[] = array((string) $name, '');
         }
         return $rows;
     }

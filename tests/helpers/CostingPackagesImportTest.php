@@ -59,6 +59,7 @@ $lookups = array(
     'currency_by_code' => array('MYR' => 1, 'USD' => 2, 'JPY' => 3),
     'category_codes'   => array('accommodation' => 'accommodation', 'tour_leader' => 'tour_leader', 'flight' => 'flight'),
     'sales_by_name'    => array('alice tan' => 10, 'bob lee' => 20),
+    'op_by_name'       => array('bob lee' => array(20), 'same name' => array(21, 22)),
 );
 
 /* ----------------------------------------------------- Parser tests */
@@ -70,7 +71,7 @@ $pkg_labels = array_keys($pkg_cols);
 $raw = array(
     $pkg_labels,                                   // header row -> skipped
     array('', '', '', '', '', '', '', '', '', ''), // blank row -> skipped
-    array('Japan Spring', 'Tan Family', '+60 12', 't@e.com', 'Alice Tan', '+60 19 888', '6', '5', 'active', '2027-03-15', 'desc',
+    array('Japan Spring', 'Tan Family', '+60 12', 't@e.com', 'Alice Tan', '+60 19 888', 'Bob Lee', '6', '5', 'active', '2027-03-15', 'desc',
           '2027-04-01', '2027-04-06', '4', '0', '15', '0', '0', 'FIT', 'Twin|Triple', 'Hotel', 'Y'),
 );
 $records = costing_import_sheet_to_records($raw, $pkg_cols);
@@ -78,6 +79,7 @@ check('parser keeps only the data row', 1, count($records));
 check('parser maps name', 'Japan Spring', $records[0]['name']);
 check('parser maps sales_person', 'Alice Tan', $records[0]['sales_person']);
 check('parser maps sales_person_mobile', '+60 19 888', $records[0]['sales_person_mobile']);
+check('parser maps OP Person', 'Bob Lee', $records[0]['op_person']);
 check('parser maps adult_count cell', '4', $records[0]['adult_count']);
 check('parser record key set', array_values($pkg_cols), array_keys($records[0]));
 
@@ -133,6 +135,7 @@ check_true('template: TOUR CODE label present', in_array('TOUR CODE', $tpl_label
 $name_idx = array_search('PACKAGE NAME', $tpl_labels, true);
 $tc_idx   = array_search('TOUR CODE', $tpl_labels, true);
 check('template: TOUR CODE sits right after PACKAGE NAME', $name_idx + 1, $tc_idx);
+check('template: OP Person is in column H', 'OP PERSON', $tpl_labels[7]);
 // A blank TOUR CODE cell is spliced in at the matching position, shifting every
 // following cell right by one (not overwriting a neighbour). Name stays at 0,
 // Tour Code is blank, and the original 2nd cell (customer name) moves to index 2.
@@ -149,6 +152,25 @@ $tpl_parsed = costing_import_sheet_to_records(
 );
 check_true('template: parser yields tour_code key', array_key_exists('tour_code', $tpl_parsed[0]));
 check('template: blank sample -> blank tour_code', '', $tpl_parsed[0]['tour_code']);
+check('template: duration follows blank OP Person', '6', $tpl_parsed[0]['duration_days']);
+
+$legacy_header = $tpl_labels;
+$legacy_sample = $tpl_sample;
+array_splice($legacy_header, 7, 1);
+array_splice($legacy_sample, 7, 1);
+foreach (array(array($legacy_header, $legacy_sample), array($legacy_sample)) as $legacy_rows) {
+    $legacy = costing_import_sheet_to_records($legacy_rows, costing_import_package_columns_with_tour_code(), array('op_person'));
+    check('legacy: OP Person stays blank', '', $legacy[0]['op_person']);
+    check('legacy: duration stays aligned', '6', $legacy[0]['duration_days']);
+}
+
+foreach (array('bOB Lee' => 20, '' => null, 'Unknown' => null, 'Same Name' => null) as $op_name => $expected_id) {
+    $package = $tpl_parsed[0];
+    $package['op_person'] = $op_name;
+    $op_import = costing_import_assemble_packages(array('packages' => array($package)), $lookups)['packages'][0];
+    check('OP import: resolves ' . var_export($op_name, true), $expected_id, $op_import['save_package']['op_admin_id']);
+    check('OP import: validates ' . var_export($op_name, true), $expected_id !== null || $op_name === '', $op_import['creatable']);
+}
 
 /* ----------------------------------------------------- Assemble: happy path */
 

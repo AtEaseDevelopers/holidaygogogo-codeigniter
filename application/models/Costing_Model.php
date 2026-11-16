@@ -278,6 +278,7 @@ class Costing_Model extends CI_Model
                 cp.sales_admin_id,
                 sales_admin.Name AS sales_admin_name,
                 cp.sales_admin_mobile,
+                op_admin.Name AS op_admin_name,
                 cp.tour_code,
                 cp.duration_days,
                 cp.duration_nights,
@@ -311,6 +312,7 @@ class Costing_Model extends CI_Model
                 cbf.total_profit
             FROM costing_packages cp
             LEFT JOIN admin sales_admin ON sales_admin.AdminID = cp.sales_admin_id
+            LEFT JOIN admin op_admin ON op_admin.AdminID = cp.op_admin_id
             LEFT JOIN costing_bookings cb ON cb.id = (
                 SELECT cb_latest.id
                 FROM costing_bookings cb_latest
@@ -829,8 +831,7 @@ class Costing_Model extends CI_Model
      * ['ok'=>bool, 'package_id'=>int].
      *
      * @param array $pkg {save_package, snapshot_payload, hotels, flight_options, quote_level}
-     * @param int $op_admin_id The admin running the import; stamped as the OP person
-     *                         (creator) on the new package. 0 leaves it unset (NULL).
+     * @param int $op_admin_id The admin running the import, used when OP Person is blank.
      * @return array
      */
     public function Import_Package($pkg, $op_admin_id = 0)
@@ -852,7 +853,7 @@ class Costing_Model extends CI_Model
 
         // Default the imported package's OP person to the admin running the import.
         $save_package = (array) $pkg['save_package'];
-        $save_package['op_admin_id'] = (int) $op_admin_id;
+        $save_package['op_admin_id'] = $save_package['op_admin_id'] ?? (int) $op_admin_id;
         $package_id = $this->Save_Package($save_package);
         if ($package_id > 0) {
             $this->Generate_Booking_Snapshot($package_id, $pkg['snapshot_payload']);
@@ -1161,7 +1162,7 @@ class Costing_Model extends CI_Model
      *
      * @param array $pkg assembled package (costing_import_assemble_packages).
      * @param int   $root_id a member of the family to revise.
-     * @param int   $op_admin_id admin running the import (stamped as OP/creator).
+     * @param int   $op_admin_id admin running the import, used when OP Person is blank.
      * @return array
      */
     public function Import_Package_As_Revision($pkg, $root_id, $op_admin_id = 0)
@@ -1183,7 +1184,7 @@ class Costing_Model extends CI_Model
         $this->db->trans_start();
 
         $save_package = (array) $pkg['save_package'];
-        $save_package['op_admin_id'] = (int) $op_admin_id;
+        $save_package['op_admin_id'] = $save_package['op_admin_id'] ?? (int) $op_admin_id;
         // Use the spreadsheet's package name, falling back to the root's name
         // when the imported cell is blank.
         $this->load->helper('costing_packages_import');

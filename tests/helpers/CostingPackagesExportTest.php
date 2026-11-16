@@ -84,6 +84,7 @@ check('hotel cols: plain kept', 'Twin|Triple', costing_packages_export_hotel_col
 $pkg_cols = costing_packages_export_insert_tour_code(costing_import_package_columns());
 $pkg_labels = array_keys($pkg_cols);
 check('insert: tour code is 2nd column', 'TOUR CODE', $pkg_labels[1]);
+check('export: OP Person is in column H', 'OP PERSON', $pkg_labels[7]);
 check('insert: tour code key', 'tour_code', $pkg_cols['TOUR CODE']);
 check('insert: package name still first', 'PACKAGE NAME', $pkg_labels[0]);
 check('insert: adds exactly one column', count(costing_import_package_columns()) + 1, count($pkg_cols));
@@ -107,7 +108,7 @@ foreach ($sheets as $s) {
 $booked = array(
     'id' => 7, 'name' => 'Bali 5D4N', 'tour_code' => 'QU-2612-0007',
     'customer_name' => 'John Tan', 'customer_contact' => '+60 123456789',
-    'customer_email' => 'john@example.com', 'sales_admin_name' => 'Alice',
+    'customer_email' => 'john@example.com', 'sales_admin_name' => 'Alice', 'op_admin_name' => 'Bob',
     'duration_days' => 5, 'duration_nights' => 4, 'status' => 'active',
     'validity_date' => '2026-11-30', 'description' => 'Island hopping',
     // Storage is the original plural columns (section_meta $meta[1]); the export
@@ -143,6 +144,7 @@ $rec = costing_packages_export_package_record($booked);
 check('pkg: key set matches columns', array_values($pkg_cols), array_keys($rec));
 check('pkg: tour code', 'QU-2612-0007', $rec['tour_code']);
 check('pkg: sales_person from admin name', 'Alice', $rec['sales_person']);
+check('pkg: OP Person from admin name', 'Bob', $rec['op_person']);
 check('pkg: travel date ymd', '2026-12-01', $rec['travel_date']);
 check('pkg: travel date end ymd', '2026-12-05', $rec['travel_date_end']);
 check('pkg: adult count', '10', $rec['adult_count']);
@@ -173,6 +175,7 @@ check('pkg: no-booking margin blank', '', $rec2['margin_percentage']);
 check('pkg: no-booking commissionable blank', '', $rec2['commissionable_per_pax']);
 check('pkg: blank tour code stays blank (not -)', '', $rec2['tour_code']);
 check('pkg: blank customer stays blank (not -)', '', $rec2['customer_name']);
+check('pkg: no OP assignment exports a blank', '', $rec2['op_person']);
 check('pkg: blank hotel columns', '', $rec2['quote_hotel_columns']);
 check('pkg: null single supp blank', '', $rec2['quote_show_single_supp']);
 check('pkg: blank tour intro stays blank', '', $rec2['itinerary_tour_intro']);
