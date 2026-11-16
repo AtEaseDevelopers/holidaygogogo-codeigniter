@@ -38,6 +38,10 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
 ?>
 
 <style>
+    #costing-show-deactivated-sales {
+        width: 1.5rem;
+        height: 1.5rem;
+    }
     /* Keep the Package Name column a sensible width and stop long descriptions
        from ballooning the row height. The full text stays available on hover. */
     .costing-pkg-name-cell {
@@ -182,7 +186,13 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             </select>
                                         </div>
                                         <div class="col-md-2">
-                                            <label for="costing-sales-filter" class="font-weight-bold">Sales Person</label>
+                                            <div class="d-flex align-items-center mb-2">
+                                                <label for="costing-sales-filter" class="font-weight-bold mb-0">Sales Person</label>
+                                                <button type="button" id="costing-show-deactivated-sales" class="btn btn-icon btn-xs ml-1 <?php echo $show_deactivated_sales ? 'btn-primary' : 'btn-clean'; ?>" aria-label="Show only deactivated admins" aria-pressed="<?php echo $show_deactivated_sales ? 'true' : 'false'; ?>" aria-controls="costing-sales-filter" title="<?php echo $show_deactivated_sales ? 'Show active admins' : 'Show deactivated admins'; ?>">
+                                                    <i class="la la-user-slash" aria-hidden="true"></i>
+                                                </button>
+                                            </div>
+                                            <input type="hidden" id="costing-sales-filter-mode" name="show_deactivated_sales" value="<?php echo $show_deactivated_sales ? '1' : '0'; ?>">
                                             <select id="costing-sales-filter" name="sales_admin_id" class="form-control">
                                                 <option value="">All</option>
                                                 <optgroup id="costing-active-sales" label="Active"<?php echo $show_deactivated_sales ? ' hidden disabled' : ''; ?>>
@@ -196,15 +206,6 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                                     <?php } ?>
                                                 </optgroup>
                                             </select>
-                                            <div class="d-flex align-items-center mt-2">
-                                                <span class="switch switch-sm mr-2">
-                                                    <label>
-                                                        <input type="checkbox" id="costing-show-deactivated-sales" name="show_deactivated_sales" value="1" aria-labelledby="costing-show-deactivated-sales-label" aria-controls="costing-sales-filter"<?php echo $show_deactivated_sales ? ' checked' : ''; ?>>
-                                                        <span></span>
-                                                    </label>
-                                                </span>
-                                                <label id="costing-show-deactivated-sales-label" for="costing-show-deactivated-sales" class="mb-0 font-size-sm">Show only deactivated admins</label>
-                                            </div>
                                         </div>
                                         <div class="col-md-2">
                                             <label class="font-weight-bold">OP Person</label>
@@ -428,10 +429,17 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
         var activeSales = document.getElementById('costing-active-sales');
         var deactivatedSales = document.getElementById('costing-deactivated-sales');
         var showDeactivatedSales = document.getElementById('costing-show-deactivated-sales');
+        var salesFilterMode = document.getElementById('costing-sales-filter-mode');
 
         function updateSalesOptions() {
-            var visibleGroup = showDeactivatedSales.checked ? deactivatedSales : activeSales;
-            var hiddenGroup = showDeactivatedSales.checked ? activeSales : deactivatedSales;
+            var showDeactivated = salesFilterMode.value === '1';
+            var visibleGroup = showDeactivated ? deactivatedSales : activeSales;
+            var hiddenGroup = showDeactivated ? activeSales : deactivatedSales;
+
+            showDeactivatedSales.setAttribute('aria-pressed', String(showDeactivated));
+            showDeactivatedSales.title = showDeactivated ? 'Show active admins' : 'Show deactivated admins';
+            showDeactivatedSales.classList.toggle('btn-primary', showDeactivated);
+            showDeactivatedSales.classList.toggle('btn-clean', !showDeactivated);
 
             if (hiddenGroup.contains(salesFilter.selectedOptions[0])) {
                 salesFilter.value = '';
@@ -444,7 +452,10 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
             }
         }
 
-        showDeactivatedSales.addEventListener('change', updateSalesOptions);
+        showDeactivatedSales.addEventListener('click', function () {
+            salesFilterMode.value = salesFilterMode.value === '1' ? '0' : '1';
+            updateSalesOptions();
+        });
         updateSalesOptions();
 
         document.querySelectorAll('.delete-package-button').forEach(function (button) {
