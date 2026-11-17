@@ -92,7 +92,7 @@ class Faq_Suggestion extends MY_Controller
 		}
 
 		foreach (array('faq_success','faq_error') as $key) { $this->session->keep_flashdata($key); }
-		redirect(base_url('Faq?section=suggestions&tab=all&run_id=').$run_id);
+		redirect(base_url('Faq?section=suggestions&tab=open&run_id=').$run_id);
 	}
 
 	/** Compatibility redirect to the source list; new imports use Add_Source. */
@@ -501,7 +501,7 @@ class Faq_Suggestion extends MY_Controller
 			$scope .= ' for ' . $mobile;
 		}
 		$this->Dispatch_Run($run_id, 'chats', $scope);
-		redirect(base_url('Faq?section=suggestions&tab=all&run_id=').$run_id);
+		redirect(base_url('Faq?section=suggestions&tab=open&run_id=').$run_id);
 	}
 
 	// Manual "Generate from PDF" — upload a document and mine FAQs from it.
@@ -537,7 +537,7 @@ class Faq_Suggestion extends MY_Controller
 			'StoredName' => $info['file_name'],
 		));
 		$this->Dispatch_Run($run_id, 'pdf', $info['orig_name']);
-		redirect(base_url('Faq?section=suggestions&tab=all&run_id=').$run_id);
+		redirect(base_url('Faq?section=suggestions&tab=open&run_id=').$run_id);
 	}
 
 	// Manual "Generate from Chat File" — upload a WhatsApp .txt export (or a .zip
@@ -575,7 +575,7 @@ class Faq_Suggestion extends MY_Controller
 			'StoredName' => $info['file_name'],
 		));
 		$this->Dispatch_Run($run_id, 'chatfile', $info['orig_name']);
-		redirect(base_url('Faq?section=suggestions&tab=all&run_id=').$run_id);
+		redirect(base_url('Faq?section=suggestions&tab=open&run_id=').$run_id);
 	}
 
 	/**

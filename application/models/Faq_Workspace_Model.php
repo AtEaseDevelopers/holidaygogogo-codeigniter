@@ -267,25 +267,25 @@ class Faq_Workspace_Model extends CI_Model
         } catch (Exception $e) { $this->db->trans_rollback(); throw $e; }
     }
 
-    private function Filter_Suggestions($filter, $search, $run)
+    private function Filter_Suggestions($filter, $search, $run, $covered=array())
     {
         $this->db->where('Status','Y');
         if ($filter==='pending' || $filter==='ready') { $this->db->where('State','draft_ready'); }
         elseif ($filter==='context') { $this->db->where_not_in('State',array('accepted','dismissed','draft_ready')); }
+        elseif ($filter==='open') { $this->db->where_not_in('State',array('accepted','dismissed')); }
         elseif (in_array($filter,array('accepted','dismissed'),true)) { $this->db->where('State',$filter); }
+        if ($covered) { $this->db->where_not_in('SuggestionID',$covered); }
         if ($search!=='') { $this->db->group_start()->like('Title',$search)->or_like('Description',$search)->group_end(); }
-        if (is_array($run)) {
-            $ids=array_values(array_filter(array_map('intval',$run),function($id){return $id>0;}));
-            if ($ids) { $this->db->where_in('RunID',$ids); } else { $this->db->where('1 = 0',null,false); }
-        } elseif ($run>0) { $this->db->where('RunID',(int)$run); }
+        $this->Faq_Suggestion_Model->Filter_By_Run($run);
     }
 
     /** $run is 0 for all generations, a RunID, or an array of RunIDs (empty means no generations). */
-    function Suggestion_List($filter='pending', $search='', $page=1, $run=0, $page_size=100)
+    function Suggestion_List($filter='pending', $search='', $page=1, $run=0, $page_size=100, $covered=array())
     {
-        $this->Filter_Suggestions($filter,$search,$run);
+        $excluded=in_array($filter,array('open','pending','ready','context'),true)?$covered:array();
+        $this->Filter_Suggestions($filter,$search,$run,$excluded);
         $pagination=faq_workspace_pagination($this->db->count_all_results('faq_suggestions'),$page,$page_size);
-        $this->Filter_Suggestions($filter,$search,$run);
+        $this->Filter_Suggestions($filter,$search,$run,$excluded);
         $this->db->order_by('SuggestionID','DESC');
         if ($pagination['page_size']!==-1) { $this->db->limit($pagination['page_size'],$pagination['offset']); }
         $rows=$this->db->get('faq_suggestions')->result();
@@ -293,15 +293,21 @@ class Faq_Workspace_Model extends CI_Model
         return array('candidates'=>$rows)+$pagination;
     }
 
-    function Suggestion_Counts($search='', $run=0)
+    function Suggestion_Counts($search='', $run=0, $covered=array())
     {
-        $out=array_fill_keys(array_keys(faq_workspace_filters()),0); $this->Filter_Suggestions('all',$search,$run);
+        $out=array_fill_keys(array_keys(faq_workspace_filters()),0);
+        if ($covered) {
+            $this->Filter_Suggestions('all',$search,$run);
+            $out['all']=$this->db->where_in('SuggestionID',$covered)->count_all_results('faq_suggestions');
+        }
+        $this->Filter_Suggestions('all',$search,$run,$covered);
         foreach ($this->db->select('State, COUNT(*) AS Total')->group_by('State')->get('faq_suggestions')->result() as $r) {
             $n=(int)$r->Total;
             $out['all']+=$n;
             if (in_array($r->State,array('accepted','dismissed'),true)) { $out[$r->State]+=$n; }
             elseif ($r->State==='draft_ready') { $out['pending']+=$n; } else { $out['context']+=$n; }
         }
+        $out['open']=$out['pending']+$out['context'];
         return $out;
     }
 

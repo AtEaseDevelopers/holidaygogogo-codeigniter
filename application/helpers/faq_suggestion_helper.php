@@ -331,6 +331,46 @@ if (!function_exists('faq_suggestion_transcript_with_sources')) {
 	}
 }
 
+/** Return keys of candidates whose complete Q&As appear in one FAQ with the same scope. */
+function faq_suggestion_covered_candidates($candidates, $published)
+{
+	$scope = function ($entry) {
+		$ids = array_unique(array_map('intval', $entry['destination_ids']));
+		sort($ids, SORT_NUMERIC);
+		return mb_strtolower(trim($entry['title']), 'UTF-8') . "\0" . implode(',', $ids);
+	};
+	$pairs = function ($entry) {
+		$keys = array();
+		foreach ($entry['items'] as $item) {
+			$q = trim(str_replace("\r\n", "\n", $item['q']));
+			$a = trim(str_replace("\r\n", "\n", $item['a']));
+			if ($q === '' || $a === '' || strcasecmp($a, 'insufficient verified source') === 0) { continue; }
+			$keys[hash('sha256', strlen($q) . ':' . $q . $a)] = true;
+		}
+		return $keys;
+	};
+
+	$by_scope = array();
+	foreach ($published as $faq) {
+		$by_scope[$scope($faq)][] = $pairs($faq);
+	}
+
+	$covered = array();
+	foreach ($candidates as $key => $candidate) {
+		$matches = $by_scope[$scope($candidate)] ?? array();
+		if (!$matches || !$candidate['items']) { continue; }
+		$candidate_pairs = $pairs($candidate);
+		if (count($candidate_pairs) !== count($candidate['items'])) { continue; }
+		foreach ($matches as $faq_pairs) {
+			if (!array_diff_key($candidate_pairs, $faq_pairs)) {
+				$covered[] = $key;
+				break;
+			}
+		}
+	}
+	return $covered;
+}
+
 if (!function_exists('faq_suggestion_existing_entries')) {
 	/** Bound comparison input by omitting whole entries, never cutting answer facts. */
 	function faq_suggestion_existing_entries($existing_faqs, $max = 300, $max_bytes = 200000)
@@ -357,6 +397,7 @@ if (!function_exists('faq_suggestion_existing_entries')) {
 				$entry['reference'] = $f['reference'];
 			}
 			if (isset($f['state']) && is_string($f['state'])) { $entry['state'] = $f['state']; }
+			if (!empty($f['destinations'])) { $entry['destinations'] = $f['destinations']; }
 			$entry['answers_available'] = (bool) $items;
 			foreach ($items as $item) {
 				if ($item['a'] === '' || $item['a'] === 'insufficient verified source') { $entry['answers_available'] = false; }

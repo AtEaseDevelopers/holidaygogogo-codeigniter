@@ -36,9 +36,10 @@ class FaqWorkspacePages
             $selected=$ci->Faq_Suggestion_Model->Read_Run($run);
             if ($selected) { $generation_runs[]=$selected; }
         }
-        $listing=$ci->Faq_Workspace_Model->Suggestion_List($tab,$search,$page,$run_filter,$ci->input->get('page_size'));
+        $covered=$ci->Faq_Suggestion_Model->Covered_Open_Suggestion_Ids($run_filter);
+        $listing=$ci->Faq_Workspace_Model->Suggestion_List($tab,$search,$page,$run_filter,$ci->input->get('page_size'),$covered);
         $data=$listing+array('workspace_tab'=>$tab,'search'=>$search,'run_id'=>$run,'generation_runs'=>$generation_runs,
-            'workspace_counts'=>$ci->Faq_Workspace_Model->Suggestion_Counts($search,$run_filter),
+            'workspace_counts'=>$ci->Faq_Workspace_Model->Suggestion_Counts($search,$run_filter,$covered),
             'can_edit'=>(int)$ci->session->level===10 || in_array('FE',(array)$ci->session->access_control,true));
         $ci->load->view('layout/header',array('tab_title'=>'HolidayGoGoGo | AI Suggestion','breadcrumb_title'=>'FAQ >> AI Suggestion'));
         $ci->load->view('faq_suggestion/index',$data); $ci->load->view('layout/footer');

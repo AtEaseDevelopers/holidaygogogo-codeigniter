@@ -82,7 +82,7 @@
 			</div>
 			<div class="card-body">
 				<p class="text-muted" style="margin-top:-6px;">
-					AI runs from chats, documents and re-evaluation. Open a run to inspect its input and results.
+					AI runs from chats, documents and re-evaluation. Open a run to review outstanding suggestions.
 				</p>
 
 				<div class="dataTables_wrapper dt-bootstrap4 no-footer" <?php if(empty($runs)) { echo 'style="overflow-x:auto;"'; } ?>>
@@ -107,7 +107,7 @@
 								$src = strtolower((string)$r->Source);
 								$src_label = ($src === 'pdf') ? 'PDF' : (($src === 'chatfile') ? 'Chat File' : (($src === 'reevaluate') ? 'Re-evaluation' : 'Chats'));
 								$src_class = ($src === 'pdf') ? 'label-light-info' : (($src === 'chatfile') ? 'label-light-success' : 'label-light-primary');
-								$view_url = $src==='reevaluate'?base_url('Faq_Suggestion/Update?id=').(int)preg_replace('/[^0-9]/','',(string)$r->FileName):base_url('Faq?section=suggestions&tab=all&run_id=').(int)$r->RunID;
+								$view_url = $src==='reevaluate'?base_url('Faq_Suggestion/Update?id=').(int)preg_replace('/[^0-9]/','',(string)$r->FileName):base_url('Faq?section=suggestions&tab=open&run_id=').(int)$r->RunID;
 							?>
 								<tr data-run-id="<?php echo (int)$r->RunID; ?>">
 									<td style="text-align:center; padding-top:15px; padding-bottom:15px;"><?php echo $count; ?></td>

@@ -136,10 +136,12 @@ class Faq_Suggestion_Model extends CI_Model
 
 		// One grouped query for the per-run pending counts (avoid N+1).
 		$pending = array();
+		$covered = $this->Covered_Open_Suggestion_Ids();
 		$this->db->select('RunID, COUNT(*) AS c');
 		$this->db->from('faq_suggestions');
 		$this->db->where('Status', 'Y');
 		$this->db->where_not_in('State', array('accepted','dismissed'));
+		if ($covered) { $this->db->where_not_in('SuggestionID', $covered); }
 		$this->db->where('RunID IS NOT NULL', null, false);
 		$this->db->group_by('RunID');
 		foreach ($this->db->get()->result() as $r) {
@@ -151,6 +153,39 @@ class Faq_Suggestion_Model extends CI_Model
 			$run->PendingCount = isset($pending[(int) $run->RunID]) ? $pending[(int) $run->RunID] : 0;
 		}
 		return $runs;
+	}
+
+	/** A run filter can select all generations, a single run, or a set of runs. */
+	function Filter_By_Run($run)
+	{
+		if (is_array($run)) {
+			$ids = Faq_Model::Normalize_Ids($run);
+			if ($ids) { $this->db->where_in('RunID', $ids); }
+			else { $this->db->where('1 = 0', null, false); }
+		} elseif ($run > 0) {
+			$this->db->where('RunID', (int) $run);
+		}
+	}
+
+	/** Recheck older open suggestions against today's active FAQs. */
+	function Covered_Open_Suggestion_Ids($run = 0)
+	{
+		$this->db->select('SuggestionID, Title, Description, DestinationIds')
+			->where('Status', 'Y')->where_not_in('State', array('accepted', 'dismissed'))
+			->where("EXISTS (SELECT 1 FROM faq WHERE faq.Status = 'Y' AND faq.Title = faq_suggestions.Title)", null, false);
+		$this->Filter_By_Run($run);
+		$rows = $this->db->get('faq_suggestions')->result();
+		if (!$rows) { return array(); }
+
+		$candidates = array();
+		foreach ($rows as $row) {
+			$candidates[(int)$row->SuggestionID] = array(
+				'title'=>$row->Title,
+				'items'=>Faq_Model::Decode_Items($row->Description),
+				'destination_ids'=>self::Parse_Id_Csv($row->DestinationIds),
+			);
+		}
+		return faq_suggestion_covered_candidates($candidates, $this->Published_Faqs());
 	}
 
 	/** One active run row (decorated with its Scope label), or null. */
@@ -326,8 +361,8 @@ class Faq_Suggestion_Model extends CI_Model
 		$dest_map      = $this->Destination_Name_Map();
 		$dest_names    = array_values($dest_map);
 		// Existing answers let the AI compare actual coverage within package scope.
-			$existing_faqs = $this->Existing_Faqs();
-			$this->load->model('Faq_Workspace_Model');
+		$existing_faqs = $this->Existing_Faqs($dest_map);
+		$this->load->model('Faq_Workspace_Model');
 		$knowledge=array('map'=>array(),'selection'=>null);
 
 		try {
@@ -415,11 +450,13 @@ class Faq_Suggestion_Model extends CI_Model
 		}
 		$parsed = faq_suggestion_parse_response($result['raw'], $name_to_id, $this->max_suggestions(), true);
 		$existing_refs = faq_suggestion_existing_reference_map($existing_faqs);
+		$covered = $parsed ? array_fill_keys(faq_suggestion_covered_candidates($parsed, $this->Published_Faqs()), true) : array();
 
 		// Build every valid suggestion first, so the run's AI cost can be split
 		// evenly across the rows actually stored (one AI call produces them all).
 		$rows = array();
-		foreach ($parsed as $s) {
+		foreach ($parsed as $key => $s) {
+			if (isset($covered[$key])) { continue; }
 			$built = isset($s['assessment'])?array('items'=>$s['items'],'error'=>null):Faq_Model::Build_Items(
 				array_map(function ($it) { return $it['q']; }, $s['items']),
 				array_map(function ($it) { return $it['a']; }, $s['items'])
@@ -660,20 +697,37 @@ class Faq_Suggestion_Model extends CI_Model
 	}
 
 	/** Existing published and draft answers supplied for coverage comparison. */
-	function Existing_Faqs()
+	function Existing_Faqs($dest_map = array())
+	{
+		$out = array_values($this->Published_Faqs());
+
+		$this->db->select('Title, Description, State, DestinationIds');
+		$this->db->where('Status', 'Y');
+		$this->db->where_not_in('State', array('accepted', 'dismissed'));
+		foreach ($this->db->get('faq_suggestions')->result() as $r) {
+			$out[] = $this->existing_faq_entry($r->Title, $r->Description) + array(
+				'kind'=>'suggestion', 'state'=>(string)$r->State, 'destination_ids'=>self::Parse_Id_Csv($r->DestinationIds),
+			);
+		}
+		foreach ($out as &$entry) {
+			$entry['destinations'] = array_values(array_intersect_key($dest_map, array_flip($entry['destination_ids'])));
+		}
+		unset($entry);
+		return $out;
+	}
+
+	private function Published_Faqs()
 	{
 		$this->load->model('Faq_Model');
-
 		$out = array();
 		foreach ($this->db->select('FAQID, Title, Description')->where('Status', 'Y')->order_by('FAQID', 'ASC')->get('faq')->result() as $r) {
-			$out[] = $this->existing_faq_entry($r->Title, $r->Description) + array('kind'=>'faq', 'reference'=>'F'.(int)$r->FAQID);
+			$out[(int)$r->FAQID] = $this->existing_faq_entry($r->Title, $r->Description) +
+				array('kind'=>'faq', 'reference'=>'F'.(int)$r->FAQID, 'destination_ids'=>array());
 		}
-
-		$this->db->select('Title, Description, State');
-		$this->db->where('Status', 'Y');
-		$this->db->where('State !=', 'dismissed');
-		foreach ($this->db->get('faq_suggestions')->result() as $r) {
-			$out[] = $this->existing_faq_entry($r->Title, $r->Description) + array('kind'=>'suggestion', 'state'=>(string)$r->State);
+		if ($out) {
+			foreach ($this->db->select('FAQID, CategoryID')->where_in('FAQID', array_keys($out))->get('faq_destination_map')->result() as $destination) {
+				$out[(int)$destination->FAQID]['destination_ids'][] = (int)$destination->CategoryID;
+			}
 		}
 		return $out;
 	}
