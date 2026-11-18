@@ -184,13 +184,29 @@ class Cron extends CI_Controller
 			}
 		}
 
+		echo "DONE! Reminder notifications: $reminder_count";
+	}
+
+	public function bookingStageReminders()
+	{
+		if (!$this->input->is_cli_request()) {
+			show_404();
+			return;
+		}
+
 		$this->load->model('Booking_Reminder_Setting_Model');
+		$this->load->model('Notification_Model');
+
 		$reminder_hours = $this->Booking_Reminder_Setting_Model->Get_Hours();
-		$booking_reminder_count = $reminder_hours === false
+		$count = $reminder_hours === false
 			? false
 			: $this->Notification_Model->Create_Booking_Stage_Reminders($reminder_hours);
-		$booking_reminder_result = $booking_reminder_count === false ? 'failed' : $booking_reminder_count;
-		echo "DONE! Reminder notifications: $reminder_count. Booking stage reminders: $booking_reminder_result";
+		if ($count === false) {
+			fwrite(STDERR, 'Booking stage reminders: failed' . PHP_EOL);
+			exit(1);
+		}
+
+		echo "Booking stage reminders: $count" . PHP_EOL;
 	}
 
 	/**
