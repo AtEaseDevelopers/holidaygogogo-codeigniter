@@ -1291,20 +1291,22 @@ class Booking_Model extends CI_Model
 	
 	function Create_Booking_Log2($current_status, $new_status, $booking_id)
 	{
+		// Status changes made without an admin session use the system actor.
+		$created_by = (int) $this->session->userdata('admin_id');
+
 		// Log to original booking_log table
 		$array = array(
 			'BookingID' => $booking_id,
 			'Column' => 'Status',
 			'CurrentData' => $current_status,
 			'NewData' => $new_status,
-			'InsertBy' => $this->session->admin_id,
+			'InsertBy' => $created_by,
 			'InsertDate' => date('Y-m-d H:i:s')
 		);
 		$this->db->insert('booking_log', $array);
 		
 		// Also log to booking_status_log table
 		$this->load->helper('booking_status_log');
-		$created_by = !empty($this->session->admin_id) ? $this->session->admin_id : 0;
 		log_booking_status_update($booking_id, $current_status, $new_status, $created_by, null, true);
 	}
 
