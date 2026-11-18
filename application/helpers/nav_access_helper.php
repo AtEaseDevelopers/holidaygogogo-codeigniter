@@ -79,6 +79,7 @@ if ( ! function_exists('nav_modules'))
 			'team' => array('label' => 'Team', 'group' => 'Settings', 'class' => 'Team'),
 			'agent_score' => array('label' => 'Agent Score', 'group' => 'Settings', 'class' => 'Agent_Score_Setting'),
 			'card_visibility' => array('label' => 'Card Visibility', 'group' => 'Settings', 'class' => 'Card_Visibility_Setting'),
+			'booking_reminder' => array('label' => 'Booking Reminders', 'group' => 'Settings', 'class' => 'Booking_Reminder_Setting'),
 			'ai_usage' => array('label' => 'AI Cost & Usage', 'group' => 'Settings', 'class' => 'Ai_Usage'),
 			'system_monitor' => array('label' => 'System Monitor', 'group' => 'Settings', 'class' => 'System_Monitor'),
 		);
@@ -149,6 +150,7 @@ if ( ! function_exists('nav_legacy_access'))
 			case 'team':
 			case 'agent_score':
 			case 'card_visibility':
+			case 'booking_reminder':
 			case 'ai_usage':
 			case 'system_monitor':
 			case 'master_product':

@@ -17,6 +17,11 @@ Extra Routes
 	- Migration: `php index.php run_sql_patches`
 	- Seeders: `php index.php run_seeders`
 
+The booking maintenance cron (`php index.php Cron index`) sends Draft BC and
+Pending BC bell reminders. Change the two thresholds under **Settings → Booking
+Reminders**. Both default to 24 hours, and 0 disables that stage. Owners can grant
+other staff access through **Navigation Access**. Run the SQL patches before running cron.
+
 4. GoHighLevel sync
 	- Users: full sync on every run via `php index.php Cron syncGhlUsers`
 	- Custom Fields: full sync on every run via `php index.php Cron syncGhlCustomFields`

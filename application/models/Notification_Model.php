@@ -32,6 +32,88 @@ class Notification_Model extends CI_Model
 	}
 
 	/**
+	 * An active OP or OP lead can see a booking through any of its assignees.
+	 * Match the team's primary and additional memberships used by Booking.
+	 */
+	private function _pending_bc_recipient_condition()
+	{
+		$assignees = '(booking.SalesAgent, booking.SalesAgent2, booking.BookingOP)';
+		return "recipient.Status = 'Y' AND recipient.Level IN ('40', '45') AND (
+			recipient.AdminID IN $assignees
+			OR EXISTS (
+				SELECT 1 FROM admin assignee
+				WHERE assignee.AdminID IN $assignees
+					AND assignee.Status = 'Y' AND assignee.TeamID > 0
+					AND (
+						assignee.TeamID = recipient.TeamID
+						OR (recipient.Level = '45' AND EXISTS (
+							SELECT 1 FROM admin_team
+							WHERE admin_team.AdminID = recipient.AdminID
+								AND admin_team.TeamID = assignee.TeamID
+						))
+					)
+			)
+		)";
+	}
+
+	/**
+	 * Send one reminder per recipient and entry into a stage, even when cron overlaps.
+	 */
+	function Create_Booking_Stage_Reminders(array $reminder_hours)
+	{
+		$rules = array(
+			'SAD' => array('draft_bc_reminder', 'Draft BC', "recipient.AdminID = booking.SalesAgent2 AND recipient.Status = 'Y'"),
+			'PB'  => array('pending_bc_reminder', 'Pending BC', $this->_pending_bc_recipient_condition()),
+		);
+		$now = time();
+		$created = 0;
+
+		foreach ($rules as $status => list($type, $label, $recipient_condition)) {
+			$hours = $reminder_hours[$type . '_hours'];
+			if ($hours <= 0) {
+				continue;
+			}
+
+			$cutoff = date('Y-m-d H:i:s', $now - $hours * 3600);
+			$unit = $hours === 1 ? 'hour' : 'hours';
+			$message = "This booking has been in $label for more than $hours $unit.";
+
+			// Ignore same-status log entries so saving the booking does not restart the timer.
+			// For bookings with no transition history, use the creation date and log ID 0.
+			$result = $this->db->query("
+				INSERT INTO notification (user_id, type, owner_type, owner_id, booking_status_log_id, message, is_read, created_at)
+				SELECT recipient.AdminID, ?, 'booking', booking.BookingID, COALESCE(stage.id, 0), ?, 0, ?
+				FROM booking
+				LEFT JOIN booking_status_log stage ON stage.id = (
+					SELECT entry.id FROM booking_status_log entry
+					WHERE entry.booking_id = booking.BookingID
+						AND (entry.from_status IS NULL OR entry.from_status <> entry.to_status)
+					ORDER BY entry.id DESC
+					LIMIT 1
+				)
+				JOIN admin recipient ON $recipient_condition
+				WHERE booking.Status = ? AND booking.CancelStatus = 'N'
+					AND (stage.id IS NULL OR stage.to_status = ?)
+					AND COALESCE(stage.created_at, booking.InsertDate) < ?
+					AND NOT EXISTS (
+						SELECT 1 FROM notification sent
+						WHERE sent.user_id = recipient.AdminID AND sent.type = ?
+							AND sent.owner_type = 'booking' AND sent.owner_id = booking.BookingID
+							AND sent.booking_status_log_id = COALESCE(stage.id, 0)
+					)
+				ON DUPLICATE KEY UPDATE NotificationID = notification.NotificationID
+			", array($type, $message, date('Y-m-d H:i:s', $now), $status, $status, $cutoff, $type));
+
+			if (!$result) {
+				return false;
+			}
+			$created += $this->db->affected_rows();
+		}
+
+		return $created;
+	}
+
+	/**
 	 * Apply role-based visibility WHERE clauses to the current $this->db builder.
 	 * Caller must have already joined `booking` so booking.SalesAgent / BookingOP
 	 * are reachable. Mutates the builder; returns nothing.
@@ -54,13 +136,22 @@ class Notification_Model extends CI_Model
 		// @mention rows (recipient is neither) stay in the Messages dropdown.
 		$this->db->where("(notification.type != 'remark' OR booking.SalesAgent = $uid OR booking.BookingOP = $uid)", NULL, FALSE);
 
+		// Reminders follow the current TC2 assignment and OP booking scope.
+		$op_scope = $this->_pending_bc_recipient_condition();
+		$this->db->where("(notification.type != 'draft_bc_reminder' OR booking.SalesAgent2 = $uid)", NULL, FALSE);
+		$this->db->where("(notification.type != 'pending_bc_reminder' OR EXISTS (
+			SELECT 1 FROM admin recipient WHERE recipient.AdminID = $uid AND $op_scope
+		))", NULL, FALSE);
+
 		// Front-line roles (SALES AGENT / OP) are scoped to bookings they sit on.
 		// Match EITHER seat (SalesAgent OR BookingOP), not the seat implied by
 		// their current level — otherwise a staff member moved between roles
 		// (e.g. TC -> OP) loses the notifications on bookings they were assigned
 		// to under their old role. Higher roles keep their unrestricted view.
 		if ($user_level == 20 || $user_level == 40) {
-			$this->db->where("(notification.owner_type != 'booking' OR booking.SalesAgent = $uid OR booking.BookingOP = $uid)", NULL, FALSE);
+			$this->db->where("(notification.owner_type != 'booking'
+				OR notification.type IN ('draft_bc_reminder', 'pending_bc_reminder')
+				OR booking.SalesAgent = $uid OR booking.BookingOP = $uid)", NULL, FALSE);
 		}
 	}
 

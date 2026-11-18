@@ -47,8 +47,9 @@ $costing_active = in_array($router, array('Costing', 'Costing_Item', 'Costing_Ca
 $costing_master_active = ($router === 'Costing_Item' || $router === 'Costing_Category' || ($router === 'Costing' && $method === 'Currency'));
 $faq_active = ($router === 'Faq' || $router === 'Faq_Tag');
 $dash_config_active = in_array($router, array('Agent_Score_Setting', 'Card_Visibility_Setting'), true);
-$settings_active = in_array($router, array('Admin', 'Team', 'Company', 'Agent_Score_Setting', 'Card_Visibility_Setting', 'Ai_Usage', 'System_Monitor', 'Nav_Access'), true);
-$show_settings = ($can_admin || nav_can_view('team') || nav_can_view('agent_score') || nav_can_view('card_visibility') || nav_can_view('ai_usage') || nav_can_view('system_monitor') || $is_owner);
+$settings_active = in_array($router, array('Admin', 'Team', 'Company', 'Agent_Score_Setting', 'Card_Visibility_Setting', 'Booking_Reminder_Setting', 'Ai_Usage', 'System_Monitor', 'Nav_Access'), true);
+$can_booking_reminder_settings = nav_can_view('booking_reminder');
+$show_settings = ($can_admin || nav_can_view('team') || nav_can_view('agent_score') || nav_can_view('card_visibility') || $can_booking_reminder_settings || nav_can_view('ai_usage') || nav_can_view('system_monitor') || $is_owner);
 $analysis_active = in_array($router, array('Competitor_Product', 'Our_Product', 'Master_Product'), true);
 $payment_upcoming = ($router === 'Payment' && $this->input->get('view_mode') === 'upcoming_due');
 
@@ -632,6 +633,14 @@ $menu_icon = '<span class="svg-icon menu-icon"><svg><g>'
 							<?php } ?>
 						</ul>
 					</div>
+				</li>
+				<?php } ?>
+				<?php if ($can_booking_reminder_settings) { ?>
+				<li class="menu-item <?php if ($router === 'Booking_Reminder_Setting') { echo 'menu-item-active'; } ?>">
+					<a href="<?php echo base_url('Booking_Reminder_Setting'); ?>" class="menu-link">
+						<i class="menu-bullet menu-bullet-dot"><span></span></i>
+						<span class="menu-text">Booking Reminders</span>
+					</a>
 				</li>
 				<?php } ?>
 				<?php if (nav_can_view('ai_usage')) { ?>

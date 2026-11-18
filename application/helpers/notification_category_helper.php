@@ -14,6 +14,7 @@ if (!function_exists('notification_category_map')) {
         return array(
             'remark'               => array('remark'),
             'booking_updated'      => array('booking_updated'),
+            'bc_reminder'          => array('draft_bc_reminder', 'pending_bc_reminder'),
             'review_submitted'     => array('review_submitted'),
             'supplier_reminder'    => array('supplier_reminder_full', 'supplier_reminder_deposit'),
             'payout_overdue'       => array('payout_overdue_full',    'payout_overdue_deposit'),
@@ -80,6 +81,7 @@ if (!function_exists('notification_category_label')) {
             'all'                  => 'All',
             'remark'               => 'Remarks',
             'booking_updated'      => 'Booking Updated',
+            'bc_reminder'          => 'Booking Reminders',
             'review_submitted'     => 'Reviews',
             'supplier_reminder'    => 'Supplier Reminders',
             'payout_overdue'       => 'Payout Overdue',
