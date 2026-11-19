@@ -1224,9 +1224,9 @@ div.kt-datatable__pager-container {
 												<button type="button" data-toggle="dropdown" class="btn btn-light-primary btn-sm dropdown-toggle" style="padding-left:3px;"></button>
 												<div class="dropdown-menu">
 													<?php if($list_base === 'Manual_Leads' && isset($g->Type) && $g->Type === 'Manual') { ?>
-														<a href="javascript:;" class="dropdown-item js-view-lead" style="font-size:11px;" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>">View Details</a>
+														<a href="javascript:;" class="dropdown-item js-view-lead" data-lead-id="<?php echo isset($g->ManualLeadID) ? (int) $g->ManualLeadID : 0; ?>" style="font-size:11px;" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>">View Details</a>
 														<?php if($lc_can_edit) { ?>
-															<a href="javascript:;" class="dropdown-item js-edit-lead" style="font-size:11px;" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>">Edit Lead</a>
+															<a href="javascript:;" class="dropdown-item js-edit-lead" data-lead-id="<?php echo isset($g->ManualLeadID) ? (int) $g->ManualLeadID : 0; ?>" style="font-size:11px;" data-dedup-key="<?php echo htmlspecialchars($g->dedup_key, ENT_QUOTES); ?>">Edit Lead</a>
 														<?php } ?>
 													<?php } ?>
 													<?php if(!$is_ghl_row) { ?>
@@ -2322,6 +2322,7 @@ div.kt-datatable__pager-container {
 		<form action="<?php echo base_url('Manual_Leads/Create'); ?>" method="post" id="ghl_lead_create_form">
 			<!-- Empty for Create; the Edit action fills this + repoints the form to Update. -->
 			<input type="hidden" name="dedup_key" id="ghl_lead_dedup_key" value="">
+			<input type="hidden" name="lead_id" id="manual_lead_id" value="">
 			<input type="hidden" name="status_changes" id="manual_lead_status_changes" value="">
 			<div class="modal-content">
 				<div class="modal-header" style="background-color:#D7E2F2;">
@@ -2766,6 +2767,7 @@ div.kt-datatable__pager-container {
 		// reset() restores the hidden dial code to +60 but not the picker display.
 		if (window.phonePickerSetCode) { phonePickerSetCode(document.getElementById('ml_phone_wrapper'), '+60'); }
 		$('#ghl_lead_dedup_key').val('');
+		$('#manual_lead_id').val('');
 		$form.attr('action', ML_CREATE_ACTION);
 		$('#ghl_lead_create_label').html('<strong>Create Manual Lead</strong>');
 		$('#ghl_lead_create_submit').prop('disabled', false).html('<i class="la la-user-plus"></i>Create Lead');
@@ -2786,12 +2788,14 @@ div.kt-datatable__pager-container {
 	// Edit action: fetch the raw values, fill the form, repoint it to Update.
 	$(document).on('click', '.js-edit-lead', function() {
 		var dedupKey = $(this).attr('data-dedup-key') || '';
+		var leadId = $(this).attr('data-lead-id') || '';
 		mlResetCreate();
 		var $form   = $('#ghl_lead_create_form');
 		var $submit = $('#ghl_lead_create_submit');
 		var editGeneration = mlEditGeneration;
 		$form.data('edit-loading', true).attr('action', ML_UPDATE_ACTION);
 		$('#ghl_lead_dedup_key').val(dedupKey);
+		$('#manual_lead_id').val(leadId);
 		$('#ghl_lead_create_label').html('<strong>Edit Manual Lead</strong>');
 		// Swap the create-only seed rows for the staged status editor, and load
 		// this lead's existing status history; changes wait for Save Changes.
@@ -2809,7 +2813,7 @@ div.kt-datatable__pager-container {
 		$submit.prop('disabled', true).html('<i class="la la-spinner la-spin"></i>Loading...');
 		$('#ghl_lead_create_modal').modal('show');
 
-		$.ajax({ url: ML_EDIT_URL, method: 'GET', dataType: 'json', cache: false, data: { dedup_key: dedupKey }, timeout: 30000 })
+		$.ajax({ url: ML_EDIT_URL, method: 'GET', dataType: 'json', cache: false, data: { dedup_key: dedupKey, lead_id: leadId }, timeout: 30000 })
 			.done(function(res) {
 				if (editGeneration !== mlEditGeneration) { return; }
 				if (res && res.ok && res.lead) {
@@ -2817,6 +2821,7 @@ div.kt-datatable__pager-container {
 					$form.data('edit-loading', false);
 					var set = function(name, val) { $form.find('[name="' + name + '"]').val(val == null ? '' : val); };
 					$('#ghl_lead_dedup_key').val(dedupKey);
+					$('#manual_lead_id').val(leadId);
 					$form.attr('action', ML_UPDATE_ACTION);
 					set('first_name', d.first_name);     set('company_name', d.company_name);
 					// Stored phone is "+60 123456789"; split it back into the picker.
@@ -3113,6 +3118,7 @@ div.kt-datatable__pager-container {
 
 	$(document).on('click', '.js-view-lead', function() {
 		var dedupKey = $(this).attr('data-dedup-key') || '';
+		var leadId = $(this).attr('data-lead-id') || '';
 		var generation = ++lvGeneration;
 		$('#lv_name').text('');
 		$('#lv_body').hide().empty();
@@ -3120,7 +3126,7 @@ div.kt-datatable__pager-container {
 		$('#lv_loading').show();
 		$('#lead_view_modal').modal('show');
 
-		$.ajax({ url: LV_URL, method: 'GET', dataType: 'json', cache: false, data: { dedup_key: dedupKey }, timeout: 30000 })
+		$.ajax({ url: LV_URL, method: 'GET', dataType: 'json', cache: false, data: { dedup_key: dedupKey, lead_id: leadId }, timeout: 30000 })
 			.done(function(res) {
 				if (generation !== lvGeneration) { return; }
 				$('#lv_loading').hide();

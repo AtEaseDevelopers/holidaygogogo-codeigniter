@@ -165,7 +165,7 @@ class Manual_Leads extends MY_Controller
 
 	/**
 	 * Update an existing hand-entered ("Manual") lead from the Edit Lead modal
-	 * (the same form as Create, in edit mode). POST dedup_key + the lead fields.
+	 * (the same form as Create, in edit mode). POST lead_id, dedup_key + the lead fields.
 	 * The lead must be visible to the current viewer (Read_Manual_Lead_Detail
 	 * applies the same per-creator 'manual' scope as the listing), so a viewer can
 	 * only edit a lead they are allowed to see. The identity/ownership columns
@@ -189,7 +189,7 @@ class Manual_Leads extends MY_Controller
 
 		// Existence + visibility check: the scope inside Read_Manual_Lead_Detail
 		// means a viewer who cannot see this manual lead gets null here.
-		$existing = $this->Guests_Model->Read_Manual_Lead_Detail($dedup_key);
+		$existing = $this->Guests_Model->Read_Manual_Lead_Detail($dedup_key, $this->input->post('lead_id') ?? '');
 		if (!$existing) {
 			$this->session->set_flashdata('ghl_lead_error', 'Lead not found.');
 			redirect($return_url);
@@ -236,7 +236,7 @@ class Manual_Leads extends MY_Controller
 
 	/**
 	 * Read one manual lead's RAW editable values to pre-fill the Edit Lead modal.
-	 * GET ?dedup_key=… Returns { ok, lead:{...raw fields...} }. Unlike View_Lead
+	 * GET ?lead_id=…&dedup_key=… Returns { ok, lead:{...raw fields...} }. Unlike View_Lead
 	 * (which formats for display), this returns date_of_birth as Y-m-d for the date
 	 * input and tags as a comma-joined string for the tags text field. Same
 	 * per-creator visibility as the listing (via Read_Manual_Lead_Detail).
@@ -251,7 +251,7 @@ class Manual_Leads extends MY_Controller
 		if ($dedup_key === '') {
 			return $out(array('ok' => false, 'message' => 'Missing lead reference.'));
 		}
-		$row = $this->Guests_Model->Read_Manual_Lead_Detail($dedup_key);
+		$row = $this->Guests_Model->Read_Manual_Lead_Detail($dedup_key, $this->input->get('lead_id') ?? '');
 		if (!$row) {
 			return $out(array('ok' => false, 'message' => 'Lead not found.'));
 		}
@@ -294,7 +294,7 @@ class Manual_Leads extends MY_Controller
 	}
 
 	/**
-	 * Read one manual lead's full detail for the Action ▸ View modal. GET ?dedup_key=…
+	 * Read one manual lead's full detail for the Action ▸ View modal. GET ?lead_id=…&dedup_key=…
 	 * Returns { ok, lead:{...formatted fields...} }. Respects per-creator visibility
 	 * (Read_Manual_Lead_Detail applies the same 'manual' scope as the listing), so a
 	 * viewer can only open a lead they are allowed to see.
@@ -309,7 +309,7 @@ class Manual_Leads extends MY_Controller
 		if ($dedup_key === '') {
 			return $out(array('ok' => false, 'message' => 'Missing lead reference.'));
 		}
-		$row = $this->Guests_Model->Read_Manual_Lead_Detail($dedup_key);
+		$row = $this->Guests_Model->Read_Manual_Lead_Detail($dedup_key, $this->input->get('lead_id') ?? '');
 		if (!$row) {
 			return $out(array('ok' => false, 'message' => 'Lead not found.'));
 		}
