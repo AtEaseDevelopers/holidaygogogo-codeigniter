@@ -949,6 +949,7 @@ GROUP BY group_key
 			$high_chance = $this->mode === 'manual' ? 'gc.high_chance' : '0';
 			$parts[] = "
 SELECT
+	" . ($this->mode === 'manual' ? 'gc.id AS ManualLeadID,' : '') . "
 	{$gc_dedup} AS dedup_key,
 	CONVERT(COALESCE(
 		NULLIF(TRIM(CONCAT_WS(' ', gc.first_name, gc.last_name)), ''),
@@ -1033,6 +1034,12 @@ SELECT
 	 */
 	private function Merge_Key_Expr($a)
 	{
+		// Manual leads represent individual enquiries/packages. Shared contact
+		// details must not hide one package behind another after creator filtering.
+		// Keep the existing dedup_key for status logs, remarks and other actions.
+		if ($this->mode === 'manual') {
+			return "CONVERT(CONCAT('manual:', {$a}.ManualLeadID) USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+		}
 		$ic = "REGEXP_REPLACE(IFNULL({$a}.IC, ''), '[^0-9A-Za-z]', '')";
 		return "CASE
 			WHEN NULLIF(UPPER({$ic}), '') IS NOT NULL
