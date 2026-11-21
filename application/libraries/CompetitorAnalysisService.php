@@ -2012,9 +2012,8 @@ class CompetitorAnalysisService
 	}
 
 	/**
-	 * The shell command for the Playwright render service ('node render.js'), or '' when
-	 * it isn't installed (no node, no script, no node_modules). COMPETITOR_RENDER_CMD
-	 * overrides it wholesale. Cached per process.
+	 * Renderer command. Playwright remains the default; COMPETITOR_RENDER_ENGINE=scrapling
+	 * selects the Python adapter. COMPETITOR_RENDER_CMD overrides either. Cached per process.
 	 */
 	protected function render_service_cmd()
 	{
@@ -2026,6 +2025,15 @@ class CompetitorAnalysisService
 		if ($override !== '') {
 			return $cache = $override;
 		}
+		if (strtolower(trim((string) get_env('COMPETITOR_RENDER_ENGINE'))) === 'scrapling') {
+			$script = FCPATH . 'tools/competitor_render/render_scrapling.py';
+			$venv = FCPATH . 'tools/competitor_render/.venv/bin/python';
+			$python = trim((string) get_env('PYTHON_BIN'));
+			if ($python === '') {
+				$python = is_file($venv) ? $venv : $this->resolve_bin('', 'python3');
+			}
+			return $cache = is_file($script) ? escapeshellarg($python) . ' ' . escapeshellarg($script) : '';
+		}
 		$script = FCPATH . 'tools/competitor_render/render.js';
 		$deps   = FCPATH . 'tools/competitor_render/node_modules/playwright';
 		if ( ! is_file($script) || ! is_dir($deps)) {
@@ -2036,7 +2044,7 @@ class CompetitorAnalysisService
 	}
 
 	/**
-	 * Render a URL via the Playwright service. Returns ['html'=>, 'apis'=>[{url,body}]]
+	 * Render a URL via the selected service. Returns ['html'=>, 'apis'=>[{url,body}]]
 	 * or null when the service isn't installed / failed (caller then uses Chrome).
 	 */
 	protected function render_via_service($url)
@@ -2057,8 +2065,10 @@ class CompetitorAnalysisService
 				$env .= 'COMPETITOR_PROXY_AUTH=' . escapeshellarg($proxy['auth']) . ' ';
 			}
 		}
-		// No done-marker: node prints its JSON then exits, so wait for exit (salvage off).
-		$raw = $this->run_with_timeout($env . $cmd . ' ' . escapeshellarg($url), $secs + 10, 'render.js', '');
+		// No done-marker: the renderer prints JSON then exits; wait for exit.
+		$kill_match = (strtolower(trim((string) get_env('COMPETITOR_RENDER_ENGINE'))) === 'scrapling')
+			? 'competitor_render/render_scrapling.py' : 'render.js';
+		$raw = $this->run_with_timeout($env . $cmd . ' ' . escapeshellarg($url), $secs + 10, $kill_match, '');
 		$data = json_decode((string) $raw, true);
 		if ( ! is_array($data) || ! empty($data['error'])) {
 			if (is_array($data) && ! empty($data['error'])) {

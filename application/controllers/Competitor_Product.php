@@ -1132,6 +1132,7 @@ class Competitor_Product extends MY_Controller
 		@exec('pkill -9 -f chrome-headless-shell 2>/dev/null');
 		@exec('pkill -9 -f ms-playwright 2>/dev/null');
 		@exec('pkill -9 -f "competitor_render/render.js" 2>/dev/null');
+		@exec('pkill -9 -f "competitor_render/render_scrapling.py" 2>/dev/null');
 	}
 
 	/**

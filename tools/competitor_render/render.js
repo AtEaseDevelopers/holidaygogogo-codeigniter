@@ -138,6 +138,11 @@
     const seen = new Set();
     page.on('response', async (resp) => {
       try {
+        // A cleared challenge can navigate again after goto() returns. Report the
+        // final main-document status so comparisons don't count an old 403 as a block.
+        if (resp.request().isNavigationRequest() && resp.frame() === page.mainFrame()) {
+          out.status = resp.status();
+        }
         if (out.apis.length >= MAX_APIS) return;
         const ct = String(resp.headers()['content-type'] || '');
         if (!/json/i.test(ct)) return;

@@ -286,8 +286,6 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                 <th style="text-align:center;">No.</th>
                                 <th style="text-align:center;">Package Name</th>
                                 <th style="text-align:center;">Customer Name</th>
-                                <th style="text-align:center;">Contact Number</th>
-                                <th style="text-align:center;">Email Address</th>
                                 <th style="text-align:center;">Sales Person</th>
                                 <th style="text-align:center;">OP Person</th>
                                 <th style="text-align:center;">Tour Code</th>
@@ -303,7 +301,7 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                         <tbody>
                             <?php if (empty($packages)) { ?>
                                 <tr>
-                                    <td colspan="15" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
+                                    <td colspan="13" style="text-align:center; padding-top:10px; padding-bottom:10px;">Costing Package Records Not Found</td>
                                 </tr>
                             <?php } else { ?>
                                 <?php $count = 1; ?>
@@ -318,8 +316,6 @@ $export_qs = !empty($export_params) ? ('?' . http_build_query($export_params)) :
                                             <?php } ?>
                                         </td>
                                         <td><?php echo !empty($package['customer_name']) ? html_escape($package['customer_name']) : '-'; ?></td>
-                                        <td style="text-align:center;"><?php echo !empty($package['customer_contact']) ? html_escape($package['customer_contact']) : '-'; ?></td>
-                                        <td><?php echo !empty($package['customer_email']) ? html_escape($package['customer_email']) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['sales_admin_name']) ? html_escape($package['sales_admin_name']) : '-'; ?></td>
                                         <td style="text-align:center;"><?php echo !empty($package['op_admin_name']) ? html_escape($package['op_admin_name']) : '-'; ?></td>
                                         <td class="costing-tourcode-cell" style="text-align:center;">
