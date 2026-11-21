@@ -3044,10 +3044,9 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 				return strcmp($tb, $ta);
 			});
 			$latest = $runs[0];
-			// The merged row advertises the BEST run's product haul (most products),
-			// NOT the latest run's — otherwise a flaky/empty re-crawl (count 0) shadows a
-			// good earlier crawl, making its products look missing. Runs are newest-first,
-			// so ties keep the newest. best_job lets the listing review that run directly.
+			// Keep the largest run available for export; the displayed product count
+			// belongs to the latest run, matching its date and database-save totals.
+			// Earlier products remain available through the timeline. Ties keep newest.
 			$best = $latest;
 			foreach ($runs as $r) {
 				if ((int) (isset($r['count']) ? $r['count'] : 0) > (int) (isset($best['count']) ? $best['count'] : 0)) {
@@ -3095,7 +3094,7 @@ if ( ! function_exists('competitor_group_crawl_jobs'))
 				'runs_count' => count($runs),
 				'state'      => (string) (isset($face['state']) ? $face['state'] : 'unknown'),
 				'message'    => (string) (isset($face['message']) ? $face['message'] : ''),
-				'count'      => (int) (isset($best['count']) ? $best['count'] : 0),
+				'count'      => (int) (isset($latest['count']) ? $latest['count'] : 0),
 				'best_job'   => (string) (isset($best['job']) ? $best['job'] : ''),
 				'analysed'   => $analysed,
 				'cost_total' => $cost,

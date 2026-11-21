@@ -2325,9 +2325,19 @@ class CompetitorAnalysisService
 		// ICE site + keyword → use ICE's native search API (server-side match), not a
 		// full-catalogue enumeration + text filter. Returns null when it isn't ICE.
 		$ice_kw  = ($keyword !== '') ? $this->discover_ice_keyword($base_url, $keyword) : null;
+		// AI URL discovery is a small search sample. Prefer the complete native
+		// catalogue for supported sites even when the user selected "AI crawl".
+		$ice_catalogue = null;
+		if ($ai_discover && $keyword === '') {
+			$ice_catalogue = $this->discover_ice_listing($base_url, $limit);
+			if ($ice_catalogue === null) { $ice_catalogue = $this->discover_ice($base_url, $limit); }
+		}
 		$ai_used = false;   // AI discovery already applied any keyword — skip the slug filter below
 		if ($ice_kw !== null) {
 			$found = $ice_kw;
+			$this->last_discovery_source = 'ice';
+		} elseif ($ice_catalogue !== null) {
+			$found = $ice_catalogue;
 			$this->last_discovery_source = 'ice';
 		} elseif ($ai_discover && get_env('OPENAI_API_KEY')) {
 			// "Crawl with AI": let the web_search agent browse the site and hand back the

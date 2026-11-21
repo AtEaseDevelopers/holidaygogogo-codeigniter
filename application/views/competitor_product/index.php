@@ -352,7 +352,7 @@
             // A merged website row — its per-run history (Review & Select, Terminate,
             // Delete) lives on the Timeline page.
             items.push('<a href="' + TIMELINE_URL + encodeURIComponent(j.host) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-history mr-2"></i>View Timeline</a>');
-            if(j.reviewable && j.best_job) items.push('<a href="' + CRAWL_EXCEL_URL + encodeURIComponent(j.best_job) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-file-excel mr-2"></i>Download Crawl Excel</a>');
+            if(j.reviewable && j.best_job) items.push('<a href="' + CRAWL_EXCEL_URL + encodeURIComponent(j.best_job) + '" class="dropdown-item" style="font-size:11px;"><i class="la la-file-excel mr-2"></i>Download Largest Crawl Excel</a>');
         } else if(j.state !== 'done' && j.state !== 'error') {
             // Running → Terminate (kills the worker + drops the task).
             items.push('<a href="javascript:;" class="dropdown-item terminate-job" data-job="' + j.job + '" style="font-size:11px;"><i class="la la-times mr-2"></i>Terminate</a>');
