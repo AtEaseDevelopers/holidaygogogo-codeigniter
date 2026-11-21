@@ -284,12 +284,18 @@ class CompetitorExcelExport
                 // Excel limits a cell to 32,767 UTF-16 units. Preserve longer crawl
                 // content in numbered parts instead of allowing silent truncation.
                 if ( ! $numeric) {
-                    $utf16 = mb_convert_encoding($value, 'UTF-16LE', 'UTF-8');
-                    if (strlen($utf16) > 65534) {
+                    // Avoid a full UTF-16 copy of multi-megabyte source text.
+                    // UTF-8 bytes bound UTF-16 units; only borderline cells need
+                    // conversion to distinguish BMP from supplementary characters.
+                    $too_long = strlen($value) > 32767 && (mb_strlen($value, 'UTF-8') > 32767
+                        || strlen(mb_convert_encoding($value, 'UTF-16LE', 'UTF-8')) > 65534);
+                    if ($too_long) {
                         $part = 0;
-                        for ($offset = 0; $offset < strlen($utf16); $offset += strlen($chunk)) {
-                            $chunk = mb_strcut($utf16, $offset, 60000, 'UTF-16LE');
-                            $this->long_text[] = array($title, $cell, ++$part, mb_convert_encoding($chunk, 'UTF-8', 'UTF-16LE'));
+                        // At most 30,000 UTF-8 bytes is also below Excel's unit
+                        // limit. strcut keeps complete Unicode characters.
+                        for ($offset = 0, $bytes = strlen($value); $offset < $bytes; $offset += strlen($chunk)) {
+                            $chunk = mb_strcut($value, $offset, 30000, 'UTF-8');
+                            $this->long_text[] = array($title, $cell, ++$part, $chunk);
                         }
                         $value = mb_substr($value, 0, 500, 'UTF-8') . "\n[Full text in Long Text: " . $title . '!' . $cell . ']';
                     }

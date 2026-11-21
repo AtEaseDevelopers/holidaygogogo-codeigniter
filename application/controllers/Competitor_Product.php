@@ -1594,6 +1594,9 @@ class Competitor_Product extends MY_Controller
 	function Download_Crawl_Excel()
 	{
 		@set_time_limit(120);
+		// A full catalogue includes the saved source text as well as XLSX cells.
+		// Match the analysis export's budget before loading the crawl from the DB.
+		@ini_set('memory_limit', '768M');
 		$selected_only = $this->input->method() === 'post';
 		$job = $selected_only ? $this->input->post('job') : $this->input->get('job');
 		if ( ! is_string($job) || ! preg_match('/^[A-Za-z0-9_]{1,100}$/D', $job)) { show_404(); return; }
@@ -1616,6 +1619,7 @@ class Competitor_Product extends MY_Controller
 			$items = $shaped['items'];
 			$analysed = $shaped['analysed'];
 			if ($source === '') { $source = (string) $stored[0]->src_url; }
+			unset($stored, $shaped);
 		} else {
 			$items = json_decode((string) @file_get_contents($dir . $job . '.items.json'), true);
 			$analysed = isset($status['analysed']) && is_array($status['analysed']) ? $status['analysed'] : array();
@@ -1623,6 +1627,7 @@ class Competitor_Product extends MY_Controller
 		if ( ! is_array($items) || empty($items)) { show_404(); return; }
 		$prepared = competitor_prepare_crawl_items($items, $source, $analysed);
 		$items = $prepared['items'];
+		$crawl_summary = $prepared['summary'];
 		if ($selected_only) {
 			$mapped = array();
 			foreach ($selected_indices as $idx => $_) {
@@ -1637,6 +1642,7 @@ class Competitor_Product extends MY_Controller
 				return;
 			}
 		}
+		unset($prepared, $status);
 		$ids = array();
 		foreach ($items as $idx => $item) {
 			if (isset($analysed[$idx]['id'])) { $ids[] = (int) $analysed[$idx]['id']; }
@@ -1651,7 +1657,7 @@ class Competitor_Product extends MY_Controller
 			}
 		}
 		$this->load->library('CompetitorExcelExport');
-		$book = $this->competitorexcelexport->crawl($items, $analysed, $analyses, $job, $source, $selected_only, $prepared['summary']);
+		$book = $this->competitorexcelexport->crawl($items, $analysed, $analyses, $job, $source, $selected_only, $crawl_summary);
 		unset($stored, $shaped, $items, $analysed, $analyses, $status);
 		$this->stream_excel($book, 'crawl-' . $job . ($selected_only ? '-selected' : '') . '.xlsx');
 	}
