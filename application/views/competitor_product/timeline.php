@@ -168,3 +168,5 @@
     }
     $(document).ready(loadRuns);
 </script>
+
+<?php $this->load->view('competitor_product/export_progress'); ?>

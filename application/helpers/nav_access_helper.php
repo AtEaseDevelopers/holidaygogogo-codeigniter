@@ -544,7 +544,7 @@ function nav_data_export_routes()
 		'supplier' => array('download', 'downloadresults'),
 		'footer' => array('download'),
 		'faq' => array('download', 'export_template'),
-		'competitor_product' => array('download_excel', 'download_excel_tables', 'download_crawl_excel'),
+		'competitor_product' => array('download_excel', 'download_excel_tables', 'download_crawl_excel', 'start_crawl_export', 'download_ready_crawl_export'),
 		'master_product' => array('download_excel', 'download_excel_tables'),
 		'message_log' => array('csv'),
 		'report' => array('download', 'download_product_sales', 'download_guest_by_country',

@@ -1590,6 +1590,140 @@ class Competitor_Product extends MY_Controller
 			: array('success' => true, 'fallback' => true));
 	}
 
+
+	/** Queue an owner-scoped background export; no workbook work in the HTTP request. */
+	function Start_Crawl_Export()
+	{
+		if (!$this->input->is_ajax_request() || $this->input->method() !== 'post') { show_404(); return; }
+		$this->output->set_content_type('application/json');
+		try {
+			$job = $this->input->post('job');
+			$raw = $this->input->post('indices');
+			if (!is_string($job) || !preg_match('/^[A-Za-z0-9_]{1,100}$/D', $job)) { throw new RuntimeException('Invalid crawl.'); }
+			$indices = null;
+			if ($raw !== null && $raw !== '') {
+				if (!is_string($raw) || !preg_match('/^(?:0|[1-9][0-9]*)(?:,(?:0|[1-9][0-9]*))*$/D', $raw)) { throw new RuntimeException('Invalid selection.'); }
+				$indices = array_values(array_unique(explode(',', $raw)));
+			}
+			if (!function_exists('exec')) { throw new RuntimeException('Background exports are unavailable on this server.'); }
+			$this->load->library('CompetitorExportJobs');
+			$jobs = $this->competitorexportjobs;
+			$jobs->cleanup();
+			$id = $jobs->create($this->session->admin_id, $job, $indices);
+			$cmd = escapeshellarg($this->php_cli_bin()) . ' -d pcre.jit=0 -d memory_limit=768M '
+				. escapeshellarg(FCPATH . 'index.php') . ' Competitor_Export_Job run ' . escapeshellarg($id)
+				. ' > /dev/null 2>&1 & echo $!';
+			$pid = (int) @exec($cmd);
+			if ($pid <= 0) { $jobs->finish($id, 'error', 'Could not start export worker.'); throw new RuntimeException('Could not start export worker.'); }
+			echo json_encode(array('success' => true, 'export' => $id));
+		} catch (Throwable $e) {
+			$this->output->set_status_header(400);
+			echo json_encode(array('success' => false, 'message' => $e->getMessage()));
+		}
+	}
+
+	function Crawl_Export_Status()
+	{
+		$this->respond_crawl_export_status(false);
+	}
+
+	function Cancel_Crawl_Export()
+	{
+		if ($this->input->method() !== 'post') { show_404(); return; }
+		$this->respond_crawl_export_status(true);
+	}
+
+	private function respond_crawl_export_status($cancel)
+	{
+		if (!$this->input->is_ajax_request()) { show_404(); return; }
+		$this->output->set_content_type('application/json');
+		$this->output->set_header('Cache-Control: no-store');
+		try {
+			$id = $cancel ? $this->input->post('export') : $this->input->get('export');
+			$this->load->library('CompetitorExportJobs');
+			$jobs = $this->competitorexportjobs;
+			$row = $cancel ? $jobs->cancel($id, $this->session->admin_id) : $jobs->read($id, $this->session->admin_id);
+			// A PHP binary mismatch can stop a worker before its shutdown handler starts.
+			if (($row['state'] === 'queued' && time() - $row['created'] > 120)
+				|| in_array($row['state'], array('running', 'downloading'), true)) {
+				$lock = $jobs->worker_lock($id);
+				if ($lock) {
+					try {
+						$row = $jobs->read($id, $this->session->admin_id);
+						if (in_array($row['state'], array('queued', 'running', 'downloading'), true)) {
+							$row = $jobs->finish($id, 'error', 'The export worker stopped. Check PHP_CLI_BIN and server logs, then try again.');
+						}
+					}
+					finally { $jobs->unlock($lock); }
+				}
+			}
+			if ($row['state'] === 'cancelling') {
+				$row = $jobs->cancel($id, $this->session->admin_id);
+			}
+			if ($row['state'] === 'ready' && time() - $row['updated'] > 3600) {
+				$jobs->cancel($id, $this->session->admin_id);
+				throw new RuntimeException('Export expired. Please generate it again.');
+			}
+			echo json_encode(array('success' => true, 'state' => $row['state'], 'phase' => $row['phase'],
+				'percent' => isset($row['percent']) ? $row['percent'] : null,
+				'done' => isset($row['done']) ? $row['done'] : 0, 'total' => isset($row['total']) ? $row['total'] : 0,
+				'download' => $row['state'] === 'ready' ? base_url('Competitor_Product/Download_Ready_Crawl_Export?export=' . $id) : null));
+		} catch (Throwable $e) {
+			$this->output->set_status_header(404);
+			echo json_encode(array('success' => false, 'message' => $e->getMessage()));
+		}
+	}
+
+	/** Single-use download. Cleanup runs even if the client disconnects mid-transfer. */
+	function Download_Ready_Crawl_Export()
+	{
+		$this->load->library('CompetitorExportJobs');
+		$jobs = $this->competitorexportjobs;
+		$id = $this->input->get('export');
+		$lock = false;
+		$claimed = false;
+		try {
+			$row = $jobs->read($id, $this->session->admin_id);
+			if ($row['state'] !== 'ready' || time() - $row['updated'] > 3600) { throw new RuntimeException('Export unavailable or expired. Please generate it again.'); }
+			$lock = $jobs->worker_lock($id);
+			if (!$lock) { throw new RuntimeException('Export is busy. Please try again.'); }
+			$jobs->claim_download($id, $this->session->admin_id);
+			$claimed = true;
+			$file = $jobs->path($id, 'export.xlsx');
+			$handle = @fopen($file, 'rb');
+			if (!$handle) { throw new RuntimeException('Export file unavailable. Please generate it again.'); }
+		} catch (Throwable $e) {
+			if ($claimed) { $jobs->finish($id, 'error', 'Export file unavailable. Please generate it again.'); }
+			$jobs->unlock($lock);
+			show_error($e->getMessage(), 410); return;
+		}
+		ignore_user_abort(true);
+		@set_time_limit(0);
+		if (session_status() === PHP_SESSION_ACTIVE) { session_write_close(); }
+		$cleaned = false;
+		$cleanup = function () use ($jobs, $id, $lock, &$cleaned) {
+			if ($cleaned) { return; }
+			$cleaned = true;
+			try { $jobs->finish($id, 'downloaded', 'Download sent; server file removed'); }
+			finally { $jobs->unlock($lock); }
+		};
+		register_shutdown_function($cleanup);
+		while (ob_get_level() > 0) { ob_end_clean(); }
+		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+		header('Content-Disposition: ' . competitor_download_content_disposition('crawl-' . $row['job'] . '.xlsx'));
+		header('Content-Length: ' . filesize($file));
+		header('Cache-Control: no-store');
+		header('X-Accel-Buffering: no');
+		try {
+			while (!feof($handle)) {
+				echo fread($handle, 1048576);
+				flush();
+				if (connection_aborted()) { break; }
+			}
+		} finally { fclose($handle); $cleanup(); }
+		exit;
+	}
+
 	/** All crawl products (GET), or only the checked product indices (POST). */
 	function Download_Crawl_Excel()
 	{
@@ -1609,56 +1743,8 @@ class Competitor_Product extends MY_Controller
 			}
 			$selected_indices = array_fill_keys(explode(',', $indices), true);
 		}
-		$dir = APPPATH . 'logs/competitor_crawl/jobs/';
-		$status = json_decode((string) @file_get_contents($dir . $job . '.json'), true);
-		$source = isset($status['url']) ? (string) $status['url'] : '';
-		$this->load->model('Competitor_Crawl_Items_Model');
-		$stored = $this->Competitor_Crawl_Items_Model->Read_By_Job('competitor', $job);
-		if ( ! empty($stored)) {
-			$shaped = competitor_items_from_db_rows($stored);
-			$items = $shaped['items'];
-			$analysed = $shaped['analysed'];
-			if ($source === '') { $source = (string) $stored[0]->src_url; }
-			unset($stored, $shaped);
-		} else {
-			$items = json_decode((string) @file_get_contents($dir . $job . '.items.json'), true);
-			$analysed = isset($status['analysed']) && is_array($status['analysed']) ? $status['analysed'] : array();
-		}
-		if ( ! is_array($items) || empty($items)) { show_404(); return; }
-		$prepared = competitor_prepare_crawl_items($items, $source, $analysed);
-		$items = $prepared['items'];
-		$crawl_summary = $prepared['summary'];
-		if ($selected_only) {
-			$mapped = array();
-			foreach ($selected_indices as $idx => $_) {
-				if (isset($prepared['index_map'][$idx])) { $mapped[$prepared['index_map'][$idx]] = true; }
-			}
-			$selected_indices = $mapped;
-			// Preserve the stable crawl indices, including index 0 and gaps after deletion.
-			$items = array_intersect_key($items, $selected_indices);
-			$analysed = array_intersect_key($analysed, $items);
-			if (empty($items)) {
-				show_error('The selected crawled products are no longer available.', 404);
-				return;
-			}
-		}
-		unset($prepared, $status);
-		$ids = array();
-		foreach ($items as $idx => $item) {
-			if (isset($analysed[$idx]['id'])) { $ids[] = (int) $analysed[$idx]['id']; }
-		}
-		$analyses = $this->Competitor_Analysis_Model->Read_By_Ids($ids);
-		foreach ($analyses as $analysis) {
-			foreach ($items as $idx => $item) {
-				if (isset($analysed[$idx]['id']) && (int) $analysed[$idx]['id'] === (int) $analysis->id) {
-					$analysis->crawl_metadata = $item['crawl_metadata'];
-					break;
-				}
-			}
-		}
-		$this->load->library('CompetitorExcelExport');
-		$book = $this->competitorexcelexport->crawl($items, $analysed, $analyses, $job, $source, $selected_only, $crawl_summary);
-		unset($stored, $shaped, $items, $analysed, $analyses, $status);
+		$this->load->library('CompetitorCrawlExportBuilder');
+		$book = $this->competitorcrawlexportbuilder->build($job, $selected_only ? array_keys($selected_indices) : null);
 		$this->stream_excel($book, 'crawl-' . $job . ($selected_only ? '-selected' : '') . '.xlsx');
 	}
 

@@ -23,10 +23,7 @@
             </div>
             <div class="card-body">
                 <div id="crawl_summary"></div>
-                <form id="crawl_export_form" method="post" action="<?php echo base_url('Competitor_Product/Download_Crawl_Excel'); ?>" style="display:none;">
-                    <input type="hidden" name="job" value="<?php echo htmlspecialchars($job); ?>">
-                    <input type="hidden" name="indices" id="crawl_export_indices">
-                </form>
+
                 <?php if (empty($has_ai)) { ?>
                     <div class="alert alert-light-warning" style="font-size:12px;">AI analysis is currently unavailable. You can still review the crawled products below.</div>
                 <?php } ?>
@@ -97,7 +94,6 @@
     var CA_IMG = '<?php echo base_url('assets/image/sweetalert.jpg') ?>';
     var JOB        = '<?php echo $job; ?>';
     var DELETE_URL = '<?php echo base_url('Competitor_Product/Delete_Crawl_Items') ?>';
-    var EXCEL_URL  = '<?php echo base_url('Competitor_Product/Download_Crawl_Excel') ?>';
     var LIST_URL   = '<?php echo base_url('Competitor_Product/Review_List') ?>';
 
     // Paging is server-side: each request returns one page of rows. Selection is kept
@@ -264,13 +260,7 @@
     });
 
     $('#download_excel').on('click', function() {
-        var indices = Object.keys(selected);
-        if (!indices.length) {
-            window.location.href = EXCEL_URL + '?job=' + encodeURIComponent(JOB);
-            return;
-        }
-        $('#crawl_export_indices').val(indices.join(','));
-        document.getElementById('crawl_export_form').submit();
+        window.CompetitorCrawlExport.start(JOB, Object.keys(selected));
     });
 
     $(document).ready(function() {
@@ -413,3 +403,5 @@
         });
     });
 </script>
+
+<?php $this->load->view('competitor_product/export_progress'); ?>

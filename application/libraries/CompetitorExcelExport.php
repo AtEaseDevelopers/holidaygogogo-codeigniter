@@ -8,6 +8,13 @@ class CompetitorExcelExport
 {
     private $book;
     private $long_text = array();
+    private $progress;
+
+    public function set_progress($callback) { $this->progress = $callback; }
+    private function report($phase, $done, $total)
+    {
+        if (is_callable($this->progress)) { call_user_func($this->progress, $phase, $done, $total); }
+    }
 
     public function analysis($analyses, $lang = 'en', $include_product_source = false)
     {
@@ -94,7 +101,10 @@ class CompetitorExcelExport
         $saved = array();
         foreach ($analyses as $a) { $saved[(int) $a->id] = $a; }
         $rows = array(); $sources = array();
+        $processed = 0;
         foreach ($items as $idx => $item) {
+            if ($processed % 10 === 0) { $this->report('Preparing products', $processed, count($items)); }
+            $processed++;
             $text = isset($item['text']) ? (string) $item['text'] : '';
             $url = isset($item['url']) ? (string) $item['url'] : '';
             $title = ! empty($item['title']) ? (string) $item['title'] : competitor_item_title($text, $url);
@@ -277,6 +287,7 @@ class CompetitorExcelExport
         $data = $rows;
         array_unshift($data, $columns);
         foreach ($data as $row_index => $row) {
+            if ($row_index % 25 === 0) { $this->report('Writing ' . $title, $row_index, count($data)); }
             foreach ($row as $column_index => $value) {
                 $cell = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column_index + 1) . ($row_index + 1);
                 $numeric = is_int($value) || is_float($value);
@@ -306,6 +317,7 @@ class CompetitorExcelExport
                     : \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
             }
         }
+        $this->report('Writing ' . $title, count($data), count($data));
         $last_column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($columns));
         $last_row = count($data);
         $sheet->getStyle('A1:' . $last_column . $last_row)->getAlignment()->setWrapText(true)

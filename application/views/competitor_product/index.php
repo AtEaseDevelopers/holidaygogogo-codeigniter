@@ -709,3 +709,5 @@
         runAnalyze(form, $(this), title);
     });
 </script>
+
+<?php $this->load->view('competitor_product/export_progress'); ?>
