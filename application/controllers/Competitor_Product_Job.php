@@ -377,7 +377,7 @@ class Competitor_Product_Job extends CI_Controller
 				$this->competitoranalysisservice->set_forced_source((string) $job['src']);
 			}
 			$items = $this->competitoranalysisservice->crawl_to_text($url, $limit, $progress, $keyword, $ai_crawl);
-			@file_put_contents($items_file, json_encode($items, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+			// crawl_to_text atomically checkpoints before committing attempted URLs.
 			// Durably persist the crawled products to the DB (the items file is a cache
 			// that re-crawls overwrite and cleanups delete). Idempotent upsert keyed on
 			// (feature, job_id, idx); guarded so a DB hiccup can't fail the crawl itself.

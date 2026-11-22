@@ -233,9 +233,12 @@ class CompetitorAnalysisService
 			return;
 		}
 		$out = competitor_prepare_crawl_items($out, $this->crawl_source_url)['items'];
+		$json = json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+		if ($json === false) { throw new RuntimeException('Cannot save crawl checkpoint: ' . json_last_error_msg()); }
 		$tmp = $this->items_checkpoint_file . '.tmp';
-		if (@file_put_contents($tmp, json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) !== false) {
-			@rename($tmp, $this->items_checkpoint_file);   // atomic swap — never a half-written file
+		if (@file_put_contents($tmp, $json, LOCK_EX) !== strlen($json) || !@rename($tmp, $this->items_checkpoint_file)) {
+			@unlink($tmp);
+			throw new RuntimeException('Cannot save crawl checkpoint. Check available disk space and directory permissions.');
 		}
 	}
 
@@ -1317,12 +1320,16 @@ class CompetitorAnalysisService
 			}
 		}
 		$text = $this->extract_source_text($url, $prefetched);
+		// A readable native detail endpoint is one product. Brochures may repeat
+		// Day 1 across languages/versions, which is not evidence of a listing.
+		$native_product = in_array(competitor_ice_api_kind($url), array('series', 'land_tour'), true)
+			&& trim($text) !== '';
 		// A page that links to >=3 of its OWN sub-pages is an index/listing of them
 		// (e.g. a JS section hub /tour-package linking /tour-package/1077, …/1090, …
 		// exposed after render) — drill the children instead of keeping the hub.
 		$child_links = competitor_count_child_links($url, $this->last_page_links_raw);
-		if ($this->last_is_listing || competitor_is_category_url($url) || competitor_text_looks_like_listing($text)
-			|| competitor_is_destination_listing($this->last_page_title, $text) || $child_links >= 3) {
+		if (!$native_product && ($this->last_is_listing || competitor_is_category_url($url) || competitor_text_looks_like_listing($text)
+			|| competitor_is_destination_listing($this->last_page_title, $text) || $child_links >= 3)) {
 			// A category / listing page (by JSON-LD, a plural "…-tours" URL, content, a
 			// bare-destination catalogue of tour cards, or a hub of its own sub-pages) —
 			// not a product itself; drop it and let
@@ -1346,7 +1353,7 @@ class CompetitorAnalysisService
 				'links' => count($this->last_page_links), 'child_links' => $child_links));
 			return array();
 		}
-		if (competitor_looks_like_article($text) && !$this->last_is_product) {
+		if (competitor_looks_like_article($text) && !$this->last_is_product && !$native_product) {
 			// Rich prose with NO product signal (price/duration/itinerary) — a blog
 			// article / info page that carried a product keyword in its URL. Drop it.
 			$this->log_crawl('dropped_article', array('url' => $url, 'text_len' => strlen($text)));
@@ -2446,7 +2453,10 @@ class CompetitorAnalysisService
 			}
 			if ( ! empty($done) && $this->items_checkpoint_file !== '' && is_file($this->items_checkpoint_file)) {
 				$prev = json_decode((string) @file_get_contents($this->items_checkpoint_file), true);
-				if (is_array($prev)) { $resume_existing_items = $prev; }
+				if (!is_array($prev)) { throw new RuntimeException('Cannot resume crawl: saved products checkpoint is invalid. Earlier products have not been overwritten.'); }
+				$resume_existing_items = $prev;
+			} elseif (!empty($done) && $this->items_checkpoint_file !== '') {
+				throw new RuntimeException('Cannot resume crawl: saved products checkpoint is missing. Earlier products have not been overwritten.');
 			}
 			$next = competitor_next_chunk($urls, $done, $chunk);   // pure, unit-tested
 			$urls = $next['chunk'];
@@ -2638,13 +2648,6 @@ class CompetitorAnalysisService
 			$this->reading_allow_headless = $prev_allow_headless;
 			$this->log_crawl('recovery_pass', array('attempted' => count($recover), 'recovered' => $recovered));
 		}
-		// Mark this run's chunk as ATTEMPTED now that reading (incl. recovery) is complete — so
-		// the next run skips them. Done AFTER reading: a mid-chunk crash leaves them un-marked,
-		// so they're safely re-read next run rather than lost. Failures count as done (attempted),
-		// so a persistently-failing URL isn't retried forever.
-		if ($this->done_file !== '' && ! empty($this->last_run_urls)) {
-			@file_put_contents($this->done_file, implode("\n", $this->last_run_urls) . "\n", FILE_APPEND);
-		}
 		// Strip site chrome (mega-menu / header / footer) that repeats verbatim across
 		// every product — our tag scraper misses it when it's plain <div>/<ul>. Fixes
 		// titles reading "MENUMENU" and stops the menu bloating every AI input.
@@ -2682,6 +2685,15 @@ class CompetitorAnalysisService
 		}
 		unset($it);
 		$prepared = competitor_prepare_crawl_items($out, $base_url);
+		// Save products before marking URLs attempted. A failed write must never
+		// let the next chunk silently skip products that were not durably checkpointed.
+		$this->checkpoint_items($prepared['items']);
+		if ($this->done_file !== '' && !empty($this->last_run_urls)) {
+			$done_text = implode("\n", $this->last_run_urls) . "\n";
+			if (@file_put_contents($this->done_file, $done_text, FILE_APPEND | LOCK_EX) !== strlen($done_text)) {
+				throw new RuntimeException('Cannot save crawl progress. Products remain in the checkpoint; check disk space and permissions.');
+			}
+		}
 		$this->log_crawl('product_quality_summary', $prepared['summary']);
 		return $prepared['items'];
 	}

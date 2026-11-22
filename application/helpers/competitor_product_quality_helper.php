@@ -165,6 +165,10 @@ function competitor_has_package_price($text)
 /** Clean repeated product headings while retaining repeated day/meal/condition text. */
 function competitor_clean_product_text($text, $title = '')
 {
+    // Malformed PDF/source bytes must not make Unicode regexes erase the text
+    // or make the complete checkpoint fail JSON encoding.
+    $text = (string) $text;
+    if (!mb_check_encoding($text, 'UTF-8')) { $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8'); }
     $text = competitor_strip_boilerplate((string) $text);
     $heading = mb_strtolower(trim(preg_replace('/\s+/u', ' ', (string) $title)), 'UTF-8');
     $seen_heading = false;
