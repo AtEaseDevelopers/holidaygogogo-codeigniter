@@ -1328,7 +1328,10 @@ class CompetitorAnalysisService
 		// (e.g. a JS section hub /tour-package linking /tour-package/1077, …/1090, …
 		// exposed after render) — drill the children instead of keeping the hub.
 		$child_links = competitor_count_child_links($url, $this->last_page_links_raw);
-		if (!$native_product && ($this->last_is_listing || competitor_is_category_url($url) || competitor_text_looks_like_listing($text)
+		// Respect explicit host route knowledge before content heuristics: a
+		// TourRadar /n/ filter can contain prices/itineraries but is still a hub.
+		$host_listing = competitor_host_url_is_product($url) === false;
+		if (!$native_product && ($host_listing || $this->last_is_listing || competitor_is_category_url($url) || competitor_text_looks_like_listing($text)
 			|| competitor_is_destination_listing($this->last_page_title, $text) || $child_links >= 3)) {
 			// A category / listing page (by JSON-LD, a plural "…-tours" URL, content, a
 			// bare-destination catalogue of tour cards, or a hub of its own sub-pages) —
