@@ -117,11 +117,12 @@ class Supplier extends MY_Controller
 		$spreadsheet->getActiveSheet()->setCellValue('H1', 'BANK ACCOUNT');
 		$spreadsheet->getActiveSheet()->setCellValue('I1', 'BANK HOLDER');
 		$spreadsheet->getActiveSheet()->setCellValue('J1', 'SWIFT CODE');
+		$spreadsheet->getActiveSheet()->setCellValue('K1', 'SUPPLIER CODE');
 		$row = 2;
 		$suppliers = $this->Supplier_Model->Read_Suppliers2();
-		$spreadsheet->getActiveSheet()->getStyle('A1:J1')->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_BLACK);
-		$spreadsheet->getActiveSheet()->getStyle('A1:J1')->getFont()->getColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE);
-		$spreadsheet->getActiveSheet()->getStyle('A1:J1')->getFont()->setBold(true);
+		$spreadsheet->getActiveSheet()->getStyle('A1:K1')->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_BLACK);
+		$spreadsheet->getActiveSheet()->getStyle('A1:K1')->getFont()->getColor()->setARGB(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE);
+		$spreadsheet->getActiveSheet()->getStyle('A1:K1')->getFont()->setBold(true);
 		if(!empty($suppliers)) {
 			foreach($suppliers as $supplier) {
 				$spreadsheet->getActiveSheet()->setCellValueExplicit('A' . $row, $supplier->Name, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
@@ -134,13 +135,14 @@ class Supplier extends MY_Controller
 				$spreadsheet->getActiveSheet()->setCellValueExplicit('H' . $row, $supplier->BankAccount, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$spreadsheet->getActiveSheet()->setCellValueExplicit('I' . $row, $supplier->BankHolder, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$spreadsheet->getActiveSheet()->setCellValueExplicit('J' . $row, $supplier->SwiftCode, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+				$spreadsheet->getActiveSheet()->setCellValueExplicit('K' . $row, $supplier->SupplierCode, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
 				$row++;
 			}
-			$spreadsheet->getActiveSheet()->getStyle('A:J')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
+			$spreadsheet->getActiveSheet()->getStyle('A:K')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
 		} else {
-			$spreadsheet->getActiveSheet()->mergeCells('A2:J2');
+			$spreadsheet->getActiveSheet()->mergeCells('A2:K2');
 			$spreadsheet->getActiveSheet()->getCell('A2')->setValue('Supplier Records Not Found');
-			$spreadsheet->getActiveSheet()->getStyle('A:J')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
+			$spreadsheet->getActiveSheet()->getStyle('A:K')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
 		}
 		$spreadsheet->getActiveSheet()->getColumnDimension('A')->setWidth(35);
 		$spreadsheet->getActiveSheet()->getColumnDimension('B')->setWidth(35);
@@ -152,6 +154,7 @@ class Supplier extends MY_Controller
 		$spreadsheet->getActiveSheet()->getColumnDimension('H')->setWidth(35);
 		$spreadsheet->getActiveSheet()->getColumnDimension('I')->setWidth(35);
 		$spreadsheet->getActiveSheet()->getColumnDimension('J')->setWidth(35);
+		$spreadsheet->getActiveSheet()->getColumnDimension('K')->setWidth(35);
 		$supplier_records = 'SUPPLIER_RECORDS_' . date('Ymd') . '.xlsx';
 		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 		header('Content-Disposition: attachment;filename="' . $supplier_records . '"');
