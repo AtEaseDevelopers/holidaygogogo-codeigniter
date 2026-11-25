@@ -94,7 +94,6 @@
                                 </div>
                             </div>
                             <button type="button" id="add_competitor_url" class="btn btn-sm btn-light-primary"><i class="la la-plus" aria-hidden="true"></i> Add URL</button>
-                            <span class="form-text text-muted" style="font-size:12px;">One base URL per field (max 100). Each website creates a separate crawl task; tasks run one at a time. The name, keyword and AI setting apply to all URLs.</span>
                         </div>
                     </div>
                     <div class="col-md-6">
