@@ -460,8 +460,8 @@ class Competitor_Product extends MY_Controller
 	/**
 	 * AJAX: a pasted site/product URL runs as a BACKGROUND crawl job (discovers
 	 * products, then auto-analyses with OpenAI when configured) — returns {job}. An
-	 * uploaded PDF/image is analysed SYNCHRONOUSLY (you can't crawl a file) and
-	 * returns {id} for redirect. Failures come back as {success:false, message:…}.
+	 * uploaded PDF/image runs as an upload job; a ZIP creates one job per document.
+	 * Synchronous single-file fallback returns {id} for redirect. Failures come back as {success:false, message:…}.
 	 */
 	function Analyze()
 	{
@@ -494,6 +494,12 @@ class Competitor_Product extends MY_Controller
 		// Optional competitor name the user keyed in — a label recorded + shown in
 		// the results table / detail only; it is NOT sent to the AI.
 		$name  = trim((string) $this->input->post('competitor_name'));
+
+		// ZIP documents use the same upload workers and history rows as single files.
+		if (isset($_FILES['zip']['error']) && (int) $_FILES['zip']['error'] !== UPLOAD_ERR_NO_FILE) {
+			$this->analyze_zip($name);
+			return;
+		}
 
 		// Pasted text (notes + links) → BACKGROUND analyse job (non-blocking). We
 		// scrape each pasted link and browse JS pages with web_search, which can run
@@ -545,24 +551,39 @@ class Competitor_Product extends MY_Controller
 			return;
 		}
 
-		if ( ! $has_file && ($url === '' || ! preg_match('#^https?://#i', $url))) {
-			echo json_encode(array('success' => false, 'message' => 'Enter a valid http(s) URL, paste text/links, or upload a PDF/image.'));
-			return;
-		}
-
-		// URL → background crawl + auto-analyse job (non-blocking; polled in the
-		// history table). AI runs only when OPENAI_API_KEY is set.
-		if ( ! $has_file) {
-			// One crawl at a time, but DON'T reject — the job is accepted and QUEUES; its
-			// background worker waits for the current crawl to finish, then runs.
-			$keyword  = trim((string) $this->input->post('keyword'));
-			$ai_crawl = (string) $this->input->post('ai_crawl') === '1';
-			$job_id = $this->start_crawl_job($url, $keyword, $ai_crawl, $name);
-			if ($job_id !== '') {
-				echo json_encode(array('success' => true, 'job' => $job_id));
-			} else {
-				echo json_encode(array('success' => false, 'message' => 'Could not start the background crawl (process spawn unavailable).'));
+		// Validate the complete URL batch before starting any crawl workers.
+		if (!$has_file) {
+			$entries = preg_split('/[\s,]+/', $url, -1, PREG_SPLIT_NO_EMPTY);
+			if (empty($entries) || count($entries) > 100) {
+				echo json_encode(array('success' => false, 'message' => 'Enter 1 to 100 website base URLs, one per line.'));
+				return;
 			}
+			$urls = array();
+			foreach ($entries as $index => $entry) {
+				$parts = parse_url($entry);
+				if (!$parts || !filter_var($entry, FILTER_VALIDATE_URL) || empty($parts['host'])
+					|| !isset($parts['scheme']) || !in_array(strtolower($parts['scheme']), array('http', 'https'), true)
+					|| isset($parts['user']) || isset($parts['pass']) || rtrim(isset($parts['path']) ? $parts['path'] : '', '/') !== '') {
+					echo json_encode(array('success' => false, 'message' => 'URL ' . ($index + 1) . ' must be a website base URL, e.g. https://competitor.com (no page path).'));
+					return;
+				}
+				$base = strtolower($parts['scheme']) . '://' . strtolower($parts['host'])
+					. (isset($parts['port']) ? ':' . $parts['port'] : '') . '/';
+				$urls[$base] = $base; // Repeat entries should not crawl the same website twice.
+			}
+			$keyword = trim((string) $this->input->post('keyword'));
+			$ai_crawl = (string) $this->input->post('ai_crawl') === '1';
+			$jobs = $failed_urls = array();
+			foreach ($urls as $base) {
+				$job_id = $this->start_crawl_job($base, $keyword, $ai_crawl, $name);
+				if ($job_id !== '') { $jobs[] = $job_id; }
+				else { $failed_urls[] = $base; }
+			}
+			$response = array('success' => !empty($jobs), 'jobs' => $jobs, 'count' => count($jobs),
+				'failed' => count($failed_urls), 'failed_urls' => $failed_urls,
+				'message' => empty($jobs) ? 'Could not start the background crawls (process spawn unavailable).' : '');
+			if (count($jobs) === 1) { $response['job'] = $jobs[0]; } // Existing single-URL clients.
+			echo json_encode($response);
 			return;
 		}
 
@@ -625,6 +646,96 @@ class Competitor_Product extends MY_Controller
 		if ((int) $id <= 0) { @unlink($upload['full_path']); }
 
 		echo json_encode(array('success' => true, 'id' => $id));
+	}
+
+	/** Poll preparation only; analysis progress remains in the normal jobs list. */
+	public function Zip_Upload_Progress()
+	{
+		$this->output->set_content_type('application/json');
+		$token = (string) $this->input->get('upload');
+		if (!preg_match('/^[a-f0-9]{32}$/D', $token)) {
+			echo json_encode(array('success' => false)); return;
+		}
+		$path = APPPATH . 'logs/competitor_zip_upload/' . $token . '.json';
+		$status = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
+		if (!$status || (string) $status['created_by'] !== (string) $this->session->admin_id) {
+			echo json_encode(array('success' => false)); return;
+		}
+		unset($status['created_by']);
+		echo json_encode(array_merge(array('success' => true), $status));
+	}
+
+	private function analyze_zip($name)
+	{
+		$archive = null;
+		$archive_deleted = false;
+		$batch = array('files' => array(), 'skipped' => 0);
+		$jobs = array();
+		$failed = 0;
+		$owner = $this->session->admin_id;
+		$token = (string) $this->input->post('upload_token');
+		$progress_path = '';
+		if (preg_match('/^[a-f0-9]{32}$/D', $token)) {
+			$dir = APPPATH . 'logs/competitor_zip_upload/';
+			if (!is_dir($dir)) { @mkdir($dir, 0755, true); }
+			// Preparation status contains no documents and expires after one day.
+			foreach (glob($dir . '*.json') ?: array() as $old) {
+				if (filemtime($old) < time() - 86400) { @unlink($old); }
+			}
+			$progress_path = $dir . $token . '.json';
+		}
+		$progress = function ($phase, $done, $total) use ($progress_path, $owner) {
+			if ($progress_path === '') { return; }
+			$data = array('phase' => $phase, 'done' => $done, 'total' => $total, 'created_by' => $owner);
+			// Atomic replacement prevents poll requests from reading half a JSON document.
+			if (@file_put_contents($progress_path . '.tmp', json_encode($data)) !== false) {
+				@rename($progress_path . '.tmp', $progress_path);
+			}
+		};
+		// Polls use the same login session and must be able to run during extraction.
+		if (session_status() === PHP_SESSION_ACTIVE) { session_write_close(); }
+		ignore_user_abort(true);
+		@set_time_limit(300);
+		try {
+			if (!function_exists('exec')) {
+				throw new Exception('ZIP analysis requires background processing, which is unavailable on this server.');
+			}
+			$progress('extracting', 0, 0);
+			$archive = $this->receive_upload('zip', 'zip');
+			$this->load->library('CompetitorZipUpload');
+			$batch = $this->competitorzipupload->extract($archive['full_path'], FCPATH . 'assets/upload/competitor/', $progress);
+			$total = count($batch['files']);
+			$progress('queuing', 0, $total);
+			foreach ($batch['files'] as $index => $file) {
+				$job_id = $this->queue_job(array(
+					'url'             => $file['orig_name'],
+					'mode'            => 'upload',
+					'file_path'       => $file['full_path'],
+					'file_ext'        => $file['file_ext'],
+					'competitor_name' => $name,
+					'created_by'      => $owner,
+				));
+				if ($job_id !== '') { $jobs[] = $job_id; }
+				else { @unlink($file['full_path']); $failed++; }
+				// Only files not yet handed to a worker belong to this request's cleanup.
+				unset($batch['files'][$index]);
+				$progress('queuing', $index + 1, $total);
+			}
+		} catch (Exception $e) {
+			foreach ($batch['files'] as $file) { @unlink($file['full_path']); }
+			$progress('error', 0, 0);
+			echo json_encode(array('success' => false, 'message' => $e->getMessage()));
+			return;
+		} finally {
+			if ($archive) {
+				$archive_deleted = !is_file($archive['full_path']) || @unlink($archive['full_path']);
+				if (!$archive_deleted) { log_message('error', 'Could not delete competitor ZIP: ' . $archive['full_path']); }
+			}
+		}
+		$progress('done', count($jobs), count($jobs));
+		echo json_encode(array('success' => !empty($jobs), 'jobs' => $jobs,
+			'count' => count($jobs), 'skipped' => $batch['skipped'], 'failed' => $failed, 'archive_deleted' => $archive_deleted,
+			'message' => empty($jobs) ? 'Could not start the ZIP analysis tasks.' : ''));
 	}
 
 	/**
@@ -1155,7 +1266,7 @@ class Competitor_Product extends MY_Controller
 	 * worker (Competitor_Product_Job::run). Returns the job id, or '' when exec is
 	 * unavailable / the process can't be launched.
 	 */
-	private function queue_job($status)
+	protected function queue_job($status)
 	{
 		if ( ! function_exists('exec')) {
 			return '';
@@ -1172,7 +1283,9 @@ class Competitor_Product extends MY_Controller
 		$job_id = date('Ymd_His') . '_' . $rand;
 		$now = date('Y-m-d H:i:s');
 		$row = array_merge(array('job' => $job_id, 'state' => 'queued', 'ts' => $now, 'created' => $now), (array) $status);
-		@file_put_contents($dir . $job_id . '.json', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+		if (@file_put_contents($dir . $job_id . '.json', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) === false) {
+			return '';
+		}
 
 		$php   = $this->php_cli_bin();
 		$index = FCPATH . 'index.php';
@@ -1187,6 +1300,10 @@ class Competitor_Product extends MY_Controller
 		$pid = (int) @exec($cmd);
 		if ($pid > 0) {
 			@file_put_contents($dir . $job_id . '.pid', $pid);
+		}
+		if ($pid <= 0) {
+			@unlink($dir . $job_id . '.json');
+			return '';
 		}
 		return $job_id;
 	}
@@ -1220,7 +1337,7 @@ class Competitor_Product extends MY_Controller
 	 * data (full_path, orig_name, file_ext). Throws Exception on any failure so
 	 * Analyze() can report it. Keep full_path after a successful analysis.
 	 */
-	private function receive_upload()
+	protected function receive_upload($field = 'file', $types = 'pdf|jpg|jpeg|png|gif|webp')
 	{
 		$dir = FCPATH . 'assets/upload/competitor/';
 		if ( ! is_dir($dir)) {
@@ -1228,13 +1345,13 @@ class Competitor_Product extends MY_Controller
 		}
 		$config = array(
 			'upload_path'   => $dir,
-			'allowed_types' => 'pdf|jpg|jpeg|png|gif|webp',
+			'allowed_types' => $types,
 			'max_size'      => 20480,        // 20 MB
 			'encrypt_name'  => true,          // avoid collisions; keeps extension
 		);
 		$this->load->library('upload', $config);
 		$this->upload->initialize($config);
-		if ( ! $this->upload->do_upload('file')) {
+		if ( ! $this->upload->do_upload($field)) {
 			throw new Exception(trim(strip_tags($this->upload->display_errors('', ''))));
 		}
 		return $this->upload->data();

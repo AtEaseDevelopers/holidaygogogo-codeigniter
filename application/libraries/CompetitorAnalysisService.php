@@ -2481,16 +2481,13 @@ class CompetitorAnalysisService
 		$this->log_crawl('reading_config', array('source' => $this->last_discovery_source,
 			'allow_headless' => $this->reading_allow_headless, 'products' => count($urls)));
 
-		// Pace the read to the host's advertised robots.txt Crawl-delay. A throttling
-		// host (lovelyvacation.com.my sets Crawl-delay: 1) returns empty/429 bodies to a
-		// wide burst; those pages then read as thin, fall to a slow headless render that
-		// ALSO fails under the load, and the product is dropped. Pacing (a narrower batch
-		// + a delay between batches) keeps plain fetches succeeding. 0 = no hint → full speed.
+		// Read one URL at a time with at least five seconds between reads. Honour a
+		// longer robots.txt Crawl-delay too, so reading does not burst at the host.
 		$parts  = parse_url($base_url);
 		$origin = ( ! empty($parts['scheme']) && ! empty($parts['host']))
 			? $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '')
 			: $base_url;
-		$crawl_delay = competitor_robots_crawl_delay($this->fetch_url($origin . '/robots.txt'));
+		$crawl_delay = max(5, competitor_robots_crawl_delay($this->fetch_url($origin . '/robots.txt')));
 
 		// Site-wide nav/menu links (from the homepage) — excluded when drilling a
 		// listing so its destination menu (e.g. wtstravel's 57 "…-tours" categories)
@@ -2527,8 +2524,7 @@ class CompetitorAnalysisService
 
 		$out = $adapter_items;   // adapter products count as read (they carry their text)
 		$i = 0;
-		// Read in parallel batches, fetching each batch's page bodies concurrently
-		// (curl_multi) then extracting from the prefetched body. Queue-based so a
+		// Fetch each page separately, then extract from its prefetched body. Queue-based so a
 		// category/listing page can DRILL into its individual products (added to the
 		// queue), bounded by the drill cap + a visited-set.
 		$queue   = array_values($urls);
@@ -2553,8 +2549,8 @@ class CompetitorAnalysisService
 		$drill_cap = $drill_cap > 0 ? $drill_cap : 800;   // generous — pull more products out of listing pages
 		$drilled = 0;
 		$drill_skipped = 0;   // fresh child products dropped because the cap was hit
-		// Narrow the batch on a self-throttling host so the burst doesn't trip its limit.
-		$batch_size = $crawl_delay > 0 ? 3 : 8;
+		// A single URL per batch makes the pause apply between individual page reads.
+		$batch_size = 1;
 		// Chunked checkpointing: flush progress to the items file every N products read, so a
 		// crash / kill / block mid-read never loses everything already read (and the read is
 		// naturally paced across chunks). 0 = single final write only.
@@ -2604,7 +2600,7 @@ class CompetitorAnalysisService
 				$this->log_crawl('read_checkpoint', array('read_so_far' => count($out), 'remaining_queue' => count($queue)));
 				$last_ckpt = count($out);
 			}
-			// Respect the host's Crawl-delay between batches so we don't get throttled.
+			// Pause before reading the next URL; no extra wait after the last URL.
 			if ($crawl_delay > 0 && ! empty($queue)) {
 				usleep((int) ($crawl_delay * 1000000));
 			}

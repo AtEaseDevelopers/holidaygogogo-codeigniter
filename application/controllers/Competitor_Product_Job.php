@@ -120,6 +120,8 @@ class Competitor_Product_Job extends CI_Controller
 				'created'      => isset($job['created']) ? $job['created'] : date('Y-m-d H:i:s'),   // fixed submit time
 				'src'          => isset($job['src']) ? $job['src'] : '',   // discovery source (persist for resume headless gating)
 				'src_job'      => isset($job['src_job']) ? $job['src_job'] : '', // keep analysis linked to its crawl for listing progress
+				'file_path'    => isset($job['file_path']) ? $job['file_path'] : '',
+				'file_ext'     => isset($job['file_ext']) ? $job['file_ext'] : '',
 				'ts'           => date('Y-m-d H:i:s'),
 			);
 			@file_put_contents($status_file, json_encode(array_merge($base, $data), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -157,11 +159,13 @@ class Competitor_Product_Job extends CI_Controller
 		$file  = isset($job['file_path']) ? (string) $job['file_path'] : '';
 		$ext   = isset($job['file_ext']) ? (string) $job['file_ext'] : '';
 		$label = isset($job['url']) && $job['url'] !== '' ? (string) $job['url'] : 'uploaded file';
-		$write(array('state' => 'running', 'phase' => 'analysing', 'done' => 0, 'total' => 1));
+		$lock = false;
 		$this->load->model('Product_Model');
 		$this->load->helper('product_tour_fields');
 		$this->load->model('Competitor_Analysis_Model');
 		try {
+			$lock = $this->acquire_crawl_lock($write, true);
+			$write(array('state' => 'running', 'phase' => 'analysing', 'done' => 0, 'total' => 1));
 			if ($file === '' || ! is_file($file)) {
 				throw new Exception('Uploaded file is no longer available.');
 			}
@@ -181,6 +185,8 @@ class Competitor_Product_Job extends CI_Controller
 			@unlink($file);
 			log_message('error', 'Competitor_Product_Job upload failed: ' . $e->getMessage());
 			$write(array('state' => 'error', 'message' => $e->getMessage()));
+		} finally {
+			$this->release_crawl_lock($lock);
 		}
 	}
 
@@ -483,7 +489,7 @@ class Competitor_Product_Job extends CI_Controller
 	}
 
 	/**
-	 * Acquire the global single-crawl lock, WAITING until it's free so crawls run strictly
+	 * Acquire the shared crawl/upload lock, WAITING until it's free so heavy work runs strictly
 	 * one at a time. Uses a MySQL NAMED lock (GET_LOCK) rather than a file: it is held by
 	 * this DB connection, released automatically if the worker dies (connection drops), and
 	 * — unlike a lock file — cannot be broken by clearing the logs directory. Each GET_LOCK
@@ -491,24 +497,25 @@ class Competitor_Product_Job extends CI_Controller
 	 * job is queued behind the running crawl. Returns true when held (release via
 	 * release_crawl_lock), or null if there's no DB (fail-open — don't block crawling).
 	 */
-	private function acquire_crawl_lock($write)
+	protected function acquire_crawl_lock($write, $upload = false)
 	{
 		if ( ! isset($this->db)) { @$this->load->database(); }
 		if ( ! isset($this->db)) {
+			if ($upload) { throw new Exception('Could not access the upload queue lock.'); }
 			return null;   // no DB → don't block crawling
 		}
-		$start = time();
 		while (true) {
-			$row = $this->db->query("SELECT GET_LOCK('competitor_crawl', 3) AS g")->row();
+			$query = $this->db->query("SELECT GET_LOCK('competitor_crawl', 3) AS g");
+			$row = $query ? $query->row() : null;
+			if ($upload && (! $row || $row->g === null)) {
+				throw new Exception('Could not acquire the upload queue lock.');
+			}
 			if ($row && (int) $row->g === 1) {
 				return true;   // lock held on this connection
 			}
 			// Another crawl holds it — heartbeat 'queued' (keeps the watchdog happy too), retry.
 			$write(array('state' => 'queued', 'phase' => 'queued', 'done' => 0, 'total' => 0,
-				'label' => 'Queued — waiting for the current crawl to finish…'));
-			if (time() - $start > 7200) {
-				return true;   // 2h safety valve — proceed rather than wait forever
-			}
+				'label' => 'Queued — waiting for the current crawl or file analysis to finish…'));
 		}
 	}
 
@@ -538,7 +545,7 @@ class Competitor_Product_Job extends CI_Controller
 	}
 
 	/** Release the single-crawl lock so the next queued crawl can start. */
-	private function release_crawl_lock($held)
+	protected function release_crawl_lock($held)
 	{
 		if ($held === true && isset($this->db)) {
 			@$this->db->query("SELECT RELEASE_LOCK('competitor_crawl')");

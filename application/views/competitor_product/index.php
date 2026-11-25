@@ -78,14 +78,15 @@
                 <div class="row align-items-start">
                     <div class="col-md-6">
                         <div class="form-group mb-2">
-                            <label style="font-size:13px;"><strong>Competitor Website (base URL)</strong></label>
+                            <label style="font-size:13px;"><strong>Competitor Websites (base URLs)</strong></label>
                             <div class="input-group">
                                 <div class="input-group-prepend">
                                     <span class="input-group-text"><i class="la la-link"></i></span>
                                 </div>
-                                <input type="url" id="competitor_url" class="form-control" autocomplete="off"
-                                       placeholder="https://competitor.com" style="font-size:14px;">
+                                <textarea id="competitor_url" class="form-control" autocomplete="off" rows="3"
+                                          placeholder="https://competitor-one.com&#10;https://competitor-two.com" style="font-size:14px;"></textarea>
                             </div>
+                            <span class="form-text text-muted" style="font-size:12px;">One base URL per line (max 100). Each website creates a separate crawl task; tasks run one at a time. The name, keyword and AI setting apply to all URLs.</span>
                         </div>
                     </div>
                     <div class="col-md-6">
@@ -132,6 +133,25 @@
                 </div>
 
                 <!-- OR divider -->
+                <div class="text-center my-3"><span class="text-muted font-weight-bold" style="font-size:12px;">OR</span></div>
+
+                <div class="form-group mb-2">
+                    <label for="competitor_zip" style="font-size:13px;"><strong>Upload ZIP File</strong></label>
+                    <div class="input-group">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text"><i class="la la-file-archive"></i></span>
+                        </div>
+                        <div class="custom-file">
+                            <input type="file" id="competitor_zip" class="custom-file-input" accept=".zip">
+                            <label class="custom-file-label" id="competitor_zip_label" for="competitor_zip" style="font-size:13px;">Choose a ZIP file…</label>
+                        </div>
+                    </div>
+                    <span class="form-text text-muted" style="font-size:12px;">
+                        Each PDF or image inside becomes a separate analysis task, including files in subfolders. Tasks run one at a time; other files are skipped.
+                        Max ZIP 20 MB; up to 100 documents, 20 MB each and 200 MB extracted in total.
+                    </span>
+                </div>
+
                 <div class="text-center my-3"><span class="text-muted font-weight-bold" style="font-size:12px;">OR</span></div>
 
                 <!-- Section 3: Paste free text / links (full row) -->
@@ -262,6 +282,18 @@
     $('#competitor_file').on('change', function() {
         var name = (this.files && this.files.length) ? this.files[0].name : 'Choose a PDF or image…';
         $('#competitor_file_label').text(name);
+        if(this.files && this.files.length) {
+            $('#competitor_zip').val('');
+            $('#competitor_zip_label').text('Choose a ZIP file…');
+        }
+    });
+
+    $('#competitor_zip').on('change', function() {
+        $('#competitor_zip_label').text(this.files && this.files.length ? this.files[0].name : 'Choose a ZIP file…');
+        if(this.files && this.files.length) {
+            $('#competitor_file').val('');
+            $('#competitor_file_label').text('Choose a PDF or image…');
+        }
     });
 
     // ---- Background crawl jobs, shown as rows AT THE TOP of Analysis History ----
@@ -609,28 +641,91 @@
         loadJobs();
     });
 
+    function zipProgressBar(stage, percent, text) {
+        percent = Math.max(0, Math.min(100, Math.round(percent)));
+        $('#zip_' + stage + '_bar').css('width', percent + '%').attr('aria-valuenow', percent).text(percent + '%');
+        $('#zip_' + stage + '_text').text(text);
+    }
+    function zipProgressHtml() {
+        return ['upload', 'extract', 'queue'].map(function(stage, index) {
+            var label = ['Uploading ZIP', 'Extracting files', 'Creating analysis tasks'][index];
+            return '<div class="text-left mb-3"><div id="zip_' + stage + '_text" role="status" aria-live="polite">' + label + '</div>'
+                + '<div class="progress mt-2" style="height:22px;"><div id="zip_' + stage + '_bar" class="progress-bar progress-bar-striped progress-bar-animated"'
+                + ' role="progressbar" aria-label="' + label + '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width:0%;">0%</div></div></div>';
+        }).join('') + '<p id="zip_progress_summary" class="text-muted mb-0" style="font-size:12px;">Keep this window open while your ZIP is prepared. Analysis tasks will then run one at a time.</p>';
+    }
+
     // Shared: POST a FormData to Analyze. All three inputs (URL crawl, pasted
     // text/links, uploaded PDF/image) run as fire-and-forget background jobs —
     // non-blocking; the row shows at the top of Analysis Results and polls itself.
     function runAnalyze(form, $btn, title) {
         var html = $btn.html();
+        var isZip = form.has && form.has('zip');
+        var zipTimer = null, zipPoll = null, zipFinished = false;
+        function stopZipProgress() {
+            zipFinished = true;
+            if(zipTimer) clearInterval(zipTimer);
+            if(zipPoll) zipPoll.abort();
+        }
+        if(isZip) {
+            var bytes = new Uint8Array(16);
+            window.crypto.getRandomValues(bytes);
+            var token = Array.from(bytes, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+            form.append('upload_token', token);
+            Swal.fire({ background: 'url(' + CA_IMG + ')', title: 'Preparing ZIP files', html: zipProgressHtml(),
+                allowOutsideClick: false, allowEscapeKey: false, showConfirmButton: false });
+            zipTimer = setInterval(function() {
+                if(zipPoll || zipFinished) return;
+                zipPoll = $.getJSON('<?php echo base_url('Competitor_Product/Zip_Upload_Progress') ?>', {upload: token})
+                    .done(function(status) {
+                        if(zipFinished || !status || !status.success) return;
+                        var percent = status.total ? status.done / status.total * 100 : 0;
+                        zipProgressBar('upload', 100, 'ZIP uploaded');
+                        if(status.phase === 'extracting') {
+                            zipProgressBar('extract', percent, 'Extracting files: ' + status.done + ' / ' + status.total + ' entries');
+                        } else if(status.phase === 'queuing' || status.phase === 'done') {
+                            zipProgressBar('extract', 100, 'Files extracted');
+                            zipProgressBar('queue', percent, 'Creating analysis tasks: ' + status.done + ' / ' + status.total);
+                        }
+                    }).always(function() { zipPoll = null; });
+            }, 700);
+        }
         $btn.prop('disabled', true).html('<i class="la la-spinner la-spin"></i> Working…');
-        var isBackground = form.has && (form.has('url') || form.has('paste') || form.has('file')) && $('#jobs_rows').length > 0;
-        if(!isBackground) {
+        var isBackground = form.has && (form.has('url') || form.has('paste') || form.has('file') || form.has('zip')) && $('#jobs_rows').length > 0;
+        if(!isBackground && !isZip) {
             Swal.fire({ background: 'url(' + CA_IMG + ')', title: title, allowOutsideClick: false,
                 didOpen: function() { Swal.showLoading(); } });
         }
         $.ajax({
             url: '<?php echo base_url('Competitor_Product/Analyze') ?>',
             type: 'post', data: form, processData: false, contentType: false, dataType: 'json',
+            xhr: function() {
+                var xhr = $.ajaxSettings.xhr();
+                if(isZip && xhr.upload) {
+                    xhr.upload.addEventListener('progress', function(event) {
+                        if(!zipFinished && event.lengthComputable) {
+                            var percent = event.loaded / event.total * 100;
+                            zipProgressBar('upload', percent, percent >= 100 ? 'ZIP uploaded — preparing files…' : 'Uploading ZIP…');
+                        }
+                    });
+                }
+                return xhr;
+            },
             success: function(res) {
+                stopZipProgress();
                 $btn.prop('disabled', false).html(html);
-                if(res && res.job) {
+                if(res && (res.job || (res.jobs && res.jobs.length))) {
                     // Background crawl / paste / upload analysis started — free the user immediately.
-                    $('#competitor_url').val('');
+                    $('#competitor_zip').val('');
+                    $('#competitor_zip_label').text('Choose a ZIP file…');
+                    $('#competitor_url').val(res.failed_urls ? res.failed_urls.join('\n') : '');
                     $('#competitor_file').val('');
                     $('#competitor_file_label').text('Choose a PDF or image…');
-                    $('#competitor_name').val('');
+                    if(!res.failed) {
+                        $('#competitor_name').val('');
+                        $('#competitor_keyword').val('');
+                        $('#competitor_ai_crawl').prop('checked', false);
+                    }
                     jobsPage = 1;
                     jobsSearch = '';
                     jobsStatus = '';
@@ -639,10 +734,20 @@
                     clearTimeout(jobsSearchTimer);
                     refreshJobFilters();
                     updateJobFilterUrl();
-                    Swal.fire({ toast: true, position: 'top-end', icon: 'success',
-                        title: 'Started in the background',
-                        text: 'It appears at the top of Analysis Results — you can keep working.',
-                        showConfirmButton: false, timer: 4000, timerProgressBar: true });
+                    var detail = (res.skipped ? res.skipped + ' unsupported or hidden files skipped. ' : '')
+                        + (res.failed ? res.failed + ' tasks could not start. ' : '');
+                    if(isZip) {
+                        Swal.update({ title: 'ZIP prepared', showConfirmButton: true, confirmButtonText: 'Done' });
+                        zipProgressBar('upload', 100, 'ZIP uploaded');
+                        zipProgressBar('extract', 100, 'Files extracted');
+                        zipProgressBar('queue', 100, res.count + ' analysis tasks created');
+                        $('#zip_upload_bar,#zip_extract_bar,#zip_queue_bar').removeClass('progress-bar-animated');
+                        $('#zip_progress_summary').text(detail + (res.archive_deleted ? 'ZIP deleted from server. ' : 'ZIP cleanup failed; please remove the uploaded ZIP from the server. ') + ' Tasks run one at a time; waiting tasks appear as Queued in Analysis Results.');
+                    } else {
+                        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: res.jobs ? res.count + ' crawl tasks queued' : 'Started in the background',
+                            text: detail + (res.jobs ? 'Crawls run one at a time. Any URLs that could not start remain in the field. ' : '') + 'See each task in Analysis Results — you can keep working.',
+                            showConfirmButton: false, timer: 4000, timerProgressBar: true });
+                    }
                     loadJobs();
                     return;
                 }
@@ -654,6 +759,7 @@
                 }
             },
             error: function() {
+                stopZipProgress();
                 Swal.close();
                 $btn.prop('disabled', false).html(html);
                 Display_Message(CA_IMG, 'Analysis Failed. Please Try Again', null);
@@ -666,22 +772,31 @@
     function baseUrlOnly(raw) {
         var u;
         try { u = new URL(raw); } catch(e) { return ''; }
-        if(!/^https?:$/i.test(u.protocol)) return '';
+        if(!/^https?:$/i.test(u.protocol) || u.username || u.password) return '';
         var path = (u.pathname || '/').replace(/\/+$/, '');
         if(path !== '') return '';           // has a path → not a base URL
         return u.protocol + '//' + u.host + '/';
     }
 
-    // One button for both: a chosen file wins, otherwise the pasted base URL.
+    // A selected ZIP or document takes priority over pasted text and URL.
     $('#analyze_btn').click(function() {
         var fileInput = $('#competitor_file')[0];
         var hasFile = fileInput && fileInput.files && fileInput.files.length > 0;
+        var zipInput = $('#competitor_zip')[0];
+        var hasZip = zipInput && zipInput.files && zipInput.files.length > 0;
         var pasteVal = $.trim($('#competitor_paste').val());
         var form = new FormData(), title;
         // Optional competitor name — a label only, attached to whichever input runs.
         var compName = $.trim($('#competitor_name').val());
         if(compName !== '') { form.append('competitor_name', compName); }
-        if(hasFile) {
+        if(hasZip) {
+            if(zipInput.files[0].size > 20 * 1024 * 1024) {
+                Display_Message(CA_IMG, 'The ZIP file must be 20 MB or smaller.', null);
+                return;
+            }
+            form.append('zip', zipInput.files[0]);
+            title = 'Extracting ZIP and starting analysis tasks…';
+        } else if(hasFile) {
             form.append('file', fileInput.files[0]);
             title = 'Reading file &amp; analysing with AI…';
         } else if(pasteVal !== '') {
@@ -689,21 +804,27 @@
             title = 'Reading links &amp; analysing with AI…';
             $('#competitor_paste').val('');
         } else {
-            var base = baseUrlOnly($.trim($('#competitor_url').val()));
-            if(base === '') {
-                Display_Message(CA_IMG, 'Enter the website’s base URL only, e.g. https://competitor.com', null);
+            var entries = $.trim($('#competitor_url').val()).split(/[\s,]+/).filter(Boolean);
+            if(!entries.length || entries.length > 100) {
+                Display_Message(CA_IMG, 'Enter 1 to 100 website base URLs, one per line.', null);
                 return;
             }
-            $('#competitor_url').val(base);
-            form.append('url', base);
+            var bases = [];
+            for(var i = 0; i < entries.length; i++) {
+                var base = baseUrlOnly(entries[i]);
+                if(base === '') {
+                    Display_Message(CA_IMG, 'URL ' + (i + 1) + ' must be a website base URL, e.g. https://competitor.com (no page path).', null);
+                    return;
+                }
+                if(bases.indexOf(base) === -1) bases.push(base);
+            }
+            $('#competitor_url').val(bases.join('\n'));
+            form.append('url', bases.join('\n'));
             var kw = $.trim($('#competitor_keyword').val());
             if(kw !== '') { form.append('keyword', kw); }
             if($('#competitor_ai_crawl').is(':checked')) { form.append('ai_crawl', '1'); }
-            title = kw !== '' ? ('Crawling for “' + kw + '”…') : 'Crawling the site…';
-            // Reset the crawl inputs so the next crawl starts clean (the keyword +
-            // AI crawl are remembered on the queued crawl row, not the form).
-            $('#competitor_keyword').val('');
-            $('#competitor_ai_crawl').prop('checked', false);
+            title = 'Queuing ' + bases.length + ' website crawl tasks…';
+
         }
         runAnalyze(form, $(this), title);
     });
