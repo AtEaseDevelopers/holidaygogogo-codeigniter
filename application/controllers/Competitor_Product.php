@@ -555,7 +555,7 @@ class Competitor_Product extends MY_Controller
 		if (!$has_file) {
 			$entries = preg_split('/[\s,]+/', $url, -1, PREG_SPLIT_NO_EMPTY);
 			if (empty($entries) || count($entries) > 100) {
-				echo json_encode(array('success' => false, 'message' => 'Enter 1 to 100 website base URLs, one per line.'));
+				echo json_encode(array('success' => false, 'message' => 'Enter 1 to 100 website base URLs, one per field.'));
 				return;
 			}
 			$urls = array();

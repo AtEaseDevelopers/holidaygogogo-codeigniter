@@ -78,15 +78,23 @@
                 <div class="row align-items-start">
                     <div class="col-md-6">
                         <div class="form-group mb-2">
-                            <label style="font-size:13px;"><strong>Competitor Websites (base URLs)</strong></label>
-                            <div class="input-group">
-                                <div class="input-group-prepend">
-                                    <span class="input-group-text"><i class="la la-link"></i></span>
+                            <label id="competitor_urls_label" style="font-size:13px;"><strong>Competitor Websites (base URLs)</strong></label>
+                            <div id="competitor_urls" role="group" aria-labelledby="competitor_urls_label">
+                                <div class="input-group competitor-url-row mb-2">
+                                    <div class="input-group-prepend">
+                                        <span class="input-group-text"><i class="la la-link" aria-hidden="true"></i></span>
+                                    </div>
+                                    <input type="url" class="form-control competitor-url-input" autocomplete="off"
+                                           placeholder="https://competitor.com" aria-label="Competitor website URL 1" style="font-size:14px;">
+                                    <div class="input-group-append">
+                                        <button type="button" class="btn btn-light-danger remove-competitor-url" aria-label="Remove URL 1" title="Remove URL">
+                                            <i class="la la-trash" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
                                 </div>
-                                <textarea id="competitor_url" class="form-control" autocomplete="off" rows="3"
-                                          placeholder="https://competitor-one.com&#10;https://competitor-two.com" style="font-size:14px;"></textarea>
                             </div>
-                            <span class="form-text text-muted" style="font-size:12px;">One base URL per line (max 100). Each website creates a separate crawl task; tasks run one at a time. The name, keyword and AI setting apply to all URLs.</span>
+                            <button type="button" id="add_competitor_url" class="btn btn-sm btn-light-primary"><i class="la la-plus" aria-hidden="true"></i> Add URL</button>
+                            <span class="form-text text-muted" style="font-size:12px;">One base URL per field (max 100). Each website creates a separate crawl task; tasks run one at a time. The name, keyword and AI setting apply to all URLs.</span>
                         </div>
                     </div>
                     <div class="col-md-6">
@@ -277,6 +285,39 @@
 
 <script>
     var CA_IMG = '<?php echo base_url('assets/image/sweetalert.jpg') ?>';
+
+    var competitorUrlTemplate = $('#competitor_urls .competitor-url-row').first().clone();
+    function refreshCompetitorUrlFields() {
+        $('#competitor_urls .competitor-url-row').each(function(index) {
+            $(this).find('.competitor-url-input').attr('aria-label', 'Competitor website URL ' + (index + 1));
+            $(this).find('.remove-competitor-url').attr('aria-label', 'Remove URL ' + (index + 1));
+        });
+        $('#add_competitor_url').prop('disabled', $('#competitor_urls .competitor-url-row').length >= 100);
+    }
+    function addCompetitorUrlField(value) {
+        if($('#competitor_urls .competitor-url-row').length >= 100) return;
+        var row = competitorUrlTemplate.clone();
+        row.find('.competitor-url-input').val(value || '');
+        $('#competitor_urls').append(row);
+        refreshCompetitorUrlFields();
+        return row;
+    }
+    function setCompetitorUrlFields(urls) {
+        $('#competitor_urls').empty();
+        (urls && urls.length ? urls : ['']).forEach(function(url) { addCompetitorUrlField(url); });
+    }
+    $('#add_competitor_url').on('click', function() {
+        var row = addCompetitorUrlField('');
+        if(row) row.find('.competitor-url-input').trigger('focus');
+    });
+    $('#competitor_urls').on('click', '.remove-competitor-url', function() {
+        var row = $(this).closest('.competitor-url-row');
+        var next = row.next().length ? row.next() : row.prev();
+        row.remove();
+        if(!$('#competitor_urls .competitor-url-row').length) next = addCompetitorUrlField('');
+        refreshCompetitorUrlFields();
+        next.find('.competitor-url-input').trigger('focus');
+    });
 
     // Show the chosen file name in the label.
     $('#competitor_file').on('change', function() {
@@ -718,7 +759,7 @@
                     // Background crawl / paste / upload analysis started — free the user immediately.
                     $('#competitor_zip').val('');
                     $('#competitor_zip_label').text('Choose a ZIP file…');
-                    $('#competitor_url').val(res.failed_urls ? res.failed_urls.join('\n') : '');
+                    setCompetitorUrlFields(res.failed_urls || []);
                     $('#competitor_file').val('');
                     $('#competitor_file_label').text('Choose a PDF or image…');
                     if(!res.failed) {
@@ -804,9 +845,11 @@
             title = 'Reading links &amp; analysing with AI…';
             $('#competitor_paste').val('');
         } else {
-            var entries = $.trim($('#competitor_url').val()).split(/[\s,]+/).filter(Boolean);
+            var entries = $('#competitor_urls .competitor-url-input').map(function() {
+                return $.trim($(this).val());
+            }).get().filter(Boolean);
             if(!entries.length || entries.length > 100) {
-                Display_Message(CA_IMG, 'Enter 1 to 100 website base URLs, one per line.', null);
+                Display_Message(CA_IMG, 'Enter 1 to 100 website base URLs, one per field.', null);
                 return;
             }
             var bases = [];
@@ -818,7 +861,7 @@
                 }
                 if(bases.indexOf(base) === -1) bases.push(base);
             }
-            $('#competitor_url').val(bases.join('\n'));
+            setCompetitorUrlFields(bases);
             form.append('url', bases.join('\n'));
             var kw = $.trim($('#competitor_keyword').val());
             if(kw !== '') { form.append('keyword', kw); }
