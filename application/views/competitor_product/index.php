@@ -155,7 +155,7 @@
                     </div>
                     <span class="form-text text-muted" style="font-size:12px;">
                         Each PDF or image inside becomes a separate analysis task, including files in subfolders. Tasks run one at a time; other files are skipped.
-                        Max ZIP 20 MB; up to 100 documents, 20 MB each and 200 MB extracted in total.
+                        Max ZIP 20 MB.
                     </span>
                 </div>
 
@@ -777,7 +777,11 @@
                     var detail = (res.skipped ? res.skipped + ' unsupported or hidden files skipped. ' : '')
                         + (res.failed ? res.failed + ' tasks could not start. ' : '');
                     if(isZip) {
-                        Swal.update({ title: 'ZIP prepared', showConfirmButton: true, confirmButtonText: 'Done' });
+                        // Open a fresh dialog: this SweetAlert version keeps the actions
+                        // hidden when updating a dialog that began without buttons.
+                        Swal.fire({ background: 'url(' + CA_IMG + ')', title: 'ZIP prepared', html: zipProgressHtml(),
+                            showConfirmButton: true, confirmButtonText: 'Done', showCloseButton: true,
+                            allowOutsideClick: true, allowEscapeKey: true });
                         zipProgressBar('upload', 100, 'ZIP uploaded');
                         zipProgressBar('extract', 100, 'Files extracted');
                         zipProgressBar('queue', 100, res.count + ' analysis tasks created');
