@@ -462,6 +462,19 @@ class Guests_Model extends CI_Model
 			// Both are multi-select on the status.
 			$lead_statuses  = guest_list_multi_values($this->input->get('lead_status'));
 			$lead_status_dt = guest_list_parse_date_range($this->input->get('lead_status_date'));
+			// Hide currently closed manual leads unless CLOSED CASE is explicitly
+			// selected, including when other filters match an older status entry.
+			$include_closed = false;
+			foreach($lead_statuses as $st) {
+				if(strtoupper(trim($st)) === 'CLOSED CASE') { $include_closed = true; break; }
+			}
+			if($this->mode === 'manual' && !$include_closed) {
+				$ghl_where .= " AND COALESCE((SELECT UPPER(TRIM(lsl_closed.LeadStatus))
+					FROM lead_status_log lsl_closed
+					WHERE lsl_closed.Status = 'Y' AND lsl_closed.dedup_key = {$gc_dedup}
+					ORDER BY lsl_closed.StatusDate DESC, lsl_closed.LogID DESC LIMIT 1), '') <> ? ";
+				$g_params[] = 'CLOSED CASE';
+			}
 			if($lead_status_dt !== null) {
 				$ghl_where .= " AND EXISTS (SELECT 1 FROM lead_status_log lsl
 						WHERE lsl.Status = 'Y' AND lsl.dedup_key = {$gc_dedup}

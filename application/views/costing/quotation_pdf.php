@@ -216,6 +216,14 @@ $FooterNotesHtml = costing_quote_footer_notes_html(
     h1 { font-size: 24px; text-align: center; margin-top: 0px; margin-bottom: 5px; }
     h3 { font-size: 16px; margin: 0px; margin-bottom: 5px; }
     p { margin-top: 0px; margin-bottom: 2px; }
+    ul, ol { text-align: left; }
+    /* Dompdf's drawn bullets sit above the CJK text baseline. Render markers as
+       text in the same font instead, keeping wrapped lines and nested lists indented. */
+    ul > li { list-style-type: none; position: relative; }
+    ul > li:before { content: "\2022"; position: absolute; left: -1em; top: 0; }
+    ul ul > li:before, ol ul > li:before { content: "\25E6"; }
+    ul ul ul > li:before, ul ol ul > li:before,
+    ol ul ul > li:before, ol ol ul > li:before { content: "\25AA"; }
     .margin-top-10 { margin-top: 10px; }
     .text-center { text-align: center; }
     .text-right { text-align: right; }

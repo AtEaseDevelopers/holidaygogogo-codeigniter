@@ -2525,10 +2525,10 @@ div.kt-datatable__pager-container {
 							<label class="font-weight-bold">Lead Status Updates <span class="text-muted font-size-xs">(date, status and note required)</span></label>
 							<div id="lead_log_rows">
 								<div class="form-group row lead-log-row mb-2">
-									<div class="col-md-4">
+									<div class="col-md-6 mb-2">
 										<input type="date" name="log_date[]" class="form-control" autocomplete="off" placeholder="Date">
 									</div>
-									<div class="col-md-4">
+									<div class="col-md-6 mb-2">
 										<select name="log_status[]" class="form-control">
 											<option value="">-- Status --</option>
 											<?php if(!empty($lead_statuses)) { foreach($lead_statuses as $ls) { ?>
@@ -2536,8 +2536,8 @@ div.kt-datatable__pager-container {
 											<?php } } ?>
 										</select>
 									</div>
-									<div class="col-md-4 d-flex">
-										<input type="text" name="log_note[]" class="form-control" maxlength="1000" autocomplete="off" placeholder="Note (required)">
+									<div class="col-12 d-flex align-items-start">
+										<textarea name="log_note[]" class="form-control" rows="5" maxlength="1000" autocomplete="off" placeholder="Note (required)"></textarea>
 										<button type="button" class="btn btn-icon btn-light-danger ml-1 lead-log-remove" title="Remove"><i class="la la-trash"></i></button>
 									</div>
 								</div>
@@ -2588,7 +2588,7 @@ div.kt-datatable__pager-container {
 						</div>
 						<div class="form-group mb-2">
 							<label class="font-weight-bold" style="font-size:12px;">Note <span class="text-danger">*</span></label>
-							<input type="text" id="lsl_note" class="form-control" maxlength="1000" placeholder="e.g. Sent Redang package, waiting on reply">
+							<textarea id="lsl_note" class="form-control" rows="5" maxlength="1000" placeholder="e.g. Sent Redang package, waiting on reply"></textarea>
 						</div>
 						<div id="lsl_error" class="text-danger font-weight-bold mb-2" style="font-size:12px; display:none;"></div>
 						<div id="lsl_list">
@@ -2708,7 +2708,7 @@ div.kt-datatable__pager-container {
 	$('#lead_log_add').on('click', function() {
 		var $rows = $('#lead_log_rows');
 		var $clone = $rows.find('.lead-log-row').first().clone();
-		$clone.find('input').val('');
+		$clone.find('input,textarea').val('');
 		$clone.find('select').val('');
 		$rows.append($clone);
 	});
@@ -2719,7 +2719,7 @@ div.kt-datatable__pager-container {
 		} else {
 			// last row: just clear it rather than leaving none
 			var $r = $(this).closest('.lead-log-row');
-			$r.find('input').val('');
+			$r.find('input,textarea').val('');
 			$r.find('select').val('');
 		}
 	});
@@ -2774,7 +2774,7 @@ div.kt-datatable__pager-container {
 		$('#ghl_lead_create_error').addClass('d-none').empty();
 		// Seed rows are Create-only: keep a single blank row and show the block.
 		$('#lead_log_rows .lead-log-row:gt(0)').remove();
-		$('#lead_log_rows .lead-log-row').find('input,select').val('');
+		$('#lead_log_rows .lead-log-row').find('input,select,textarea').val('');
 		$('#lead_seed_block').show();
 		$('#manual_lead_create_high_chance').prop('disabled', false);
 		// The staged status editor is Edit-only.
